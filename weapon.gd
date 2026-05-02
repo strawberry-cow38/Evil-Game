@@ -12,6 +12,7 @@ const BULLET_GRAVITY := 3.0                # m/s^2 (Rust-ish, gentle drop)
 const STEP_DT := 0.01                      # trajectory sim step
 const MAX_SIM_TIME := 4.0                  # cap (=2km @ 500m/s)
 const RECOIL_RESET_DELAY := 0.40           # s of no-fire before pattern index resets
+const RECOIL_SMOOTH_RATE := 22.0           # higher = snappier (per-shot kick exp-approaches over ~1/RATE s)
 const TRACER_LIFETIME := 0.06              # s
 
 # Recoil pattern: (yaw_deg, pitch_deg) per shot. Pitch is "kick up" so positive = up.
@@ -40,6 +41,11 @@ var _player: Node    # CharacterBody3D w/ _yaw/_pitch
 var _last_fire_time := -1000.0
 var _recoil_index := 0
 var _rng := RandomNumberGenerator.new()
+# Smoothed recoil: shots add to *target*; _process exp-approaches it and applies the per-frame delta to the player view.
+var _target_yaw := 0.0
+var _target_pitch := 0.0
+var _applied_yaw := 0.0
+var _applied_pitch := 0.0
 
 func _ready() -> void:
 	_rng.randomize()
@@ -48,29 +54,45 @@ func _ready() -> void:
 	if player_path != NodePath():
 		_player = get_node(player_path)
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if Input.is_action_pressed("fire") and now - _last_fire_time >= FIRE_INTERVAL:
 		_fire(now)
 	if now - _last_fire_time > RECOIL_RESET_DELAY:
 		_recoil_index = 0
+	_apply_smoothed_recoil(delta)
+
+func _apply_smoothed_recoil(delta: float) -> void:
+	if _player == null:
+		return
+	# Frame-rate-independent exponential approach.
+	var alpha := 1.0 - exp(-RECOIL_SMOOTH_RATE * delta)
+	var new_yaw := lerp(_applied_yaw, _target_yaw, alpha)
+	var new_pitch := lerp(_applied_pitch, _target_pitch, alpha)
+	var dy := new_yaw - _applied_yaw
+	var dp := new_pitch - _applied_pitch
+	if absf(dy) < 1e-6 and absf(dp) < 1e-6:
+		return
+	_player._yaw += dy
+	_player._pitch = clampf(_player._pitch + dp, -1.4, 1.4)
+	_player.rotation.y = _player._yaw
+	_player._camera.rotation.x = _player._pitch
+	_applied_yaw = new_yaw
+	_applied_pitch = new_pitch
 
 func _fire(now: float) -> void:
 	_last_fire_time = now
 	if _camera == null or _player == null:
 		return
 
-	# Apply recoil to player view BEFORE computing the shot direction —
-	# the bullet flies wherever the muzzle is now pointing (post-kick), like Rust.
+	# Bullet leaves at the *current* aim. The new kick goes into the smoothed
+	# target — camera will lerp toward it over the next few frames, so the
+	# crosshair drifts up smoothly instead of teleporting per shot.
 	var pat := RECOIL_PATTERN[_recoil_index % RECOIL_PATTERN.size()]
 	var jitter_yaw = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
 	var jitter_pitch = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
-	var d_yaw = deg_to_rad(pat.x + jitter_yaw)
-	var d_pitch = deg_to_rad(pat.y + jitter_pitch)
-	_player._yaw += d_yaw
-	_player._pitch = clampf(_player._pitch + d_pitch, -1.4, 1.4)
-	_player.rotation.y = _player._yaw
-	_player._camera.rotation.x = _player._pitch
+	_target_yaw += deg_to_rad(pat.x + jitter_yaw)
+	_target_pitch += deg_to_rad(pat.y + jitter_pitch)
 	_recoil_index += 1
 
 	# Sim trajectory from camera origin in camera-forward direction.
@@ -119,6 +141,7 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(1.0, 0.85, 0.4, 1.0)
