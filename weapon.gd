@@ -33,6 +33,8 @@ const RECOIL_PATTERN: Array[Vector2] = [
 ]
 const RECOIL_JITTER_DEG := 0.12
 const CROUCH_RECOIL_MULT := 0.5
+const HIP_RECOIL_MULT := 1.30      # extra kick when not ADS
+const HIP_BLOOM_DEG := 1.8         # cone half-angle of random spread when hip-firing
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
@@ -92,15 +94,28 @@ func _fire(now: float) -> void:
 	var pat := RECOIL_PATTERN[_recoil_index % RECOIL_PATTERN.size()]
 	var jitter_yaw = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
 	var jitter_pitch = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
-	var mult: float = CROUCH_RECOIL_MULT if _player.has_method("is_crouched") and _player.is_crouched() else 1.0
+	var mult: float = 1.0
+	if _player.has_method("is_crouched") and _player.is_crouched():
+		mult *= CROUCH_RECOIL_MULT
+	if not ads:
+		mult *= HIP_RECOIL_MULT
 	_target_yaw += deg_to_rad(pat.x + jitter_yaw) * mult
 	_target_pitch += deg_to_rad(pat.y + jitter_pitch) * mult
 	_recoil_index += 1
 
 	# Sim trajectory from camera origin in camera-forward direction.
 	var origin: Vector3 = _camera.global_transform.origin
-	var dir: Vector3 = -_camera.global_transform.basis.z
+	var cam_basis: Basis = _camera.global_transform.basis
+	var dir: Vector3 = -cam_basis.z
 	dir = dir.normalized()
+	# Hip-fire bloom: random cone offset around camera forward.
+	var ads: bool = _player.has_method("is_ads") and _player.is_ads()
+	if not ads:
+		var ang: float = sqrt(_rng.randf()) * deg_to_rad(HIP_BLOOM_DEG)
+		var theta: float = _rng.randf() * TAU
+		# Local offset in camera space (forward = -z).
+		var local_offset := Vector3(sin(ang) * cos(theta), sin(ang) * sin(theta), -cos(ang))
+		dir = (cam_basis * local_offset).normalized()
 	var vel: Vector3 = dir * MUZZLE_VELOCITY
 	var gravity := Vector3(0.0, -BULLET_GRAVITY, 0.0)
 

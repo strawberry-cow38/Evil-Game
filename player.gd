@@ -12,17 +12,25 @@ const CAMERA_HEIGHT_STAND := 0.7
 const CAMERA_HEIGHT_CROUCH := 0.3
 const CROUCH_LERP_RATE := 14.0   # exp-approach per second
 
+const FOV_HIP := 80.0
+const FOV_ADS := 55.0
+const ADS_LERP_RATE := 18.0
+
 @onready var _camera: Camera3D = $Camera3D
 
 var _yaw := 0.0
 var _pitch := 0.0
 var _crouched := false
+var _ads := false
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func is_crouched() -> bool:
 	return _crouched
+
+func is_ads() -> bool:
+	return _ads
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -35,12 +43,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
 
 func _process(delta: float) -> void:
+	_ads = Input.is_action_pressed("ads")
+
 	# Smooth camera height between stand/crouch.
 	var target_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
 	var alpha: float = 1.0 - exp(-CROUCH_LERP_RATE * delta)
 	var pos := _camera.position
 	pos.y = lerpf(pos.y, target_y, alpha)
 	_camera.position = pos
+
+	# ADS FOV zoom.
+	var target_fov: float = FOV_ADS if _ads else FOV_HIP
+	var fov_alpha: float = 1.0 - exp(-ADS_LERP_RATE * delta)
+	_camera.fov = lerpf(_camera.fov, target_fov, fov_alpha)
 
 func _physics_process(delta: float) -> void:
 	_crouched = Input.is_action_pressed("crouch")
