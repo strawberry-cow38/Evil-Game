@@ -32,6 +32,7 @@ const RECOIL_PATTERN: Array[Vector2] = [
 	Vector2( 0.55, 0.35),
 ]
 const RECOIL_JITTER_DEG := 0.12
+const CROUCH_RECOIL_MULT := 0.5
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
@@ -91,8 +92,9 @@ func _fire(now: float) -> void:
 	var pat := RECOIL_PATTERN[_recoil_index % RECOIL_PATTERN.size()]
 	var jitter_yaw = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
 	var jitter_pitch = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
-	_target_yaw += deg_to_rad(pat.x + jitter_yaw)
-	_target_pitch += deg_to_rad(pat.y + jitter_pitch)
+	var mult: float = CROUCH_RECOIL_MULT if _player.has_method("is_crouched") and _player.is_crouched() else 1.0
+	_target_yaw += deg_to_rad(pat.x + jitter_yaw) * mult
+	_target_pitch += deg_to_rad(pat.y + jitter_pitch) * mult
 	_recoil_index += 1
 
 	# Sim trajectory from camera origin in camera-forward direction.
