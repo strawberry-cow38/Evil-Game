@@ -11,8 +11,7 @@ const MUZZLE_VELOCITY := 500.0             # m/s
 const BULLET_GRAVITY := 3.0                # m/s^2 (Rust-ish, gentle drop)
 const STEP_DT := 0.01                      # trajectory sim step
 const MAX_SIM_TIME := 4.0                  # cap (=2km @ 500m/s)
-const RECOIL_RECOVER_DELAY := 0.40         # s of no-fire before pattern resets
-const RECOIL_RECOVER_RATE := 6.0           # rad/s back toward zero
+const RECOIL_RESET_DELAY := 0.40           # s of no-fire before pattern index resets
 const TRACER_LIFETIME := 0.06              # s
 
 # Recoil pattern: (yaw_deg, pitch_deg) per shot. Pitch is "kick up" so positive = up.
@@ -40,8 +39,6 @@ var _camera: Camera3D
 var _player: Node    # CharacterBody3D w/ _yaw/_pitch
 var _last_fire_time := -1000.0
 var _recoil_index := 0
-var _accum_recoil_pitch := 0.0   # current applied (rad) so we can recover
-var _accum_recoil_yaw := 0.0
 var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
@@ -51,29 +48,12 @@ func _ready() -> void:
 	if player_path != NodePath():
 		_player = get_node(player_path)
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	if Input.is_action_pressed("fire") and now - _last_fire_time >= FIRE_INTERVAL:
 		_fire(now)
-	# Recoil recovery: if not firing for a while, drift back to zero.
-	if now - _last_fire_time > RECOIL_RECOVER_DELAY:
+	if now - _last_fire_time > RECOIL_RESET_DELAY:
 		_recoil_index = 0
-		var step := RECOIL_RECOVER_RATE * delta
-		_recover_recoil(step)
-
-func _recover_recoil(step: float) -> void:
-	if absf(_accum_recoil_pitch) > 0.0001:
-		var dp = clampf(step, 0.0, absf(_accum_recoil_pitch))
-		var sign_p = signf(_accum_recoil_pitch)
-		_accum_recoil_pitch -= sign_p * dp
-		_player._pitch -= sign_p * dp
-		_player._camera.rotation.x = _player._pitch
-	if absf(_accum_recoil_yaw) > 0.0001:
-		var dy = clampf(step, 0.0, absf(_accum_recoil_yaw))
-		var sign_y = signf(_accum_recoil_yaw)
-		_accum_recoil_yaw -= sign_y * dy
-		_player._yaw -= sign_y * dy
-		_player.rotation.y = _player._yaw
 
 func _fire(now: float) -> void:
 	_last_fire_time = now
@@ -91,8 +71,6 @@ func _fire(now: float) -> void:
 	_player._pitch = clampf(_player._pitch + d_pitch, -1.4, 1.4)
 	_player.rotation.y = _player._yaw
 	_player._camera.rotation.x = _player._pitch
-	_accum_recoil_yaw += d_yaw
-	_accum_recoil_pitch += d_pitch
 	_recoil_index += 1
 
 	# Sim trajectory from camera origin in camera-forward direction.
@@ -169,7 +147,7 @@ func _apply_impact(world_pos: Vector3) -> void:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(1, 0.2, 0.2, 1)
 	mi.material_override = mat
-	mi.global_position = world_pos
 	get_tree().current_scene.add_child(mi)
+	mi.global_position = world_pos
 	var timer := get_tree().create_timer(0.6)
 	timer.timeout.connect(func(): if is_instance_valid(mi): mi.queue_free())
