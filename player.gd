@@ -1,6 +1,8 @@
 extends CharacterBody3D
 
-const SPEED := 6.0
+const SPEED_FORWARD := 6.0
+const SPEED_BACK := 3.6
+const SPEED_STRAFE := 4.5
 const JUMP_VELOCITY := 5.0
 const MOUSE_SENSITIVITY := 0.0025
 
@@ -30,12 +32,14 @@ func _physics_process(delta: float) -> void:
 		velocity.y = JUMP_VELOCITY
 
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var direction := (transform.basis * Vector3(input_dir.x, 0.0, input_dir.y)).normalized()
-	if direction:
-		velocity.x = direction.x * SPEED
-		velocity.z = direction.z * SPEED
+	var forward_speed := SPEED_FORWARD if input_dir.y < 0.0 else SPEED_BACK
+	var local_vel := Vector3(input_dir.x * SPEED_STRAFE, 0.0, input_dir.y * forward_speed)
+	var world_vel := transform.basis * local_vel
+	if input_dir != Vector2.ZERO:
+		velocity.x = world_vel.x
+		velocity.z = world_vel.z
 	else:
-		velocity.x = move_toward(velocity.x, 0.0, SPEED)
-		velocity.z = move_toward(velocity.z, 0.0, SPEED)
+		velocity.x = move_toward(velocity.x, 0.0, SPEED_FORWARD)
+		velocity.z = move_toward(velocity.z, 0.0, SPEED_FORWARD)
 
 	move_and_slide()
