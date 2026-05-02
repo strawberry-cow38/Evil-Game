@@ -1,6 +1,7 @@
 extends CharacterBody3D
 
 const SPEED_FORWARD := 6.0
+const SPEED_SPRINT := 9.5
 const SPEED_BACK := 3.6
 const SPEED_STRAFE := 4.5
 const JUMP_VELOCITY := 5.0
@@ -32,7 +33,10 @@ func _physics_process(delta: float) -> void:
 		velocity.y = JUMP_VELOCITY
 
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var sprinting := Input.is_action_pressed("sprint") and input_dir.y < 0.0
 	var forward_speed := SPEED_FORWARD if input_dir.y < 0.0 else SPEED_BACK
+	if sprinting:
+		forward_speed = SPEED_SPRINT
 	var local_vel := Vector3(input_dir.x * SPEED_STRAFE, 0.0, input_dir.y * forward_speed)
 	var world_vel := transform.basis * local_vel
 	if input_dir != Vector2.ZERO:

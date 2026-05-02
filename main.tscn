@@ -1,6 +1,7 @@
-[gd_scene load_steps=10 format=3 uid="uid://b8fpsbase00001"]
+[gd_scene load_steps=11 format=3 uid="uid://b8fpsbase00001"]
 
 [ext_resource type="Script" path="res://player.gd" id="1_player"]
+[ext_resource type="Script" path="res://hud.gd" id="2_hud"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -68,3 +69,19 @@ visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
 current = true
 fov = 80.0
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("2_hud")
+player_path = NodePath("../Player")
+
+[node name="Label" type="Label" parent="HUD"]
+offset_left = 12.0
+offset_top = 8.0
+offset_right = 240.0
+offset_bottom = 60.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "FPS: 0
+Speed: 0.00 m/s"
