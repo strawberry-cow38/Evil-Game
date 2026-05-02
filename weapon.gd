@@ -88,6 +88,8 @@ func _fire(now: float) -> void:
 	if _camera == null or _player == null:
 		return
 
+	var ads: bool = _player.has_method("is_ads") and _player.is_ads()
+
 	# Bullet leaves at the *current* aim. The new kick goes into the smoothed
 	# target — camera will lerp toward it over the next few frames, so the
 	# crosshair drifts up smoothly instead of teleporting per shot.
@@ -109,7 +111,6 @@ func _fire(now: float) -> void:
 	var dir: Vector3 = -cam_basis.z
 	dir = dir.normalized()
 	# Hip-fire bloom: random cone offset around camera forward.
-	var ads: bool = _player.has_method("is_ads") and _player.is_ads()
 	if not ads:
 		var ang: float = sqrt(_rng.randf()) * deg_to_rad(HIP_BLOOM_DEG)
 		var theta: float = _rng.randf() * TAU
