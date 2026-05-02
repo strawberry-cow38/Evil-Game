@@ -66,11 +66,11 @@ func _apply_smoothed_recoil(delta: float) -> void:
 	if _player == null:
 		return
 	# Frame-rate-independent exponential approach.
-	var alpha := 1.0 - exp(-RECOIL_SMOOTH_RATE * delta)
-	var new_yaw := lerp(_applied_yaw, _target_yaw, alpha)
-	var new_pitch := lerp(_applied_pitch, _target_pitch, alpha)
-	var dy := new_yaw - _applied_yaw
-	var dp := new_pitch - _applied_pitch
+	var alpha: float = 1.0 - exp(-RECOIL_SMOOTH_RATE * delta)
+	var new_yaw: float = lerpf(_applied_yaw, _target_yaw, alpha)
+	var new_pitch: float = lerpf(_applied_pitch, _target_pitch, alpha)
+	var dy: float = new_yaw - _applied_yaw
+	var dp: float = new_pitch - _applied_pitch
 	if absf(dy) < 1e-6 and absf(dp) < 1e-6:
 		return
 	_player._yaw += dy
