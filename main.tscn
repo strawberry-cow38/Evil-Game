@@ -1,7 +1,8 @@
-[gd_scene load_steps=11 format=3 uid="uid://b8fpsbase00001"]
+[gd_scene load_steps=12 format=3 uid="uid://b8fpsbase00001"]
 
 [ext_resource type="Script" path="res://player.gd" id="1_player"]
 [ext_resource type="Script" path="res://hud.gd" id="2_hud"]
+[ext_resource type="Script" path="res://weapon.gd" id="3_weapon"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -69,6 +70,11 @@ visible = false
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
 current = true
 fov = 80.0
+
+[node name="Weapon" type="Node3D" parent="Player"]
+script = ExtResource("3_weapon")
+camera_path = NodePath("../Camera3D")
+player_path = NodePath("..")
 
 [node name="HUD" type="CanvasLayer" parent="."]
 script = ExtResource("2_hud")
