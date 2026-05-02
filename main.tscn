@@ -1,8 +1,9 @@
-[gd_scene load_steps=17 format=3 uid="uid://b8fpsbase00001"]
+[gd_scene load_steps=18 format=3 uid="uid://b8fpsbase00001"]
 
 [ext_resource type="Script" path="res://player.gd" id="1_player"]
 [ext_resource type="Script" path="res://hud.gd" id="2_hud"]
 [ext_resource type="Script" path="res://weapon.gd" id="3_weapon"]
+[ext_resource type="Script" path="res://crosshair.gd" id="4_crosshair"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -147,3 +148,11 @@ theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 16
 text = "FPS: 0
 Speed: 0.00 m/s"
+
+[node name="Crosshair" type="Control" parent="HUD"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+script = ExtResource("4_crosshair")
+weapon_path = NodePath("../../Player/Weapon")
+camera_path = NodePath("../../Player/Camera3D")

@@ -35,6 +35,9 @@ const RECOIL_JITTER_DEG := 0.12
 const CROUCH_RECOIL_MULT := 0.5
 const HIP_RECOIL_MULT := 1.30      # extra kick when not ADS
 const HIP_BLOOM_DEG := 1.8         # cone half-angle of random spread when hip-firing
+const MOVE_BLOOM_DEG := 1.2        # extra bloom while moving on foot (uncrouched)
+const AIR_BLOOM_DEG := 2.5         # extra bloom while airborne
+const MOVE_SPEED_THRESHOLD := 0.5  # m/s of horizontal velocity to count as "moving"
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
@@ -56,6 +59,23 @@ func _ready() -> void:
 		_camera = get_node(camera_path)
 	if player_path != NodePath():
 		_player = get_node(player_path)
+
+func get_current_bloom_deg() -> float:
+	if _player == null:
+		return 0.0
+	var ads: bool = _player.has_method("is_ads") and _player.is_ads()
+	var bloom_deg: float = 0.0
+	if not ads:
+		bloom_deg += HIP_BLOOM_DEG
+	var crouched: bool = _player.has_method("is_crouched") and _player.is_crouched()
+	var horiz_speed: float = Vector2(_player.velocity.x, _player.velocity.z).length()
+	var moving: bool = horiz_speed > MOVE_SPEED_THRESHOLD
+	var airborne: bool = not _player.is_on_floor()
+	if moving and not crouched:
+		bloom_deg += MOVE_BLOOM_DEG
+	if airborne:
+		bloom_deg += AIR_BLOOM_DEG
+	return bloom_deg
 
 func _process(delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
@@ -110,9 +130,10 @@ func _fire(now: float) -> void:
 	var cam_basis: Basis = _camera.global_transform.basis
 	var dir: Vector3 = -cam_basis.z
 	dir = dir.normalized()
-	# Hip-fire bloom: random cone offset around camera forward.
-	if not ads:
-		var ang: float = sqrt(_rng.randf()) * deg_to_rad(HIP_BLOOM_DEG)
+	# Bloom matches the on-screen crosshair (hip + movement + airborne).
+	var bloom_deg: float = get_current_bloom_deg()
+	if bloom_deg > 0.0:
+		var ang: float = sqrt(_rng.randf()) * deg_to_rad(bloom_deg)
 		var theta: float = _rng.randf() * TAU
 		# Local offset in camera space (forward = -z).
 		var local_offset := Vector3(sin(ang) * cos(theta), sin(ang) * sin(theta), -cos(ang))
