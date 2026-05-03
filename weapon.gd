@@ -115,6 +115,22 @@ const RECOIL_PATTERN_SHOTGUN: Array[Vector2] = [
 	Vector2( 0.30, 2.45),
 	Vector2(-0.35, 2.40),
 ]
+# P90: high-cyclic PDW. Light per-shot pitch, mild horizontal weave. Climbs
+# faster than the Bizon but still flatter than full-power rifles.
+const RECOIL_PATTERN_P90: Array[Vector2] = [
+	Vector2( 0.20, 0.65),
+	Vector2(-0.30, 0.75),
+	Vector2( 0.40, 0.85),
+	Vector2(-0.50, 0.90),
+	Vector2( 0.60, 0.90),
+	Vector2(-0.70, 0.90),
+	Vector2( 0.80, 0.85),
+	Vector2(-0.85, 0.80),
+	Vector2( 0.90, 0.75),
+	Vector2(-0.95, 0.70),
+	Vector2( 1.00, 0.65),
+	Vector2(-1.00, 0.60),
+]
 # MP5: between AK and M16 vertically, but very horizontal — wide left/right swings.
 const RECOIL_PATTERN_MP5: Array[Vector2] = [
 	Vector2( 0.40, 0.55),
@@ -252,7 +268,7 @@ const PROFILES := {
 		"mag_size": 100,
 		"rpm": 600.0,
 		"modes": [FireMode.AUTO],
-		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm_BeltA.ogg"],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_FALA.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_M60,
@@ -294,6 +310,19 @@ const PROFILES := {
 		"shell_impact_pitch_max": 1.12,
 		"shell_impact_vol_db": -18.0,
 	},
+	"p90": {
+		"name": "FN P90",
+		"mag_size": 50,
+		"rpm": 900.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_P90B.ogg"],
+		"fire_hold": 0.14,
+		"fire_fade": 0.22,
+		"recoil_pattern": RECOIL_PATTERN_P90,
+		"bloom_mult": 1.5,
+		"ammo_id": "ammo_57x28",
+		"reload_time": 3.6,
+	},
 	"mgl": {
 		"name": "MGL",
 		"mag_size": 6,
@@ -312,7 +341,7 @@ const PROFILES := {
 		"no_shell_impact": true,
 	},
 }
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl", "shotgun_combat"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
