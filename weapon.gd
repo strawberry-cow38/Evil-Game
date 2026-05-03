@@ -245,6 +245,7 @@ const PROFILES := {
 		"fire_sounds": ["res://assets/audio/Shot_GTEK_MP5Type.ogg"],
 		"fire_hold": 0.08,
 		"fire_fade": 0.18,
+		"fire_vol_db": 2.0,
 		"recoil_pattern": RECOIL_PATTERN_MP5,
 		"bloom_mult": 2.2,
 		"ammo_id": "ammo_9mm",
@@ -748,7 +749,7 @@ func _play_fire_sound() -> void:
 	if prev != null and prev.is_valid():
 		prev.kill()
 	voice.stream = _fire_stream_list[_rng.randi() % _fire_stream_list.size()]
-	voice.volume_db = FIRE_VOL_DB
+	voice.volume_db = float(_profile.get("fire_vol_db", FIRE_VOL_DB))
 	voice.pitch_scale = _rng.randf_range(FIRE_PITCH_MIN, FIRE_PITCH_MAX)
 	voice.play()
 	# Hold full volume briefly, then fade the tail to silence and stop the voice.
