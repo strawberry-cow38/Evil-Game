@@ -844,13 +844,24 @@ func _fire(now: float) -> void:
 
 	# Bloom matches the on-screen crosshair (hip + movement + airborne).
 	var bloom_deg: float = get_current_bloom_deg()
-	if bloom_deg > 0.0:
-		var ang: float = sqrt(_rng.randf()) * deg_to_rad(bloom_deg)
-		var theta: float = _rng.randf() * TAU
-		# Local offset in camera space (forward = -z).
-		var local_offset := Vector3(sin(ang) * cos(theta), sin(ang) * sin(theta), -cos(ang))
-		dir = (cam_basis * local_offset).normalized()
-	var vel: Vector3 = dir * MUZZLE_VELOCITY
+	# Pellet count + per-pellet spread come from the cartridge def (slugs = 1
+	# pellet, buckshot = 8). Each pellet picks its own random spread cone on
+	# top of the shared bloom cone.
+	var ammo_id := get_selected_ammo()
+	var pellets: int = max(1, Items.ammo_pellets(ammo_id))
+	var pellet_spread: float = Items.ammo_pellet_spread_deg(ammo_id)
+	for i in range(pellets):
+		var pdir: Vector3 = dir
+		var total_spread_deg: float = bloom_deg + pellet_spread
+		if total_spread_deg > 0.0:
+			var ang: float = sqrt(_rng.randf()) * deg_to_rad(total_spread_deg)
+			var theta: float = _rng.randf() * TAU
+			var local_offset := Vector3(sin(ang) * cos(theta), sin(ang) * sin(theta), -cos(ang))
+			pdir = (cam_basis * local_offset).normalized()
+		_fire_pellet(origin, pdir)
+
+func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
+	var vel: Vector3 = pdir * MUZZLE_VELOCITY
 	var gravity := Vector3(0.0, -BULLET_GRAVITY, 0.0)
 
 	var space := get_world_3d().direct_space_state

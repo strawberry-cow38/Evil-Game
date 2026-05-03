@@ -39,16 +39,21 @@ func _process(delta: float) -> void:
 		var reserve: int = _weapon.get_reserve_ammo() if _weapon.has_method("get_reserve_ammo") else 0
 		var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
 		var prog: float = _weapon.get_reload_progress() if _weapon.has_method("get_reload_progress") else 0.0
+		# Show the ammo-type line only on weapons that can chamber more than one
+		# cartridge — prevents clutter on single-ammo guns and keeps the label
+		# inside its anchor box.
+		var compat: Array = _weapon.get_compatible_ammo_ids() if _weapon.has_method("get_compatible_ammo_ids") else []
 		var ammo_id: String = _weapon.get_selected_ammo() if _weapon.has_method("get_selected_ammo") else ""
-		var ammo_name: String = Items.item_name(ammo_id) if ammo_id != "" else ""
-		var ammo_suffix: String = ("  · %s" % ammo_name) if ammo_name != "" else ""
+		var ammo_line: String = ""
+		if compat.size() > 1 and ammo_id != "":
+			ammo_line = "\n%s" % Items.item_name(ammo_id)
 		if reloading:
 			var bar_len := 10
 			var filled := int(round(prog * bar_len))
 			var bar := "[" + "=".repeat(filled) + " ".repeat(bar_len - filled) + "]"
-			_ammo_label.text = "%s  [%s]%s\n%d / %d   (%d)  %s" % [name, mode, ammo_suffix, ammo, mag, reserve, bar]
+			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)  %s%s" % [name, mode, ammo, mag, reserve, bar, ammo_line]
 		else:
-			_ammo_label.text = "%s  [%s]%s\n%d / %d   (%d)" % [name, mode, ammo_suffix, ammo, mag, reserve]
+			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)%s" % [name, mode, ammo, mag, reserve, ammo_line]
 		_update_low_ammo_flash(delta, ammo, mag, reloading)
 
 func _update_low_ammo_flash(delta: float, ammo: int, mag: int, reloading: bool) -> void:
