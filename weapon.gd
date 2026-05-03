@@ -356,15 +356,22 @@ func _apply_weapon(key: String) -> void:
 		v.stream = _fire_stream_list[0] if not _fire_stream_list.is_empty() else null
 
 func equip(key: String) -> void:
-	if _reloading:
-		return
 	if not PROFILES.has(key):
 		return
 	# Same weapon: just re-arm the empty hands. Different weapon: swap.
-	if key == _current_weapon:
-		_equipped = true
+	if key == _current_weapon and _equipped:
 		return
-	_apply_weapon(key)
+	# Cancel any in-flight reload — swapping aborts it (no ammo was consumed
+	# yet; _finish_reload only fires on completion). Otherwise the new weapon
+	# silently never gets equipped.
+	if _reloading:
+		_reloading = false
+		_reload_remaining = 0.0
+		_reload_amount = 0
+		if _reload_player != null:
+			_reload_player.stop()
+	if key != _current_weapon:
+		_apply_weapon(key)
 	_equipped = true
 
 func unequip() -> void:
