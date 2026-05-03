@@ -177,7 +177,10 @@ func _process(delta: float) -> void:
 		_loot(_interact_target)
 	if not is_menu_open():
 		_check_equip_hotkeys()
-	_ads = Input.is_action_pressed("ads") and not is_menu_open()
+	# Reloading kicks the player out of ADS — can't aim down sights with the
+	# weapon torn open. Holding the ADS button is also ignored mid-reload.
+	var weapon_reloading: bool = _weapon != null and _weapon.has_method("is_reloading") and _weapon.is_reloading()
+	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not weapon_reloading
 
 	# Smooth camera height between stand/crouch.
 	var target_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
