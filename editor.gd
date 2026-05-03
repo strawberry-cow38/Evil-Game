@@ -22,6 +22,7 @@ const TOOL_S_DELETE_SPAWN := "s_player_delete"
 const TOOL_L_EFFECTS := "l_effects"
 
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
+const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 
 const BRUSH_STRENGTH := 12.0    # m/s for raise/lower at full falloff
 const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to remove it
@@ -52,6 +53,17 @@ var _spawn_ghost: Node3D = null
 var _placed_effects: Array[Node3D] = []
 var _selected_effect: Node3D = null
 var _armed_effect_id: String = ""
+var _gizmo: Node3D = null
+# Drag state for translate gizmo. _drag_handle == "" means no drag in
+# progress. _drag_axis / _drag_normal pin the axis or plane the drag is
+# constrained to (in world space, captured at drag start). _drag_offset
+# = offset from target.global_position to the cursor's projection on
+# the constraint at drag start, so motion preserves grab point.
+var _drag_handle: String = ""
+var _drag_axis: Vector3 = Vector3.ZERO
+var _drag_normal: Vector3 = Vector3.ZERO
+var _drag_offset: Vector3 = Vector3.ZERO
+var _drag_anchor: Vector3 = Vector3.ZERO  # gizmo origin at drag start
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -84,6 +96,10 @@ func _ready() -> void:
 	_spawn_ghost = _build_marker_node(_get_ghost_material())
 	_spawn_ghost.visible = false
 	add_child(_spawn_ghost)
+	# Transform gizmo — follows the selected effect, hidden until Q/W/R.
+	_gizmo = Node3D.new()
+	_gizmo.set_script(GIZMO_SCRIPT)
+	add_child(_gizmo)
 
 func _input(event: InputEvent) -> void:
 	# F9 → play mode. Either the input action OR the raw key fires it,
@@ -100,6 +116,13 @@ func _input(event: InputEvent) -> void:
 			var hit := _raycast_cursor()
 			if not hit.is_empty():
 				_spawn_effect_at(_armed_effect_id, hit.position)
+	# Q → translate gizmo. Only when an effect is selected and the
+	# camera isn't grabbing the key for fly-down (camera only consumes
+	# Q while MMB is held).
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
+		if _selected_effect != null and not _camera.is_looking():
+			_gizmo.set_target(_selected_effect)
+			_gizmo.cycle_translate()
 
 func _enter_play_mode() -> void:
 	# Snapshot the current map into the autoload so the play scene can
@@ -164,9 +187,18 @@ func _process(delta: float) -> void:
 	_was_painting = painting
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Mouse motion drives an in-progress gizmo drag (always handled,
+	# regardless of tool — once a drag starts the user is committed).
+	if event is InputEventMouseMotion and _drag_handle != "":
+		_continue_gizmo_drag()
+		return
 	if not (event is InputEventMouseButton):
 		return
 	if event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	# In-progress drag always consumes the release, even over UI / look-mode.
+	if _drag_handle != "" and not event.pressed:
+		_drag_handle = ""
 		return
 	if _is_over_ui() or _camera.is_looking():
 		return
@@ -211,11 +243,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		p3.y = _terrain.sample_height(p3)
 		_delete_nearest_spawn(p3)
 		return
-	# Effects tool: LMB picks the placed effect under the cursor (if
-	# any). E places a new one (handled in _input). Selection drives
-	# the gizmo work in later phases.
-	if _active_tool == TOOL_L_EFFECTS and event.pressed:
-		_pick_effect_under_cursor()
+	# Effects tool: LMB picks a gizmo handle first (so dragging an
+	# arrow doesn't deselect the effect underneath). Falls through to
+	# pick the box itself if no handle was hit. Release ends the drag.
+	if _active_tool == TOOL_L_EFFECTS:
+		if event.pressed:
+			if _try_start_gizmo_drag():
+				return
+			_pick_effect_under_cursor()
+		else:
+			_drag_handle = ""
 
 func _apply_tool(world_pos: Vector3, delta: float) -> void:
 	var s: float = _brush_strength
@@ -271,6 +308,13 @@ func _on_category_picked(category: String) -> void:
 func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
+	# Gizmo only matters while the Effects tool is active.
+	if _gizmo != null:
+		if tool_id == TOOL_L_EFFECTS:
+			_gizmo.set_target(_selected_effect)
+		else:
+			_gizmo.set_target(null)
+			_drag_handle = ""
 
 func _on_effect_picked(id: String) -> void:
 	_armed_effect_id = id
@@ -358,6 +402,10 @@ func _select_effect(box: Node3D) -> void:
 	_selected_effect = box
 	if box != null:
 		box.set_selected(true)
+	# Re-bind the gizmo to the new selection. If nothing's selected the
+	# gizmo hides itself.
+	if _gizmo != null:
+		_gizmo.set_target(_selected_effect)
 
 func _pick_effect_under_cursor() -> void:
 	# Ray-vs-AABB pick over every placed effect; closest hit wins.
@@ -381,6 +429,73 @@ func _pick_effect_under_cursor() -> void:
 			best = box
 	if best != null:
 		_select_effect(best)
+
+func _try_start_gizmo_drag() -> bool:
+	if _gizmo == null or _gizmo.mode == _gizmo.MODE_NONE or _selected_effect == null:
+		return false
+	if _is_over_ui() or _camera.is_looking():
+		return false
+	var mouse := get_viewport().get_mouse_position()
+	var from := _camera.project_ray_origin(mouse)
+	var dir := _camera.project_ray_normal(mouse)
+	var pick: Dictionary = _gizmo.pick_handle(from, dir)
+	var handle: String = String(pick.get("handle", ""))
+	if handle == "":
+		return false
+	_drag_handle = handle
+	# Resolve the constraint (axis or plane) and capture the grab offset
+	# in world space so the cursor anchor doesn't snap on first motion.
+	_drag_anchor = _selected_effect.global_position
+	if handle.begins_with("p"):
+		_drag_normal = pick.get("normal", Vector3.UP)
+		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
+		if hit_p.is_empty():
+			_drag_handle = ""
+			return false
+		_drag_offset = _drag_anchor - hit_p.point
+	else:
+		_drag_axis = pick.get("axis", Vector3.RIGHT)
+		var ap: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
+		_drag_offset = _drag_anchor - ap
+	return true
+
+func _continue_gizmo_drag() -> void:
+	if _selected_effect == null or not is_instance_valid(_selected_effect):
+		_drag_handle = ""
+		return
+	var mouse := get_viewport().get_mouse_position()
+	var from := _camera.project_ray_origin(mouse)
+	var dir := _camera.project_ray_normal(mouse)
+	if _drag_handle.begins_with("p"):
+		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
+		if hit_p.is_empty():
+			return
+		_selected_effect.global_position = hit_p.point + _drag_offset
+	else:
+		var ap: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
+		_selected_effect.global_position = ap + _drag_offset
+
+func _closest_point_on_axis(ro: Vector3, rd: Vector3, ap: Vector3, ax: Vector3) -> Vector3:
+	# Closest point on the line (ap, ax) to the ray (ro, rd).
+	var u: Vector3 = ax.normalized()
+	var w: Vector3 = ap - ro
+	var b: float = u.dot(rd)
+	var d: float = u.dot(w)
+	var e: float = rd.dot(w)
+	var denom: float = 1.0 - b * b
+	if absf(denom) < 1e-7:
+		return ap
+	var s: float = (d - b * e) / denom
+	return ap + u * s
+
+func _ray_plane_hit_world(ro: Vector3, rd: Vector3, p: Vector3, n: Vector3) -> Dictionary:
+	var denom: float = rd.dot(n)
+	if absf(denom) < 1e-6:
+		return {}
+	var t: float = (p - ro).dot(n) / denom
+	if t < 0.0:
+		return {}
+	return {"point": ro + rd * t, "t": t}
 
 func _ray_aabb(o: Vector3, d: Vector3, b: AABB) -> float:
 	# Slab method. Returns the entry t along the ray (≥0) or -1.0 if miss.
