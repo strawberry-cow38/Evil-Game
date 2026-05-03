@@ -21,6 +21,10 @@ const CATEGORIES: Array = [
 # Kinds claimed by named categories — anything outside this set falls into Misc.
 const NAMED_KINDS: Array = ["weapon", "apparel", "armor", "clothing", "ammo", "medical", "food", "resource", "building", "material"]
 
+# Stacks larger than this prompt for a split-drop count instead of dropping
+# one at a time. Smaller stacks just drop a single unit on R press.
+const SPLIT_PROMPT_THRESHOLD := 5
+
 enum SortMode { NAME, WEIGHT_TOTAL, VALUE_EACH }
 const SORT_LABELS := {
 	SortMode.NAME: "Name",
@@ -71,6 +75,15 @@ var _inspect_desc: Label
 var _inspect_stats: Label
 var _inspect_slots_label: Label
 var _inspect_slots_box: VBoxContainer
+
+# Split-drop overlay nodes + active context.
+var _split_root: Control
+var _split_title: Label
+var _split_slider: HSlider
+var _split_spin: SpinBox
+var _split_id: String = ""
+var _split_max: int = 0
+var _split_syncing: bool = false
 
 func _ready() -> void:
 	layer = 50
@@ -267,6 +280,7 @@ func _build_ui() -> void:
 	vb.add_child(_status_label)
 
 	_build_inspect_overlay()
+	_build_split_overlay()
 	_select_tab(0)
 	_select_category(0)
 
@@ -643,6 +657,131 @@ func _close_inspect() -> void:
 func _is_inspect_open() -> bool:
 	return _inspect_root != null and _inspect_root.visible
 
+func _build_split_overlay() -> void:
+	_split_root = Control.new()
+	_split_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_split_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	_split_root.visible = false
+	_root.add_child(_split_root)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.0, 0.0, 0.0, 0.6)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_split_root.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_split_root.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(440, 0)
+	center.add_child(panel)
+
+	var pad := MarginContainer.new()
+	pad.add_theme_constant_override("margin_left", 24)
+	pad.add_theme_constant_override("margin_right", 24)
+	pad.add_theme_constant_override("margin_top", 20)
+	pad.add_theme_constant_override("margin_bottom", 20)
+	panel.add_child(pad)
+
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 12)
+	pad.add_child(box)
+
+	_split_title = Label.new()
+	_split_title.add_theme_font_size_override("font_size", 22)
+	_split_title.text = "Drop how many?"
+	box.add_child(_split_title)
+
+	var sl_row := HBoxContainer.new()
+	sl_row.add_theme_constant_override("separation", 12)
+	box.add_child(sl_row)
+
+	_split_slider = HSlider.new()
+	_split_slider.min_value = 1
+	_split_slider.max_value = 1
+	_split_slider.step = 1
+	_split_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_split_slider.value_changed.connect(_on_split_slider_changed)
+	sl_row.add_child(_split_slider)
+
+	_split_spin = SpinBox.new()
+	_split_spin.min_value = 1
+	_split_spin.max_value = 1
+	_split_spin.step = 1
+	_split_spin.custom_minimum_size = Vector2(110, 0)
+	_split_spin.value_changed.connect(_on_split_spin_changed)
+	sl_row.add_child(_split_spin)
+
+	var btns := HBoxContainer.new()
+	btns.add_theme_constant_override("separation", 12)
+	btns.alignment = BoxContainer.ALIGNMENT_END
+	box.add_child(btns)
+
+	var cancel_btn := Button.new()
+	cancel_btn.text = "Cancel [Esc]"
+	cancel_btn.add_theme_font_size_override("font_size", 16)
+	cancel_btn.pressed.connect(_close_split)
+	btns.add_child(cancel_btn)
+
+	var drop_btn := Button.new()
+	drop_btn.text = "Drop [Enter]"
+	drop_btn.add_theme_font_size_override("font_size", 16)
+	drop_btn.pressed.connect(_confirm_split)
+	btns.add_child(drop_btn)
+
+func _open_split(id: String, max_n: int) -> void:
+	_split_id = id
+	_split_max = max_n
+	_split_syncing = true
+	_split_slider.max_value = max_n
+	_split_slider.value = max_n
+	_split_spin.max_value = max_n
+	_split_spin.value = max_n
+	_split_syncing = false
+	_split_title.text = "Drop how many %s?  (1..%d)" % [Items.item_name(id), max_n]
+	_split_root.visible = true
+	_split_spin.get_line_edit().grab_focus()
+	_split_spin.get_line_edit().select_all()
+
+func _close_split() -> void:
+	if _split_root != null:
+		_split_root.visible = false
+	_split_id = ""
+	_split_max = 0
+	if _list != null:
+		_list.grab_focus()
+
+func _is_split_open() -> bool:
+	return _split_root != null and _split_root.visible
+
+func _on_split_slider_changed(v: float) -> void:
+	if _split_syncing:
+		return
+	_split_syncing = true
+	_split_spin.value = v
+	_split_syncing = false
+
+func _on_split_spin_changed(v: float) -> void:
+	if _split_syncing:
+		return
+	_split_syncing = true
+	_split_slider.value = v
+	_split_syncing = false
+
+func _confirm_split() -> void:
+	if not _is_split_open():
+		return
+	var id: String = _split_id
+	var n: int = clampi(int(round(_split_spin.value)), 1, _split_max)
+	_close_split()
+	if id == "" or _inventory == null:
+		return
+	var player: Node = _inventory.get_parent()
+	if player != null and player.has_method("drop_item"):
+		player.drop_item(id, n)
+
 func _input(event: InputEvent) -> void:
 	if not _open:
 		return
@@ -652,6 +791,19 @@ func _input(event: InputEvent) -> void:
 		if event.is_action_pressed("inspect") or event.is_action_pressed("ui_cancel"):
 			_close_inspect()
 			get_viewport().set_input_as_handled()
+		return
+
+	# Split-drop overlay: Enter confirms, Esc cancels. Eat other shortcuts so
+	# the user can type into the spinbox without triggering sort/etc.
+	if _is_split_open():
+		if event.is_action_pressed("ui_cancel"):
+			_close_split()
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_pressed("ui_accept"):
+			_confirm_split()
+			get_viewport().set_input_as_handled()
+			return
 		return
 
 	# Favorite-binding mode: next 1-9 binds, Esc cancels.
@@ -736,8 +888,14 @@ func _drop_selected() -> void:
 		return
 	if bool(row.is_instance) and player.has_method("drop_instance"):
 		player.drop_instance(int(row.uid))
-	elif player.has_method("drop_item"):
-		player.drop_item(String(row.id), 1)
+		return
+	if not player.has_method("drop_item"):
+		return
+	var count: int = int(row.get("count", 1))
+	if count > SPLIT_PROMPT_THRESHOLD:
+		_open_split(String(row.id), count)
+		return
+	player.drop_item(String(row.id), 1)
 
 func _move_selection(direction: int) -> void:
 	if _list.item_count == 0:
