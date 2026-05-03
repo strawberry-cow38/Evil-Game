@@ -186,14 +186,16 @@ func _build_ui() -> void:
 	_list = ItemList.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list.custom_minimum_size = Vector2(400, 300)
-	_list.fixed_icon_size = Vector2i(32, 32)
+	_list.custom_minimum_size = Vector2(520, 360)
+	_list.fixed_icon_size = Vector2i(48, 48)
 	_list.icon_mode = ItemList.ICON_MODE_LEFT
 	_list.max_columns = 1
 	_list.same_column_width = true
 	_list.auto_height = false
 	_list.allow_reselect = true
-	_list.add_theme_font_size_override("font_size", 18)
+	_list.add_theme_font_size_override("font_size", 24)
+	_list.add_theme_constant_override("v_separation", 10)
+	_list.add_theme_constant_override("icon_margin", 12)
 	_list.item_selected.connect(func(_i): _refresh_preview())
 	_list.item_clicked.connect(_on_item_clicked)
 	_list.item_activated.connect(_on_item_activated)
@@ -452,15 +454,13 @@ func _refresh_list() -> void:
 
 func _row_label(e: Dictionary, equipped_uid: int) -> String:
 	if bool(e.is_instance):
-		var slot: int = int(_inventory.find_favorite_slot_for_uid(int(e.uid)))
-		var fav_marker: String = "  ★%d" % slot if slot > 0 else ""
 		var eq_marker: String = "  [E]" if int(e.uid) == equipped_uid else ""
 		var qual: String = Items.quality_name(int(e.quality))
 		var tier: Dictionary = Items.condition_tier(float(e.condition), String(e.kind))
-		return "%s %s   %.2f kg   ¢%d   %s %d%%%s%s" % [
+		return "%s %s   %.2f kg   ¢%d   %s %d%%%s" % [
 			qual, e.name, e.weight_total, e.value_each,
 			tier.name, int(round(float(e.condition) * 100.0)),
-			fav_marker, eq_marker,
+			eq_marker,
 		]
 	return "%s   x%d   %.2f kg   ¢%d" % [
 		e.name, e.count, e.weight_total, e.value_each,
@@ -560,7 +560,7 @@ func _refresh_status() -> void:
 		_status_label.text = ""
 
 func _swatch_icon(color: Color) -> ImageTexture:
-	var img := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	var img := Image.create(48, 48, false, Image.FORMAT_RGBA8)
 	img.fill(color)
 	return ImageTexture.create_from_image(img)
 
