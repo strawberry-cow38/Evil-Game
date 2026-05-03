@@ -601,17 +601,17 @@ func _open_inspect() -> void:
 		_inspect_slots_box.add_child(none)
 	else:
 		for s in slots:
-			var row := HBoxContainer.new()
-			row.add_theme_constant_override("separation", 12)
+			var slot_row := HBoxContainer.new()
+			slot_row.add_theme_constant_override("separation", 12)
 			var name_lbl := Label.new()
 			name_lbl.text = "• %s" % String(s)
 			name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.add_child(name_lbl)
+			slot_row.add_child(name_lbl)
 			var status := Label.new()
 			status.text = "(empty)"
 			status.modulate = Color(0.65, 0.65, 0.65)
-			row.add_child(status)
-			_inspect_slots_box.add_child(row)
+			slot_row.add_child(status)
+			_inspect_slots_box.add_child(slot_row)
 	_inspect_root.visible = true
 
 func _close_inspect() -> void:
