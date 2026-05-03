@@ -57,7 +57,7 @@ const IMPACT_CONCRETE_PATH := "res://assets/audio/impact_concrete.ogg"
 const CASING_PATH := "res://assets/audio/casing.ogg"
 const CASING_DELAY_MIN := 0.35
 const CASING_DELAY_MAX := 0.55
-const CASING_VOL_DB := -10.0
+const CASING_VOL_DB := -24.0
 const CASING_PITCH_MIN := 0.92
 const CASING_PITCH_MAX := 1.10
 const CASING_VOICES := 6
@@ -141,8 +141,8 @@ func _setup_audio() -> void:
 		cp.stream = _casing_stream
 		cp.bus = "Master"
 		cp.volume_db = CASING_VOL_DB
-		cp.unit_size = 8.0
-		cp.max_distance = 30.0
+		cp.unit_size = 4.0
+		cp.max_distance = 18.0
 		add_child(cp)
 		_casing_voices.append(cp)
 
