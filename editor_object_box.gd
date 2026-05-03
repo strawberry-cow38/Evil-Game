@@ -35,11 +35,17 @@ func _ready() -> void:
 		if aabb.size.length_squared() > 0.0:
 			_local_aabb = aabb.grow(PAD)
 	_rebuild()
+	# Objects hide their bounds wireframe when not selected — they're real
+	# props that should look like the prop alone in the viewport. Effects
+	# keep theirs (they're often invisible/sparse, need the box as a hint).
+	_mesh_instance.visible = false
 
 func set_selected(v: bool) -> void:
 	_selected = v
 	if _material != null:
 		_material.albedo_color = COLOR_SELECTED if v else COLOR_NORMAL
+	if _mesh_instance != null:
+		_mesh_instance.visible = v
 
 func get_aabb_local() -> AABB:
 	return _local_aabb
