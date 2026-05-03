@@ -41,7 +41,7 @@ func _process(delta: float) -> void:
 			var bar_len := 10
 			var filled := int(round(prog * bar_len))
 			var bar := "[" + "=".repeat(filled) + " ".repeat(bar_len - filled) + "]"
-			_ammo_label.text = "%s  [%s]\nRELOADING %s" % [name, mode, bar]
+			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)  %s" % [name, mode, ammo, mag, reserve, bar]
 		else:
 			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)" % [name, mode, ammo, mag, reserve]
 		_update_low_ammo_flash(delta, ammo, mag, reloading)

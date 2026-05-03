@@ -651,12 +651,14 @@ func _process(delta: float) -> void:
 				_reloading = false
 				_finish_reload()
 
-	# Decide whether to fire this frame based on mode. Per-round reload doesn't
-	# block fire input — pulling the trigger cancels the reload chain so you
-	# can pop off whatever you've already loaded.
+	# Decide whether to fire this frame based on mode. Per-round reload only
+	# allows fire if at least one round has finished loading — partway through
+	# the current round's window the shell isn't seated yet, so trigger does
+	# nothing. Once a round is in, firing cancels the rest of the chain.
 	var per_round: bool = bool(_profile.get("per_round_reload", false))
+	var per_round_fireable: bool = per_round and _ammo > 0
 	var want_fire := false
-	if not _reloading or per_round:
+	if not _reloading or per_round_fireable:
 		match _fire_mode:
 			FireMode.SEMI:
 				want_fire = Input.is_action_just_pressed("fire")
@@ -666,7 +668,7 @@ func _process(delta: float) -> void:
 				if Input.is_action_just_pressed("fire") and _burst_remaining == 0 and now >= _burst_cooldown_until:
 					_burst_remaining = BURST_COUNT
 				want_fire = _burst_remaining > 0
-	if want_fire and _reloading and per_round:
+	if want_fire and _reloading and per_round_fireable:
 		_reloading = false
 		_reload_remaining = 0.0
 		_reload_amount = 0
