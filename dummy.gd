@@ -57,7 +57,7 @@ func _refresh_hp_label() -> void:
 
 func _spawn_popup(amount: int, headshot: bool = false) -> void:
 	var lbl := Label3D.new()
-	lbl.text = ("HS! " + str(amount)) if headshot else str(amount)
+	lbl.text = str(amount)
 	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	lbl.no_depth_test = true
 	lbl.fixed_size = false

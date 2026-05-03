@@ -795,6 +795,9 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 func _classify_material(collider: Object) -> String:
 	if collider == null:
 		return "concrete"
+	# Anything that takes damage is flesh — gives blood spray on hit.
+	if collider.has_method("take_damage"):
+		return "flesh"
 	var n: String = ""
 	if collider is Node:
 		n = (collider as Node).name
@@ -818,7 +821,10 @@ const BULLET_HOLE_SIZE := 0.08
 func _apply_impact(world_pos: Vector3, normal: Vector3, material: String) -> void:
 	# Impact sounds disabled — broken clips, regenerating.
 	_spawn_impact_particles(world_pos, normal, material)
-	_spawn_bullet_hole(world_pos, normal, material)
+	# Skip bullet-hole decals on flesh — they'd just float in the air once
+	# the target moves, and look weird stuck to a body anyway.
+	if material != "flesh":
+		_spawn_bullet_hole(world_pos, normal, material)
 
 func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String) -> void:
 	var n: Vector3 = normal.normalized()
@@ -878,6 +884,8 @@ func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: Stri
 			mat.albedo_color = Color(0.42, 0.28, 0.18, 1.0)
 		"concrete":
 			mat.albedo_color = Color(0.85, 0.83, 0.78, 1.0)
+		"flesh":
+			mat.albedo_color = Color(0.55, 0.05, 0.05, 1.0)
 		_:
 			mat.albedo_color = Color(0.7, 0.7, 0.7, 1.0)
 	var mesh := SphereMesh.new()
@@ -891,16 +899,16 @@ func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: Stri
 	p.mesh = mesh
 	p.one_shot = true
 	p.explosiveness = 1.0
-	p.amount = 22
-	p.lifetime = 0.6
+	p.amount = 36 if material == "flesh" else 22
+	p.lifetime = 0.7 if material == "flesh" else 0.6
 	p.local_coords = false
 	p.direction = normal.normalized()
-	p.spread = 42.0
-	p.initial_velocity_min = 1.8
-	p.initial_velocity_max = 4.5
-	p.gravity = Vector3(0.0, -7.0, 0.0)
-	p.scale_amount_min = 0.6
-	p.scale_amount_max = 1.4
+	p.spread = 55.0 if material == "flesh" else 42.0
+	p.initial_velocity_min = 2.4 if material == "flesh" else 1.8
+	p.initial_velocity_max = 5.5 if material == "flesh" else 4.5
+	p.gravity = Vector3(0.0, -9.0 if material == "flesh" else -7.0, 0.0)
+	p.scale_amount_min = 0.5 if material == "flesh" else 0.6
+	p.scale_amount_max = 1.2 if material == "flesh" else 1.4
 	p.damping_min = 1.0
 	p.damping_max = 3.0
 	# Cast/receive flags off so unshaded specks don't blow out shadow maps.
