@@ -39,6 +39,11 @@ const MOVE_BLOOM_DEG := 1.2        # extra bloom while moving on foot (uncrouche
 const AIR_BLOOM_DEG := 2.5         # extra bloom while airborne
 const MOVE_SPEED_THRESHOLD := 0.5  # m/s of horizontal velocity to count as "moving"
 
+const WEAPON_NAME := "AK-style Rifle"
+const MAG_SIZE := 30
+const BURST_COUNT := 3
+enum FireMode { SEMI, BURST, AUTO }
+
 @export var camera_path: NodePath
 @export var player_path: NodePath
 
@@ -52,6 +57,9 @@ var _target_yaw := 0.0
 var _target_pitch := 0.0
 var _applied_yaw := 0.0
 var _applied_pitch := 0.0
+var _ammo := MAG_SIZE
+var _fire_mode: FireMode = FireMode.AUTO
+var _burst_remaining := 0
 
 func _ready() -> void:
 	_rng.randomize()
@@ -62,6 +70,22 @@ func _ready() -> void:
 
 func is_ads() -> bool:
 	return _player != null and _player.has_method("is_ads") and _player.is_ads()
+
+func get_weapon_name() -> String:
+	return WEAPON_NAME
+
+func get_ammo() -> int:
+	return _ammo
+
+func get_mag_size() -> int:
+	return MAG_SIZE
+
+func get_fire_mode_name() -> String:
+	match _fire_mode:
+		FireMode.SEMI: return "SEMI"
+		FireMode.BURST: return "BURST"
+		FireMode.AUTO: return "AUTO"
+	return "?"
 
 func get_current_bloom_deg() -> float:
 	if _player == null:
@@ -82,8 +106,33 @@ func get_current_bloom_deg() -> float:
 
 func _process(delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
-	if Input.is_action_pressed("fire") and now - _last_fire_time >= FIRE_INTERVAL:
+
+	if Input.is_action_just_pressed("cycle_fire_mode"):
+		_fire_mode = ((_fire_mode + 1) % FireMode.size()) as FireMode
+		_burst_remaining = 0
+
+	if Input.is_action_just_pressed("reload") and _ammo < MAG_SIZE:
+		_ammo = MAG_SIZE
+		_burst_remaining = 0
+
+	# Decide whether to fire this frame based on mode.
+	var want_fire := false
+	match _fire_mode:
+		FireMode.SEMI:
+			want_fire = Input.is_action_just_pressed("fire")
+		FireMode.AUTO:
+			want_fire = Input.is_action_pressed("fire")
+		FireMode.BURST:
+			if Input.is_action_just_pressed("fire") and _burst_remaining == 0:
+				_burst_remaining = BURST_COUNT
+			want_fire = _burst_remaining > 0
+
+	if want_fire and _ammo > 0 and now - _last_fire_time >= FIRE_INTERVAL:
 		_fire(now)
+		_ammo -= 1
+		if _fire_mode == FireMode.BURST:
+			_burst_remaining = max(_burst_remaining - 1, 0)
+
 	if now - _last_fire_time > RECOIL_RESET_DELAY:
 		_recoil_index = 0
 	_apply_smoothed_recoil(delta)
