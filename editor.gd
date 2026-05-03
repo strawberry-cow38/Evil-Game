@@ -612,7 +612,8 @@ func _continue_gizmo_drag() -> void:
 		# bakes in start_scale; rescale just its idx column to derive the
 		# new offset from origin to pivot.
 		var pivot_world: Vector3 = _drag_anchor + _drag_start_basis * _drag_pivot_local
-		var col_i: Vector3 = _drag_start_basis.get_column(idx) * (new_axis_scale / _drag_start_scale[idx])
+		var basis_cols: Array = [_drag_start_basis.x, _drag_start_basis.y, _drag_start_basis.z]
+		var col_i: Vector3 = basis_cols[idx] * (new_axis_scale / _drag_start_scale[idx])
 		var new_offset: Vector3 = col_i * _drag_pivot_local[idx]
 		_selected_prop.scale = new_scale
 		_selected_prop.global_position = pivot_world - new_offset
