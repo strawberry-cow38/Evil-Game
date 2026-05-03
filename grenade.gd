@@ -13,6 +13,10 @@ const EXPLOSION_RADIUS := 5.0
 const EXPLOSION_LIGHT_ENERGY := 8.0
 const EXPLOSION_LIGHT_RANGE := 12.0
 const EXPLOSION_LIGHT_FADE := 0.25
+const EXPLOSION_SOUND_PATH := "res://assets/audio/explosion.ogg"
+const EXPLOSION_VOL_DB := 2.0
+const EXPLOSION_PITCH_MIN := 0.92
+const EXPLOSION_PITCH_MAX := 1.06
 
 var _velocity: Vector3 = Vector3.ZERO
 var _exclude: Array[RID] = []
@@ -104,6 +108,23 @@ func _explode(world_pos: Vector3, normal: Vector3) -> void:
 	p.global_position = world_pos + normal.normalized() * 0.05
 	p.restart()
 	p.emitting = true
+
+	# Boom — load the stream straight from disk like the rest of the audio,
+	# since .import is gitignored on the source-pull repo.
+	var snd_path := ProjectSettings.globalize_path(EXPLOSION_SOUND_PATH)
+	if FileAccess.file_exists(snd_path):
+		var sp := AudioStreamPlayer3D.new()
+		sp.stream = AudioStreamOggVorbis.load_from_file(snd_path)
+		sp.bus = "Master"
+		sp.volume_db = EXPLOSION_VOL_DB
+		sp.unit_size = 30.0
+		sp.max_distance = 200.0
+		sp.pitch_scale = randf_range(EXPLOSION_PITCH_MIN, EXPLOSION_PITCH_MAX)
+		scene.add_child(sp)
+		sp.global_position = world_pos
+		sp.play()
+		var st := get_tree().create_timer(4.0)
+		st.timeout.connect(func(): if is_instance_valid(sp): sp.queue_free())
 
 	# Brief light flash.
 	var light := OmniLight3D.new()
