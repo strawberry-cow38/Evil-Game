@@ -20,6 +20,7 @@ const DEFS := {
 	"m249":   {"name": "M249 SAW",     "weight": 7.50, "value":  900, "color": Color(0.28, 0.28, 0.25), "kind": "weapon", "desc": "5.56 belt-fed LMG. 100-round box. Heavy.", "slots": ["Optic", "Bipod"]},
 	"m60":    {"name": "M60",          "weight": 10.50,"value": 1100, "color": Color(0.22, 0.22, 0.20), "kind": "weapon", "desc": "7.62 belt-fed LMG. Slow cyclic, devastating.", "slots": ["Optic", "Bipod"]},
 	"mgl":    {"name": "Milkor MGL",   "weight": 5.50, "value":  800, "color": Color(0.18, 0.30, 0.20), "kind": "weapon", "desc": "40mm 6-round revolving grenade launcher. Goes boom.", "slots": ["Optic"]},
+	"makarov":{"name": "PM Makarov",   "weight": 0.66, "value":  120, "color": Color(0.18, 0.18, 0.20), "kind": "weapon", "desc": "Soviet 9×18 service pistol. 8-round mag.", "slots": ["Muzzle"]},
 
 	"ammo_762x39":  {"name": "7.62×39mm",       "weight": 0.016, "value":  1, "color": Color(0.85, 0.65, 0.20), "kind": "ammo", "desc": "Soviet intermediate cartridge. Feeds the AKM."},
 	"ammo_556nato": {"name": "5.56×45mm NATO",  "weight": 0.012, "value":  1, "color": Color(0.90, 0.78, 0.40), "kind": "ammo", "desc": "NATO standard. Feeds the M16A2 and M249."},

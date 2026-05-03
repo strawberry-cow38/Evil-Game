@@ -79,6 +79,17 @@ const RECOIL_PATTERN_M249: Array[Vector2] = [
 	Vector2( 0.40, 1.35),
 	Vector2(-1.15, 1.30),
 ]
+# PM Makarov: small pistol, light upward kick, mild drift.
+const RECOIL_PATTERN_MAKAROV: Array[Vector2] = [
+	Vector2( 0.05, 0.55),
+	Vector2(-0.10, 0.60),
+	Vector2( 0.15, 0.65),
+	Vector2(-0.18, 0.65),
+	Vector2( 0.22, 0.60),
+	Vector2(-0.25, 0.58),
+	Vector2( 0.28, 0.55),
+	Vector2(-0.30, 0.50),
+]
 # PP-19 Bizon: 9mm helical-mag SMG. Light recoil, mostly vertical with mild drift.
 const RECOIL_PATTERN_BIZON: Array[Vector2] = [
 	Vector2( 0.10, 0.55),
@@ -182,7 +193,7 @@ const PROFILES := {
 		"fire_fade": 0.26,
 		"recoil_pattern": RECOIL_PATTERN_BIZON,
 		"bloom_mult": 1.4,
-		"ammo_id": "ammo_9mm",
+		"ammo_id": "ammo_9x18",
 	},
 	"mp5sd": {
 		"name": "MP5SD",
@@ -220,6 +231,18 @@ const PROFILES := {
 		"bloom_mult": 1.7,
 		"ammo_id": "ammo_762nato",
 	},
+	"makarov": {
+		"name": "PM Makarov",
+		"mag_size": 8,
+		"rpm": 240.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_PPBizon.ogg"],
+		"fire_hold": 0.10,
+		"fire_fade": 0.18,
+		"recoil_pattern": RECOIL_PATTERN_MAKAROV,
+		"bloom_mult": 1.6,
+		"ammo_id": "ammo_9x18",
+	},
 	"mgl": {
 		"name": "MGL",
 		"mag_size": 6,
@@ -235,7 +258,7 @@ const PROFILES := {
 		"ammo_id": "ammo_40mm",
 	},
 }
-const WEAPON_ORDER := ["akm", "m16a2", "bizon", "mp5sd", "m249", "m60", "mgl"]
+const WEAPON_ORDER := ["akm", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 
 @export var camera_path: NodePath

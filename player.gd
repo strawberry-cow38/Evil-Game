@@ -20,7 +20,7 @@ const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
 const INTERACT_MASK := 0xFFFFFFFF
 
-const STARTING_WEAPONS: Array[String] = ["akm", "m16a2", "bizon", "mp5sd", "m249", "m60", "mgl"]
+const STARTING_WEAPONS: Array[String] = ["akm", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
 const STARTING_AMMO: Dictionary = {
 	"ammo_762x39":  200,
 	"ammo_556nato": 200,
