@@ -123,6 +123,10 @@ func _input(event: InputEvent) -> void:
 		if _selected_effect != null and not _camera.is_looking():
 			_gizmo.set_target(_selected_effect)
 			_gizmo.cycle_translate()
+	# Delete → remove selected effect.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_DELETE:
+		if _selected_effect != null and not _camera.is_looking():
+			_delete_selected_effect()
 
 func _enter_play_mode() -> void:
 	# Snapshot the current map into the autoload so the play scene can
@@ -404,9 +408,12 @@ func _select_effect(box: Node3D) -> void:
 	if box != null:
 		box.set_selected(true)
 	# Re-bind the gizmo to the new selection. If nothing's selected the
-	# gizmo hides itself.
+	# gizmo hides itself; if something IS selected, default to the
+	# translate gizmo so the user doesn't need to hit Q just to nudge it.
 	if _gizmo != null:
 		_gizmo.set_target(_selected_effect)
+		if _selected_effect != null and _gizmo.mode == _gizmo.MODE_NONE:
+			_gizmo.set_mode(_gizmo.MODE_TRANSLATE_AXES)
 
 func _pick_effect_under_cursor() -> void:
 	# Ray-vs-AABB pick over every placed effect; closest hit wins.
@@ -430,6 +437,17 @@ func _pick_effect_under_cursor() -> void:
 			best = box
 	if best != null:
 		_select_effect(best)
+
+func _delete_selected_effect() -> void:
+	if _selected_effect == null:
+		return
+	var doomed: Node3D = _selected_effect
+	_placed_effects.erase(doomed)
+	_selected_effect = null
+	if _gizmo != null:
+		_gizmo.set_target(null)
+	_drag_handle = ""
+	doomed.queue_free()
 
 func _try_start_gizmo_drag() -> bool:
 	if _gizmo == null or _gizmo.mode == _gizmo.MODE_NONE or _selected_effect == null:
@@ -477,9 +495,11 @@ func _continue_gizmo_drag() -> void:
 		_selected_effect.global_position = ap + _drag_offset
 
 func _closest_point_on_axis(ro: Vector3, rd: Vector3, ap: Vector3, ax: Vector3) -> Vector3:
-	# Closest point on the line (ap, ax) to the ray (ro, rd).
+	# Closest point on the infinite line (ap, ax) to the ray (ro, rd).
+	# Uses w = ro - ap (not ap - ro — that flipped signs and inverted
+	# every drag direction).
 	var u: Vector3 = ax.normalized()
-	var w: Vector3 = ap - ro
+	var w: Vector3 = ro - ap
 	var b: float = u.dot(rd)
 	var d: float = u.dot(w)
 	var e: float = rd.dot(w)
