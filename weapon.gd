@@ -343,6 +343,11 @@ const PROFILES := {
 		"scope": true,
 		"ads_fov": 13.0,
 		"bolt_unscope_time": 0.85,
+		"bolt_sound_path": "res://assets/audio/Sub_GTEKBoltAction.ogg",
+		"bolt_delay": 0.20,
+		"bolt_pitch_min": 0.96,
+		"bolt_pitch_max": 1.04,
+		"bolt_vol_db": -4.0,
 	},
 	"mgl": {
 		"name": "MGL",
@@ -422,6 +427,10 @@ var _shell_impact_streams: Dictionary = {}
 var _shell_impact_voices: Array[AudioStreamPlayer3D] = []
 var _shell_impact_idx := 0
 const SHELL_IMPACT_VOICES := 4
+# Bolt-cycle sound (currently just M700). Single voice per weapon — bolt
+# action only fires one round at a time so we don't need a pool.
+var _bolt_streams: Dictionary = {}
+var _bolt_voice: AudioStreamPlayer3D = null
 # Default brass-casing impact set used by every weapon that doesn't override
 # (XM1014 ships its own shellimpact.wav; MGL opts out via no_shell_impact).
 const DEFAULT_BRASS_PATHS: Array = [
@@ -605,6 +614,21 @@ func _setup_audio() -> void:
 		sp.max_distance = 22.0
 		add_child(sp)
 		_shell_impact_voices.append(sp)
+	# Bolt-cycle streams (M700 etc). One stream per weapon profile that
+	# defines bolt_sound_path; shared single voice on the weapon.
+	for key in WEAPON_ORDER:
+		var bp: String = String(PROFILES[key].get("bolt_sound_path", ""))
+		if bp == "":
+			continue
+		var bs: AudioStream = _load_wav(bp)
+		if bs != null:
+			_bolt_streams[key] = bs
+	if not _bolt_streams.is_empty():
+		_bolt_voice = AudioStreamPlayer3D.new()
+		_bolt_voice.bus = "Master"
+		_bolt_voice.unit_size = 5.0
+		_bolt_voice.max_distance = 20.0
+		add_child(_bolt_voice)
 	# Reload sound — single voice on the weapon, plays start of reload.
 	_reload_stream = _load_wav(RELOAD_SOUND_PATH)
 	_reload_player = AudioStreamPlayer3D.new()
@@ -732,6 +756,27 @@ func _schedule_shell_impact() -> void:
 	var idx: int = _shell_impact_idx
 	_shell_impact_idx = (_shell_impact_idx + 1) % _shell_impact_voices.size()
 	var voice: AudioStreamPlayer3D = _shell_impact_voices[idx]
+	var timer := get_tree().create_timer(delay)
+	timer.timeout.connect(func():
+		if not is_instance_valid(voice):
+			return
+		voice.stream = stream
+		voice.pitch_scale = pitch
+		voice.volume_db = vol
+		voice.play()
+	)
+
+func _schedule_bolt() -> void:
+	var stream: AudioStream = _bolt_streams.get(_current_weapon, null)
+	if stream == null or _bolt_voice == null:
+		return
+	var delay: float = float(_profile.get("bolt_delay", 0.18))
+	var pitch: float = _rng.randf_range(
+		float(_profile.get("bolt_pitch_min", 0.97)),
+		float(_profile.get("bolt_pitch_max", 1.03)),
+	)
+	var vol: float = float(_profile.get("bolt_vol_db", -4.0))
+	var voice: AudioStreamPlayer3D = _bolt_voice
 	var timer := get_tree().create_timer(delay)
 	timer.timeout.connect(func():
 		if not is_instance_valid(voice):
@@ -994,6 +1039,8 @@ func _fire(now: float) -> void:
 	# brass set; MGL opted out via no_shell_impact).
 	if _shell_impact_streams.has(_current_weapon):
 		_schedule_shell_impact()
+	if _bolt_streams.has(_current_weapon):
+		_schedule_bolt()
 
 	# Sim trajectory from camera origin in camera-forward direction.
 	var origin: Vector3 = _camera.global_transform.origin
