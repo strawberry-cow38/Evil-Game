@@ -6,8 +6,6 @@ extends Node3D
 #   3. Schedules damage at impact_time = distance / muzzle_velocity
 #   4. Renders a tracer line for the full path
 
-const MAX_RPM := 600.0
-const FIRE_INTERVAL := 60.0 / MAX_RPM      # hard-clamped at 600 RPM
 const MUZZLE_VELOCITY := 500.0             # m/s
 const BULLET_GRAVITY := 3.0                # m/s^2 (Rust-ish, gentle drop)
 const STEP_DT := 0.01                      # trajectory sim step
@@ -40,11 +38,8 @@ const MOVE_BLOOM_DEG := 1.2        # extra bloom while moving on foot (uncrouche
 const AIR_BLOOM_DEG := 2.5         # extra bloom while airborne
 const MOVE_SPEED_THRESHOLD := 0.5  # m/s of horizontal velocity to count as "moving"
 
-const WEAPON_NAME := "AK-style Rifle"
-const MAG_SIZE := 30
 const BURST_COUNT := 3
 const RELOAD_TIME := 2.0
-const FIRE_SOUND_PATH := "res://assets/audio/Shot_GTEK762mmSoviet.ogg"
 const FIRE_PITCH_MIN := 0.94
 const FIRE_PITCH_MAX := 1.06
 const FIRE_VOL_DB := -4.0
@@ -69,6 +64,24 @@ const IMPACT_PITCH_MAX := 1.08
 const IMPACT_VOICES := 6
 enum FireMode { SEMI, BURST, AUTO }
 
+const PROFILES := {
+	"akm": {
+		"name": "AKM",
+		"mag_size": 30,
+		"rpm": 600.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sound": "res://assets/audio/Shot_GTEK762mmSoviet.ogg",
+	},
+	"m16a2": {
+		"name": "M16A2",
+		"mag_size": 30,
+		"rpm": 800.0,
+		"modes": [FireMode.BURST, FireMode.AUTO],
+		"fire_sound": "res://assets/audio/Shot_GTEK556mm.ogg",
+	},
+}
+const WEAPON_ORDER := ["akm", "m16a2"]
+
 @export var camera_path: NodePath
 @export var player_path: NodePath
 
@@ -82,7 +95,10 @@ var _target_yaw := 0.0
 var _target_pitch := 0.0
 var _applied_yaw := 0.0
 var _applied_pitch := 0.0
-var _ammo := MAG_SIZE
+var _current_weapon: String = "akm"
+var _profile: Dictionary = {}
+var _fire_streams: Dictionary = {}     # weapon key -> AudioStream
+var _ammo := 0
 var _fire_mode: FireMode = FireMode.AUTO
 var _burst_remaining := 0
 var _reloading := false
@@ -107,13 +123,41 @@ func _ready() -> void:
 	if player_path != NodePath():
 		_player = get_node(player_path)
 	_setup_audio()
+	_apply_weapon(_current_weapon)
+
+func _apply_weapon(key: String) -> void:
+	if not PROFILES.has(key):
+		return
+	_current_weapon = key
+	_profile = PROFILES[key]
+	_ammo = _profile.mag_size
+	_fire_mode = _profile.modes[0]
+	_burst_remaining = 0
+	_recoil_index = 0
+	_target_yaw = _applied_yaw
+	_target_pitch = _applied_pitch
+	# Swap the fire-sound stream on every voice in the pool.
+	_fire_stream = _fire_streams.get(key, null)
+	for v in _audio_voices:
+		v.stop()
+		v.stream = _fire_stream
+
+func _cycle_weapon(direction: int) -> void:
+	if _reloading:
+		return
+	var idx: int = WEAPON_ORDER.find(_current_weapon)
+	if idx < 0:
+		idx = 0
+	idx = (idx + direction + WEAPON_ORDER.size()) % WEAPON_ORDER.size()
+	_apply_weapon(WEAPON_ORDER[idx])
 
 func _setup_audio() -> void:
 	# .import is gitignored on this source-pull repo, so res:// won't resolve the
 	# .ogg via GD.Load. Load the file straight off disk at runtime.
-	var abs_path: String = ProjectSettings.globalize_path(FIRE_SOUND_PATH)
-	if FileAccess.file_exists(abs_path):
-		_fire_stream = AudioStreamOggVorbis.load_from_file(abs_path)
+	for key in WEAPON_ORDER:
+		var path: String = PROFILES[key].fire_sound
+		_fire_streams[key] = _load_wav(path)
+	_fire_stream = _fire_streams.get(_current_weapon, null)
 	# Voice pool so fast-fire shots don't restart each other mid-fade —
 	# the fade-out on shot N keeps ringing while shot N+1 starts on a fresh voice.
 	for i in range(FIRE_VOICES):
@@ -213,13 +257,20 @@ func is_ads() -> bool:
 	return _player != null and _player.has_method("is_ads") and _player.is_ads()
 
 func get_weapon_name() -> String:
-	return WEAPON_NAME
+	return _profile.get("name", "?")
 
 func get_ammo() -> int:
 	return _ammo
 
 func get_mag_size() -> int:
-	return MAG_SIZE
+	return int(_profile.get("mag_size", 0))
+
+func _fire_interval() -> float:
+	var rpm: float = float(_profile.get("rpm", 600.0))
+	return 60.0 / rpm if rpm > 0.0 else 0.1
+
+func _available_modes() -> Array:
+	return _profile.get("modes", [FireMode.AUTO])
 
 func get_fire_mode_name() -> String:
 	match _fire_mode:
@@ -256,11 +307,21 @@ func get_current_bloom_deg() -> float:
 func _process(delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 
+	if Input.is_action_just_pressed("weapon_next"):
+		_cycle_weapon(1)
+	elif Input.is_action_just_pressed("weapon_prev"):
+		_cycle_weapon(-1)
+
 	if Input.is_action_just_pressed("cycle_fire_mode") and not _reloading:
-		_fire_mode = ((_fire_mode + 1) % FireMode.size()) as FireMode
+		var modes: Array = _available_modes()
+		var idx: int = modes.find(_fire_mode)
+		if idx < 0:
+			idx = -1
+		idx = (idx + 1) % modes.size()
+		_fire_mode = modes[idx]
 		_burst_remaining = 0
 
-	if Input.is_action_just_pressed("reload") and not _reloading and _ammo < MAG_SIZE:
+	if Input.is_action_just_pressed("reload") and not _reloading and _ammo < get_mag_size():
 		_start_reload()
 
 	if _reloading:
@@ -268,7 +329,7 @@ func _process(delta: float) -> void:
 		if _reload_remaining <= 0.0:
 			_reload_remaining = 0.0
 			_reloading = false
-			_ammo = MAG_SIZE
+			_ammo = get_mag_size()
 
 	# Decide whether to fire this frame based on mode.
 	var want_fire := false
@@ -283,7 +344,7 @@ func _process(delta: float) -> void:
 					_burst_remaining = BURST_COUNT
 				want_fire = _burst_remaining > 0
 
-	if want_fire and _ammo > 0 and now - _last_fire_time >= FIRE_INTERVAL:
+	if want_fire and _ammo > 0 and now - _last_fire_time >= _fire_interval():
 		_fire(now)
 		_ammo -= 1
 		if _fire_mode == FireMode.BURST:
