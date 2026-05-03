@@ -259,7 +259,7 @@ func _build_ui() -> void:
 	footer.add_child(_sort_label)
 
 	_hint_label = Label.new()
-	_hint_label.text = "[Enter/Dbl-Click] equip  [X] inspect  [R] drop  [Q] favorite→1-9  [←/→] category  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
+	_hint_label.text = "[Enter/Dbl-Click] equip  [X] inspect  [R] drop / [Shift+R] drop all  [Q] favorite→1-9  [←/→] category  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
 	_hint_label.modulate = Color(0.75, 0.75, 0.75)
 	_hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -720,13 +720,13 @@ func _build_split_overlay() -> void:
 	box.add_child(btns)
 
 	var cancel_btn := Button.new()
-	cancel_btn.text = "Cancel [Esc]"
+	cancel_btn.text = "Cancel [R / Esc]"
 	cancel_btn.add_theme_font_size_override("font_size", 16)
 	cancel_btn.pressed.connect(_close_split)
 	btns.add_child(cancel_btn)
 
 	var drop_btn := Button.new()
-	drop_btn.text = "Drop [Enter]"
+	drop_btn.text = "Drop [E]"
 	drop_btn.add_theme_font_size_override("font_size", 16)
 	drop_btn.pressed.connect(_confirm_split)
 	btns.add_child(drop_btn)
@@ -793,14 +793,14 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		return
 
-	# Split-drop overlay: Enter confirms, Esc cancels. Eat other shortcuts so
+	# Split-drop overlay: E confirms, R/Esc cancels. Eat other shortcuts so
 	# the user can type into the spinbox without triggering sort/etc.
 	if _is_split_open():
-		if event.is_action_pressed("ui_cancel"):
+		if event.is_action_pressed("ui_cancel") or event.is_action_pressed("reload"):
 			_close_split()
 			get_viewport().set_input_as_handled()
 			return
-		if event.is_action_pressed("ui_accept"):
+		if event.is_action_pressed("interact"):
 			_confirm_split()
 			get_viewport().set_input_as_handled()
 			return
@@ -837,7 +837,8 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("reload"):
-		_drop_selected()
+		var shift: bool = Input.is_key_pressed(KEY_SHIFT)
+		_drop_selected(shift)
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("favorite"):
@@ -879,7 +880,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-func _drop_selected() -> void:
+func _drop_selected(shift: bool = false) -> void:
 	var row: Dictionary = _selected_row()
 	if row.is_empty() or _inventory == null:
 		return
@@ -892,6 +893,10 @@ func _drop_selected() -> void:
 	if not player.has_method("drop_item"):
 		return
 	var count: int = int(row.get("count", 1))
+	# Shift-R always dumps the full stack — bypasses the split prompt entirely.
+	if shift:
+		player.drop_item(String(row.id), count)
+		return
 	if count > SPLIT_PROMPT_THRESHOLD:
 		_open_split(String(row.id), count)
 		return
