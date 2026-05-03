@@ -117,8 +117,14 @@ func _build_ui() -> void:
 	_list = ItemList.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_list.custom_minimum_size = Vector2(400, 300)
 	_list.fixed_icon_size = Vector2i(32, 32)
+	_list.icon_mode = ItemList.ICON_MODE_LEFT
+	_list.max_columns = 1
+	_list.same_column_width = true
+	_list.auto_height = false
 	_list.allow_reselect = true
+	_list.add_theme_font_size_override("font_size", 18)
 	_list.item_selected.connect(func(_i): _refresh_preview())
 	_list.item_clicked.connect(func(_i, _pos, _btn): _refresh_preview())
 	content.add_child(_list)
@@ -201,9 +207,11 @@ func _refresh() -> void:
 
 func _refresh_list() -> void:
 	if _inventory == null:
+		push_warning("menu: _inventory null")
 		return
 	var entries: Array = _inventory.entries()
-	entries.sort_custom(_compare_entries)
+	print("menu: refresh_list entries=", entries.size())
+	entries.sort_custom(Callable(self, "_compare_entries"))
 
 	# Try to keep the current selection on the same item id.
 	var selected_id: String = ""
