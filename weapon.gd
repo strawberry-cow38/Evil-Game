@@ -79,6 +79,21 @@ const RECOIL_PATTERN_M249: Array[Vector2] = [
 	Vector2( 0.40, 1.35),
 	Vector2(-1.15, 1.30),
 ]
+# PP-19 Bizon: 9mm helical-mag SMG. Light recoil, mostly vertical with mild drift.
+const RECOIL_PATTERN_BIZON: Array[Vector2] = [
+	Vector2( 0.10, 0.55),
+	Vector2(-0.15, 0.65),
+	Vector2( 0.20, 0.75),
+	Vector2(-0.25, 0.80),
+	Vector2( 0.30, 0.80),
+	Vector2(-0.35, 0.78),
+	Vector2( 0.40, 0.75),
+	Vector2(-0.45, 0.72),
+	Vector2( 0.50, 0.70),
+	Vector2(-0.55, 0.68),
+	Vector2( 0.60, 0.65),
+	Vector2(-0.65, 0.62),
+]
 # MP5: between AK and M16 vertically, but very horizontal — wide left/right swings.
 const RECOIL_PATTERN_MP5: Array[Vector2] = [
 	Vector2( 0.40, 0.55),
@@ -155,6 +170,17 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_M16,
 		"bloom_mult": 1.0,
 	},
+	"bizon": {
+		"name": "PP-19 Bizon",
+		"mag_size": 64,
+		"rpm": 700.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_PPBizon.ogg"],
+		"fire_hold": 0.18,
+		"fire_fade": 0.26,
+		"recoil_pattern": RECOIL_PATTERN_BIZON,
+		"bloom_mult": 1.4,
+	},
 	"mp5sd": {
 		"name": "MP5SD",
 		"mag_size": 30,
@@ -202,7 +228,7 @@ const PROFILES := {
 		"projectile_velocity": 75.0,
 	},
 }
-const WEAPON_ORDER := ["akm", "m16a2", "mp5sd", "m249", "m60", "mgl"]
+const WEAPON_ORDER := ["akm", "m16a2", "bizon", "mp5sd", "m249", "m60", "mgl"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 
 @export var camera_path: NodePath
