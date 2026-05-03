@@ -26,9 +26,14 @@ var _normals: PackedVector3Array = PackedVector3Array()
 var _array_mesh: ArrayMesh = null
 # Coalesced rebuild flags. Brush calls just mark these — actual mesh
 # work happens in _process at most once per frame, and collision
-# rebuild waits until end_stroke() is called.
+# rebuild waits until end_stroke() is called. _dirty_min/_max bound
+# the touched vertex window so the rebuild only walks the affected
+# slice, not the whole 16k-vert grid.
 var _mesh_dirty: bool = false
 var _collision_dirty: bool = false
+var _dirty_min: Vector2i = Vector2i.ZERO
+var _dirty_max: Vector2i = Vector2i.ZERO
+var _has_dirty_rect: bool = false
 
 func _ready() -> void:
 	heights.resize(GRID_W * GRID_H)
@@ -95,9 +100,11 @@ func _idx(x: int, y: int) -> int:
 func _in_bounds(x: int, y: int) -> bool:
 	return x >= 0 and x < GRID_W and y >= 0 and y < GRID_H
 
-# Walk every vertex inside `radius` of `center` (XZ distance), call
-# `op` with (idx, falloff[0..1]). op mutates heights directly.
-func _stamp(center: Vector3, radius: float, op: Callable) -> void:
+func raise_brush(center: Vector3, radius: float, strength: float, delta: float) -> void:
+	# Inlined window walk + smoothstep falloff. Lambda dispatch was a
+	# real per-vertex cost in GDScript, so brush ops write heights
+	# directly here.
+	var amount: float = strength * delta
 	var g := world_to_grid(center)
 	var rg: float = radius / VERT_SPACING
 	var x0: int = max(0, int(floor(g.x - rg)))
@@ -112,23 +119,33 @@ func _stamp(center: Vector3, radius: float, op: Callable) -> void:
 			if d > rg:
 				continue
 			var f: float = 1.0 - (d / rg)
-			f = f * f * (3.0 - 2.0 * f)  # smoothstep falloff
-			op.call(_idx(x, y), f)
-
-func raise_brush(center: Vector3, radius: float, strength: float, delta: float) -> void:
-	var amount: float = strength * delta
-	_stamp(center, radius, func(i, f): heights[i] += amount * f)
-	_mark_dirty()
+			f = f * f * (3.0 - 2.0 * f)
+			heights[x + y * GRID_W] += amount * f
+	_mark_region_dirty(x0, y0, x1, y1)
 
 func lower_brush(center: Vector3, radius: float, strength: float, delta: float) -> void:
 	raise_brush(center, radius, -strength, delta)
 
 func flatten_brush(center: Vector3, radius: float, target_h: float, strength: float, delta: float) -> void:
 	var rate: float = clampf(strength * delta, 0.0, 1.0)
-	_stamp(center, radius, func(i, f):
-		heights[i] = lerpf(heights[i], target_h, rate * f)
-	)
-	_mark_dirty()
+	var g := world_to_grid(center)
+	var rg: float = radius / VERT_SPACING
+	var x0: int = max(0, int(floor(g.x - rg)))
+	var x1: int = min(GRID_W - 1, int(ceil(g.x + rg)))
+	var y0: int = max(0, int(floor(g.y - rg)))
+	var y1: int = min(GRID_H - 1, int(ceil(g.y + rg)))
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			var dx: float = float(x) - g.x
+			var dy: float = float(y) - g.y
+			var d: float = sqrt(dx * dx + dy * dy)
+			if d > rg:
+				continue
+			var f: float = 1.0 - (d / rg)
+			f = f * f * (3.0 - 2.0 * f)
+			var i: int = x + y * GRID_W
+			heights[i] = lerpf(heights[i], target_h, rate * f)
+	_mark_region_dirty(x0, y0, x1, y1)
 
 func smooth_brush(center: Vector3, radius: float, strength: float, delta: float) -> void:
 	# Box-blur each touched vertex with its 8 neighbours.
@@ -155,7 +172,7 @@ func smooth_brush(center: Vector3, radius: float, strength: float, delta: float)
 					sum += src[_idx(x + ox, y + oy)]
 			var avg: float = sum / 9.0
 			heights[_idx(x, y)] = lerpf(heights[_idx(x, y)], avg, rate * f)
-	_mark_dirty()
+	_mark_region_dirty(x0, y0, x1, y1)
 
 # Two-point ramp: linearly slope between height(start) and height(end)
 # for vertices inside a corridor of `radius` around the line segment.
@@ -185,7 +202,7 @@ func ramp_stroke(start: Vector3, end: Vector3, radius: float) -> void:
 			f = f * f * (3.0 - 2.0 * f)
 			var target: float = lerpf(h_start, h_end, t)
 			heights[_idx(x, y)] = lerpf(heights[_idx(x, y)], target, f)
-	_mark_dirty()
+	_mark_region_dirty(sx, sy, ex, ey)
 
 # March a ray against the *live* heightmap (not the collider, which
 # only updates on stroke release). Returns the world-space hit point
@@ -248,27 +265,56 @@ func end_stroke() -> void:
 	_rebuild_collision_now()
 
 func _mark_dirty() -> void:
+	# Whole-grid dirty (used by rebuild() shim after a full restore).
+	_dirty_min = Vector2i.ZERO
+	_dirty_max = Vector2i(GRID_W - 1, GRID_H - 1)
+	_has_dirty_rect = true
+	_mesh_dirty = true
+	_collision_dirty = true
+
+func _mark_region_dirty(x0: int, y0: int, x1: int, y1: int) -> void:
+	if not _has_dirty_rect:
+		_dirty_min = Vector2i(x0, y0)
+		_dirty_max = Vector2i(x1, y1)
+		_has_dirty_rect = true
+	else:
+		_dirty_min.x = min(_dirty_min.x, x0)
+		_dirty_min.y = min(_dirty_min.y, y0)
+		_dirty_max.x = max(_dirty_max.x, x1)
+		_dirty_max.y = max(_dirty_max.y, y1)
 	_mesh_dirty = true
 	_collision_dirty = true
 
 func _rebuild_mesh_now() -> void:
-	# Update vertex positions in-place from heights.
-	for y in range(GRID_H):
-		for x in range(GRID_W):
-			_vertices[_idx(x, y)] = Vector3(
+	# Walk only the touched window. Normals need a 1-vert padding ring
+	# because they sample cardinal neighbours.
+	var x0: int = 0
+	var y0: int = 0
+	var x1: int = GRID_W - 1
+	var y1: int = GRID_H - 1
+	if _has_dirty_rect:
+		x0 = max(0, _dirty_min.x)
+		y0 = max(0, _dirty_min.y)
+		x1 = min(GRID_W - 1, _dirty_max.x)
+		y1 = min(GRID_H - 1, _dirty_max.y)
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			_vertices[x + y * GRID_W] = Vector3(
 				ORIGIN_OFFSET.x + x * VERT_SPACING,
-				heights[_idx(x, y)],
+				heights[x + y * GRID_W],
 				ORIGIN_OFFSET.z + y * VERT_SPACING,
 			)
-	# Per-vertex normals from cardinal-neighbour height differences.
-	# Cheap and good enough for an editor preview.
-	for y in range(GRID_H):
-		for x in range(GRID_W):
-			var hl: float = heights[_idx(max(0, x - 1), y)]
-			var hr: float = heights[_idx(min(GRID_W - 1, x + 1), y)]
-			var hd: float = heights[_idx(x, max(0, y - 1))]
-			var hu: float = heights[_idx(x, min(GRID_H - 1, y + 1))]
-			_normals[_idx(x, y)] = Vector3(hl - hr, 2.0 * VERT_SPACING, hd - hu).normalized()
+	var nx0: int = max(0, x0 - 1)
+	var ny0: int = max(0, y0 - 1)
+	var nx1: int = min(GRID_W - 1, x1 + 1)
+	var ny1: int = min(GRID_H - 1, y1 + 1)
+	for y in range(ny0, ny1 + 1):
+		for x in range(nx0, nx1 + 1):
+			var hl: float = heights[max(0, x - 1) + y * GRID_W]
+			var hr: float = heights[min(GRID_W - 1, x + 1) + y * GRID_W]
+			var hd: float = heights[x + max(0, y - 1) * GRID_W]
+			var hu: float = heights[x + min(GRID_H - 1, y + 1) * GRID_W]
+			_normals[x + y * GRID_W] = Vector3(hl - hr, 2.0 * VERT_SPACING, hd - hu).normalized()
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = _vertices
@@ -278,6 +324,7 @@ func _rebuild_mesh_now() -> void:
 	_array_mesh.clear_surfaces()
 	_array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	_array_mesh.surface_set_material(0, _material)
+	_has_dirty_rect = false
 
 func _rebuild_collision_now() -> void:
 	var shape := ConcavePolygonShape3D.new()
