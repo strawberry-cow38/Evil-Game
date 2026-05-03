@@ -712,6 +712,8 @@ func _build_split_overlay() -> void:
 	_split_spin.step = 1
 	_split_spin.custom_minimum_size = Vector2(110, 0)
 	_split_spin.value_changed.connect(_on_split_spin_changed)
+	# Reject non-digit input so users can't type "abc" into the count.
+	_split_spin.get_line_edit().text_changed.connect(_on_split_text_changed)
 	sl_row.add_child(_split_spin)
 
 	var btns := HBoxContainer.new()
@@ -769,6 +771,20 @@ func _on_split_spin_changed(v: float) -> void:
 	_split_syncing = true
 	_split_slider.value = v
 	_split_syncing = false
+
+func _on_split_text_changed(new_text: String) -> void:
+	# SpinBox's LineEdit accepts arbitrary characters; strip anything that's
+	# not a digit and rewrite in place so the field can only ever hold a count.
+	var filtered := ""
+	for c in new_text:
+		if c >= "0" and c <= "9":
+			filtered += c
+	if filtered == new_text:
+		return
+	var le: LineEdit = _split_spin.get_line_edit()
+	var caret: int = le.caret_column
+	le.text = filtered
+	le.caret_column = mini(caret, filtered.length())
 
 func _confirm_split() -> void:
 	if not _is_split_open():
