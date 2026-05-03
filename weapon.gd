@@ -287,6 +287,12 @@ const PROFILES := {
 		"ammo_ids": ["ammo_12ga", "ammo_12ga_slug"],
 		"per_round_reload": true,
 		"reload_time_per_round": 0.85,
+		"shell_impact_path": "res://assets/audio/shellimpact.wav",
+		"shell_impact_delay_min": 0.55,
+		"shell_impact_delay_max": 0.95,
+		"shell_impact_pitch_min": 0.90,
+		"shell_impact_pitch_max": 1.12,
+		"shell_impact_vol_db": -8.0,
 	},
 	"mgl": {
 		"name": "MGL",
@@ -358,6 +364,12 @@ var _impact_idx := 0
 var _casing_stream: AudioStream
 var _casing_voices: Array[AudioStreamPlayer3D] = []
 var _casing_idx := 0
+# Per-weapon "spent shell hits the floor" stream (currently only the XM1014).
+# Keyed by weapon profile key; null entries mean no impact sound.
+var _shell_impact_streams: Dictionary = {}
+var _shell_impact_voices: Array[AudioStreamPlayer3D] = []
+var _shell_impact_idx := 0
+const SHELL_IMPACT_VOICES := 3
 var _reload_player: AudioStreamPlayer3D
 var _reload_stream: AudioStream
 
@@ -495,6 +507,19 @@ func _setup_audio() -> void:
 		cp.max_distance = 18.0
 		add_child(cp)
 		_casing_voices.append(cp)
+	# Spent-shell impact streams (only weapons with shell_impact_path in profile).
+	for key in WEAPON_ORDER:
+		var sip: String = String(PROFILES[key].get("shell_impact_path", ""))
+		if sip != "":
+			_shell_impact_streams[key] = _load_wav(sip)
+	# Voice pool lives on the player (gun) so the clatter follows them.
+	for i in range(SHELL_IMPACT_VOICES):
+		var sp := AudioStreamPlayer3D.new()
+		sp.bus = "Master"
+		sp.unit_size = 4.0
+		sp.max_distance = 22.0
+		add_child(sp)
+		_shell_impact_voices.append(sp)
 	# Reload sound — single voice on the weapon, plays start of reload.
 	_reload_stream = _load_wav(RELOAD_SOUND_PATH)
 	_reload_player = AudioStreamPlayer3D.new()
@@ -509,6 +534,9 @@ func _load_wav(res_path: String) -> AudioStream:
 	var abs_path: String = ProjectSettings.globalize_path(res_path)
 	if not FileAccess.file_exists(abs_path):
 		return null
+	var ext: String = res_path.get_extension().to_lower()
+	if ext == "wav":
+		return AudioStreamWAV.load_from_file(abs_path)
 	return AudioStreamOggVorbis.load_from_file(abs_path)
 
 # --- Multi-ammo support ---------------------------------------------------
@@ -599,6 +627,34 @@ func _load_one_round() -> void:
 	_inventory.remove(ammo_id, 1)
 	_ammo += 1
 	_reload_amount -= 1
+
+# Spent shotgun shell hitting the floor — fires after a randomized delay so it
+# lands cleanly in the post-shot quiet, with pitch + delay variation per shot.
+func _schedule_shell_impact() -> void:
+	var stream: AudioStream = _shell_impact_streams.get(_current_weapon, null)
+	if stream == null or _shell_impact_voices.is_empty():
+		return
+	var delay: float = _rng.randf_range(
+		float(_profile.get("shell_impact_delay_min", 0.5)),
+		float(_profile.get("shell_impact_delay_max", 0.9)),
+	)
+	var pitch: float = _rng.randf_range(
+		float(_profile.get("shell_impact_pitch_min", 0.92)),
+		float(_profile.get("shell_impact_pitch_max", 1.10)),
+	)
+	var vol: float = float(_profile.get("shell_impact_vol_db", -10.0))
+	var idx: int = _shell_impact_idx
+	_shell_impact_idx = (_shell_impact_idx + 1) % _shell_impact_voices.size()
+	var voice: AudioStreamPlayer3D = _shell_impact_voices[idx]
+	var timer := get_tree().create_timer(delay)
+	timer.timeout.connect(func():
+		if not is_instance_valid(voice):
+			return
+		voice.stream = stream
+		voice.pitch_scale = pitch
+		voice.volume_db = vol
+		voice.play()
+	)
 
 func _schedule_casing() -> void:
 	if _casing_stream == null or _casing_voices.is_empty():
@@ -830,6 +886,9 @@ func _fire(now: float) -> void:
 
 	_play_fire_sound()
 	# Casing clink disabled — too harsh when stacked under full-auto fire.
+	# Shotgun-style spent-shell impact (per-profile, currently XM1014 only).
+	if _shell_impact_streams.get(_current_weapon, null) != null:
+		_schedule_shell_impact()
 
 	# Sim trajectory from camera origin in camera-forward direction.
 	var origin: Vector3 = _camera.global_transform.origin
