@@ -36,6 +36,7 @@ const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to 
 @onready var _radius_widget: Control = $UI/RadiusWidget
 @onready var _fps_label: Label = $UI/FpsLabel
 @onready var _effects_panel: PanelContainer = $UI/EffectsPanel
+@onready var _space_toggle: PanelContainer = $UI/SpaceToggle
 
 var _active_tool: String = TOOL_NONE
 var _brush_radius: float = 4.0
@@ -64,6 +65,15 @@ var _drag_axis: Vector3 = Vector3.ZERO
 var _drag_normal: Vector3 = Vector3.ZERO
 var _drag_offset: Vector3 = Vector3.ZERO
 var _drag_anchor: Vector3 = Vector3.ZERO  # gizmo origin at drag start
+# Rotate/scale extras: snapshot of target state at drag start so motion
+# is computed delta-from-start (no drift from accumulating tiny deltas).
+var _drag_start_basis: Basis = Basis()
+var _drag_start_scale: Vector3 = Vector3.ONE
+var _drag_start_angle: float = 0.0
+var _drag_start_dist: float = 1.0
+var _drag_axis_u: Vector3 = Vector3.ZERO  # ring plane basis u
+var _drag_axis_v: Vector3 = Vector3.ZERO  # ring plane basis v
+var _drag_scale_index: int = 0            # 0=x, 1=y, 2=z (local scale)
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -83,6 +93,7 @@ func _ready() -> void:
 	_sub_bar.tool_picked.connect(_on_tool_picked)
 	_effects_panel.effect_picked.connect(_on_effect_picked)
 	_effects_panel.visible = false
+	_space_toggle.space_changed.connect(_on_space_changed)
 	_radius_widget.radius_changed.connect(_on_radius_changed)
 	_radius_widget.strength_changed.connect(_on_strength_changed)
 	_radius_widget.set_radius(_brush_radius)
@@ -123,6 +134,15 @@ func _input(event: InputEvent) -> void:
 		if _selected_effect != null and not _camera.is_looking():
 			_gizmo.set_target(_selected_effect)
 			_gizmo.cycle_translate()
+	# W → rotate gizmo. R → scale gizmo.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_W:
+		if _selected_effect != null and not _camera.is_looking():
+			_gizmo.set_target(_selected_effect)
+			_gizmo.set_mode(_gizmo.MODE_ROTATE)
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
+		if _selected_effect != null and not _camera.is_looking():
+			_gizmo.set_target(_selected_effect)
+			_gizmo.set_mode(_gizmo.MODE_SCALE)
 	# Delete → remove selected effect.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_DELETE:
 		if _selected_effect != null and not _camera.is_looking():
@@ -294,7 +314,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _space_toggle]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -322,6 +342,10 @@ func _on_tool_picked(tool_id: String) -> void:
 
 func _on_effect_picked(id: String) -> void:
 	_armed_effect_id = id
+
+func _on_space_changed(use_local: bool) -> void:
+	if _gizmo != null:
+		_gizmo.set_use_local(use_local)
 
 func _on_radius_changed(r: float) -> void:
 	_brush_radius = r
@@ -465,7 +489,42 @@ func _try_start_gizmo_drag() -> bool:
 	# Resolve the constraint (axis or plane) and capture the grab offset
 	# in world space so the cursor anchor doesn't snap on first motion.
 	_drag_anchor = _selected_effect.global_position
-	if handle.begins_with("p"):
+	if handle.begins_with("r"):
+		# Rotate ring drag — capture start basis + initial cursor angle on
+		# the ring plane. Motion computes delta angle and applies
+		# Basis(axis, delta) * start_basis (deltas-from-start avoid drift).
+		_drag_axis = pick.get("axis", Vector3.UP).normalized()
+		_drag_start_basis = _selected_effect.global_transform.basis
+		var u: Vector3 = _drag_axis.cross(Vector3.UP)
+		if u.length() < 0.001:
+			u = _drag_axis.cross(Vector3.RIGHT)
+		u = u.normalized()
+		var v: Vector3 = _drag_axis.cross(u).normalized()
+		_drag_axis_u = u
+		_drag_axis_v = v
+		var hit_r: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_axis)
+		if hit_r.is_empty():
+			_drag_handle = ""
+			return false
+		var local_r: Vector3 = hit_r.point - _drag_anchor
+		_drag_start_angle = atan2(local_r.dot(v), local_r.dot(u))
+	elif handle.begins_with("s"):
+		# Scale axis drag — capture start scale + signed projection along
+		# the axis. Motion ratio (current / start) drives the scale axis.
+		_drag_axis = pick.get("axis", Vector3.RIGHT).normalized()
+		_drag_start_scale = _selected_effect.scale
+		_drag_scale_index = 0
+		if handle == "sy":
+			_drag_scale_index = 1
+		elif handle == "sz":
+			_drag_scale_index = 2
+		var ap_s: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
+		var dist_s: float = (ap_s - _drag_anchor).dot(_drag_axis)
+		# Guard against starting too close to origin (would divide by ~0).
+		if absf(dist_s) < 0.05:
+			dist_s = 0.05 if dist_s >= 0.0 else -0.05
+		_drag_start_dist = dist_s
+	elif handle.begins_with("p"):
 		_drag_normal = pick.get("normal", Vector3.UP)
 		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
 		if hit_p.is_empty():
@@ -485,7 +544,29 @@ func _continue_gizmo_drag() -> void:
 	var mouse := get_viewport().get_mouse_position()
 	var from := _camera.project_ray_origin(mouse)
 	var dir := _camera.project_ray_normal(mouse)
-	if _drag_handle.begins_with("p"):
+	if _drag_handle.begins_with("r"):
+		var hit_r: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_axis)
+		if hit_r.is_empty():
+			return
+		var local_r: Vector3 = hit_r.point - _drag_anchor
+		var ang: float = atan2(local_r.dot(_drag_axis_v), local_r.dot(_drag_axis_u))
+		var delta: float = ang - _drag_start_angle
+		var new_basis: Basis = Basis(_drag_axis, delta) * _drag_start_basis
+		var t: Transform3D = _selected_effect.global_transform
+		t.basis = new_basis
+		_selected_effect.global_transform = t
+	elif _drag_handle.begins_with("s"):
+		var ap_s: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
+		var dist_s: float = (ap_s - _drag_anchor).dot(_drag_axis)
+		var ratio: float = dist_s / _drag_start_dist
+		# Clamp absurdly tiny/negative ratios so the box doesn't collapse
+		# or invert (negative scale silently flips winding everywhere).
+		if ratio < 0.05:
+			ratio = 0.05
+		var new_scale: Vector3 = _drag_start_scale
+		new_scale[_drag_scale_index] = _drag_start_scale[_drag_scale_index] * ratio
+		_selected_effect.scale = new_scale
+	elif _drag_handle.begins_with("p"):
 		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
 		if hit_p.is_empty():
 			return

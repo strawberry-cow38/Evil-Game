@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3 uid="uid://b8fpsbase00020"]
+[gd_scene load_steps=12 format=3 uid="uid://b8fpsbase00020"]
 
 [ext_resource type="Script" path="res://editor.gd" id="1_root"]
 [ext_resource type="Script" path="res://editor_camera.gd" id="2_cam"]
@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://editor_sub_bar.gd" id="6_sub"]
 [ext_resource type="Script" path="res://editor_radius_widget.gd" id="7_radius"]
 [ext_resource type="Script" path="res://editor_effects_panel.gd" id="8_fxpanel"]
+[ext_resource type="Script" path="res://editor_space_toggle.gd" id="9_space"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_E1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -95,6 +96,17 @@ theme_override_colors/font_color = Color(1, 1, 1, 0.9)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 4
 text = "FPS: 0"
+
+[node name="SpaceToggle" type="PanelContainer" parent="UI"]
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -170.0
+offset_right = 160.0
+offset_bottom = -140.0
+script = ExtResource("9_space")
 
 [node name="HelpLabel" type="Label" parent="UI"]
 anchor_left = 1.0

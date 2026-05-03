@@ -16,6 +16,19 @@ const MODE_TRANSLATE_6 := 2
 const MODE_ROTATE := 3
 const MODE_SCALE := 4
 
+const HANDLE_ROT_X := "rx"
+const HANDLE_ROT_Y := "ry"
+const HANDLE_ROT_Z := "rz"
+const HANDLE_SCALE_X := "sx"
+const HANDLE_SCALE_Y := "sy"
+const HANDLE_SCALE_Z := "sz"
+
+const RING_RADIUS := 1.6
+const RING_THICKNESS := 0.18
+const RING_SEGMENTS := 48
+const SCALE_LEN := 1.4
+const SCALE_BOX := 0.18
+
 const HANDLE_NONE := ""
 const HANDLE_X := "x"
 const HANDLE_Y := "y"
@@ -108,6 +121,14 @@ func _rebuild() -> void:
 		_axis_arrow(im, Vector3.DOWN, COLOR_Y, HANDLE_NEG_Y)
 		_axis_arrow(im, Vector3.BACK, COLOR_Z, HANDLE_Z)
 		_axis_arrow(im, Vector3.FORWARD, COLOR_Z, HANDLE_NEG_Z)
+	elif mode == MODE_ROTATE:
+		_ring(im, Vector3.RIGHT, Vector3.UP, Vector3.BACK, COLOR_X, HANDLE_ROT_X)
+		_ring(im, Vector3.UP, Vector3.RIGHT, Vector3.BACK, COLOR_Y, HANDLE_ROT_Y)
+		_ring(im, Vector3.BACK, Vector3.RIGHT, Vector3.UP, COLOR_Z, HANDLE_ROT_Z)
+	elif mode == MODE_SCALE:
+		_scale_handle(im, Vector3.RIGHT, COLOR_X, HANDLE_SCALE_X)
+		_scale_handle(im, Vector3.UP, COLOR_Y, HANDLE_SCALE_Y)
+		_scale_handle(im, Vector3.BACK, COLOR_Z, HANDLE_SCALE_Z)
 	_mesh.mesh = im
 
 func _axis_arrow(im: ImmediateMesh, dir: Vector3, color: Color, handle_id: String) -> void:
@@ -132,6 +153,49 @@ func _axis_arrow(im: ImmediateMesh, dir: Vector3, color: Color, handle_id: Strin
 		var p: Vector3 = base + (perp1 * cos(ang) + perp2 * sin(ang)) * (ARROW_HEAD * 0.55)
 		im.surface_add_vertex(tip)
 		im.surface_add_vertex(p)
+	im.surface_end()
+
+func _ring(im: ImmediateMesh, axis: Vector3, u: Vector3, v: Vector3, color: Color, handle_id: String) -> void:
+	# Circle in the plane spanned by (u, v), perpendicular to axis.
+	var c: Color = COLOR_HOVER if handle_id == hover_handle else color
+	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, _mat)
+	im.surface_set_color(c)
+	for k in range(RING_SEGMENTS + 1):
+		var ang: float = (float(k) / float(RING_SEGMENTS)) * TAU
+		var p: Vector3 = (u * cos(ang) + v * sin(ang)) * RING_RADIUS
+		im.surface_add_vertex(p)
+	im.surface_end()
+
+func _scale_handle(im: ImmediateMesh, dir: Vector3, color: Color, handle_id: String) -> void:
+	var c: Color = COLOR_HOVER if handle_id == hover_handle else color
+	var tip: Vector3 = dir * SCALE_LEN
+	im.surface_begin(Mesh.PRIMITIVE_LINES, _mat)
+	im.surface_set_color(c)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_add_vertex(tip)
+	im.surface_end()
+	# Cube endcap — 12 line segments.
+	var perp1: Vector3 = dir.cross(Vector3.UP)
+	if perp1.length() < 0.001:
+		perp1 = dir.cross(Vector3.RIGHT)
+	perp1 = perp1.normalized()
+	var perp2: Vector3 = dir.cross(perp1).normalized()
+	var hb: float = SCALE_BOX * 0.5
+	var corners: Array = []
+	for sx in [-1, 1]:
+		for sy in [-1, 1]:
+			for sz in [-1, 1]:
+				corners.append(tip + dir * (hb * sz) + perp1 * (hb * sx) + perp2 * (hb * sy))
+	var edges: Array = [
+		[0,1],[2,3],[4,5],[6,7],
+		[0,2],[1,3],[4,6],[5,7],
+		[0,4],[1,5],[2,6],[3,7],
+	]
+	im.surface_begin(Mesh.PRIMITIVE_LINES, _mat)
+	im.surface_set_color(c)
+	for e in edges:
+		im.surface_add_vertex(corners[e[0]])
+		im.surface_add_vertex(corners[e[1]])
 	im.surface_end()
 
 func _plane_quad(im: ImmediateMesh, a: Vector3, b: Vector3, color: Color, handle_id: String) -> void:
@@ -179,6 +243,12 @@ func pick_handle(from: Vector3, dir: Vector3) -> Dictionary:
 			[HANDLE_Z,     b.z,  ARROW_LEN],
 			[HANDLE_NEG_Z, -b.z, ARROW_LEN],
 		]
+	elif mode == MODE_SCALE:
+		axis_specs = [
+			[HANDLE_SCALE_X, b.x, SCALE_LEN],
+			[HANDLE_SCALE_Y, b.y, SCALE_LEN],
+			[HANDLE_SCALE_Z, b.z, SCALE_LEN],
+		]
 	for spec in axis_specs:
 		var name: String = spec[0]
 		var ax: Vector3 = spec[1].normalized()
@@ -213,6 +283,25 @@ func pick_handle(from: Vector3, dir: Vector3) -> Dictionary:
 					best_t = hit.t
 					best_handle = name2
 					best_normal = n
+	# Rotate rings — pick the closest ring whose hit lies within ring thickness.
+	if mode == MODE_ROTATE:
+		var rings: Array = [
+			[HANDLE_ROT_X, b.x],
+			[HANDLE_ROT_Y, b.y],
+			[HANDLE_ROT_Z, b.z],
+		]
+		for r in rings:
+			var rname: String = r[0]
+			var n: Vector3 = r[1].normalized()
+			var hit: Dictionary = _ray_plane_hit(from, dir, origin, n)
+			if hit.is_empty():
+				continue
+			var local: Vector3 = hit.point - origin
+			var d: float = absf(local.length() - RING_RADIUS)
+			if d <= RING_THICKNESS and hit.t < best_t:
+				best_t = hit.t
+				best_handle = rname
+				best_axis = n
 	if best_handle == HANDLE_NONE:
 		return {"handle": HANDLE_NONE}
 	return {
