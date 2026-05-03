@@ -112,7 +112,8 @@ func _explode(world_pos: Vector3, normal: Vector3) -> void:
 	light.omni_range = EXPLOSION_LIGHT_RANGE
 	scene.add_child(light)
 	light.global_position = world_pos + normal.normalized() * 0.2
-	var lt := create_tween()
+	# Tween lives on the light, not on self — self queue_frees at end of _explode.
+	var lt := light.create_tween()
 	lt.tween_property(light, "light_energy", 0.0, EXPLOSION_LIGHT_FADE)
 	lt.tween_callback(light.queue_free)
 
