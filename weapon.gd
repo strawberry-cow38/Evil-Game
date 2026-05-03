@@ -167,7 +167,7 @@ const PROFILES := {
 		"mag_size": 6,
 		"rpm": 180.0,
 		"modes": [FireMode.SEMI],
-		"fire_sounds": [],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK40mmGL.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_MGL,
