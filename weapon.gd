@@ -42,6 +42,7 @@ const MOVE_SPEED_THRESHOLD := 0.5  # m/s of horizontal velocity to count as "mov
 const WEAPON_NAME := "AK-style Rifle"
 const MAG_SIZE := 30
 const BURST_COUNT := 3
+const RELOAD_TIME := 2.0
 enum FireMode { SEMI, BURST, AUTO }
 
 @export var camera_path: NodePath
@@ -60,6 +61,8 @@ var _applied_pitch := 0.0
 var _ammo := MAG_SIZE
 var _fire_mode: FireMode = FireMode.AUTO
 var _burst_remaining := 0
+var _reloading := false
+var _reload_remaining := 0.0
 
 func _ready() -> void:
 	_rng.randomize()
@@ -87,6 +90,14 @@ func get_fire_mode_name() -> String:
 		FireMode.AUTO: return "AUTO"
 	return "?"
 
+func is_reloading() -> bool:
+	return _reloading
+
+func get_reload_progress() -> float:
+	if not _reloading or RELOAD_TIME <= 0.0:
+		return 0.0
+	return clampf(1.0 - _reload_remaining / RELOAD_TIME, 0.0, 1.0)
+
 func get_current_bloom_deg() -> float:
 	if _player == null:
 		return 0.0
@@ -107,25 +118,34 @@ func get_current_bloom_deg() -> float:
 func _process(delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 
-	if Input.is_action_just_pressed("cycle_fire_mode"):
+	if Input.is_action_just_pressed("cycle_fire_mode") and not _reloading:
 		_fire_mode = ((_fire_mode + 1) % FireMode.size()) as FireMode
 		_burst_remaining = 0
 
-	if Input.is_action_just_pressed("reload") and _ammo < MAG_SIZE:
-		_ammo = MAG_SIZE
+	if Input.is_action_just_pressed("reload") and not _reloading and _ammo < MAG_SIZE:
+		_reloading = true
+		_reload_remaining = RELOAD_TIME
 		_burst_remaining = 0
+
+	if _reloading:
+		_reload_remaining -= delta
+		if _reload_remaining <= 0.0:
+			_reload_remaining = 0.0
+			_reloading = false
+			_ammo = MAG_SIZE
 
 	# Decide whether to fire this frame based on mode.
 	var want_fire := false
-	match _fire_mode:
-		FireMode.SEMI:
-			want_fire = Input.is_action_just_pressed("fire")
-		FireMode.AUTO:
-			want_fire = Input.is_action_pressed("fire")
-		FireMode.BURST:
-			if Input.is_action_just_pressed("fire") and _burst_remaining == 0:
-				_burst_remaining = BURST_COUNT
-			want_fire = _burst_remaining > 0
+	if not _reloading:
+		match _fire_mode:
+			FireMode.SEMI:
+				want_fire = Input.is_action_just_pressed("fire")
+			FireMode.AUTO:
+				want_fire = Input.is_action_pressed("fire")
+			FireMode.BURST:
+				if Input.is_action_just_pressed("fire") and _burst_remaining == 0:
+					_burst_remaining = BURST_COUNT
+				want_fire = _burst_remaining > 0
 
 	if want_fire and _ammo > 0 and now - _last_fire_time >= FIRE_INTERVAL:
 		_fire(now)
