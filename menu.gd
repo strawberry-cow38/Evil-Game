@@ -398,8 +398,16 @@ func _refresh_list() -> void:
 	entries.sort_custom(_compare_entries)
 
 	# Try to keep the current selection across refresh by matching uid first
-	# (instances are unique) then id (stackables).
+	# (instances are unique) then id (stackables). If the prior selection is
+	# gone (drop, full stack consumed), fall back to the row that was *below*
+	# it — same index in the new list, clamped — so the user's scroll position
+	# stays put. If they were on the last row, that clamp puts them on the
+	# new last row, which is the row that was previously above.
 	var prev: Dictionary = _selected_row()
+	var prev_idx: int = -1
+	var sel: PackedInt32Array = _list.get_selected_items()
+	if sel.size() > 0:
+		prev_idx = sel[0]
 	_list.clear()
 	_rows.clear()
 	var new_select := -1
@@ -424,8 +432,9 @@ func _refresh_list() -> void:
 					new_select = i
 	if _list.item_count > 0:
 		if new_select < 0:
-			new_select = 0
+			new_select = clampi(prev_idx, 0, _list.item_count - 1) if prev_idx >= 0 else 0
 		_list.select(new_select)
+		_list.ensure_current_is_visible()
 
 func _row_label(e: Dictionary, equipped_uid: int) -> String:
 	if bool(e.is_instance):
