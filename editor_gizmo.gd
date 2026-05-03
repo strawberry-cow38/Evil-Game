@@ -15,6 +15,7 @@ const MODE_TRANSLATE_AXES := 1
 const MODE_TRANSLATE_6 := 2
 const MODE_ROTATE := 3
 const MODE_SCALE := 4
+const MODE_SCALE_6 := 5  # 2nd-tier scale: handle on each side of every axis
 
 const HANDLE_ROT_X := "rx"
 const HANDLE_ROT_Y := "ry"
@@ -22,6 +23,9 @@ const HANDLE_ROT_Z := "rz"
 const HANDLE_SCALE_X := "sx"
 const HANDLE_SCALE_Y := "sy"
 const HANDLE_SCALE_Z := "sz"
+const HANDLE_NSCALE_X := "-sx"
+const HANDLE_NSCALE_Y := "-sy"
+const HANDLE_NSCALE_Z := "-sz"
 
 const RING_RADIUS := 1.6
 const RING_THICKNESS := 0.18
@@ -90,6 +94,13 @@ func cycle_translate() -> void:
 	else:
 		set_mode(MODE_TRANSLATE_AXES)
 
+func cycle_scale() -> void:
+	# Off / non-scale → 3-axis scale; 3-axis ↔ 6-handle (per-direction) toggle.
+	if mode == MODE_SCALE:
+		set_mode(MODE_SCALE_6)
+	else:
+		set_mode(MODE_SCALE)
+
 func set_use_local(v: bool) -> void:
 	use_local = v
 
@@ -133,6 +144,13 @@ func _rebuild() -> void:
 		_scale_handle(im, Vector3.RIGHT, COLOR_X, HANDLE_SCALE_X)
 		_scale_handle(im, Vector3.UP, COLOR_Y, HANDLE_SCALE_Y)
 		_scale_handle(im, Vector3.BACK, COLOR_Z, HANDLE_SCALE_Z)
+	elif mode == MODE_SCALE_6:
+		_scale_handle(im, Vector3.RIGHT, COLOR_X, HANDLE_SCALE_X)
+		_scale_handle(im, Vector3.LEFT, COLOR_X, HANDLE_NSCALE_X)
+		_scale_handle(im, Vector3.UP, COLOR_Y, HANDLE_SCALE_Y)
+		_scale_handle(im, Vector3.DOWN, COLOR_Y, HANDLE_NSCALE_Y)
+		_scale_handle(im, Vector3.BACK, COLOR_Z, HANDLE_SCALE_Z)
+		_scale_handle(im, Vector3.FORWARD, COLOR_Z, HANDLE_NSCALE_Z)
 	_mesh.mesh = im
 
 func _axis_arrow(im: ImmediateMesh, dir: Vector3, color: Color, handle_id: String) -> void:
@@ -234,26 +252,41 @@ func pick_handle(from: Vector3, dir: Vector3) -> Dictionary:
 	var best_axis: Vector3 = Vector3.ZERO
 	var best_normal: Vector3 = Vector3.ZERO
 	var axis_specs: Array = []
+	# Pick-segment lengths extend past the visual tip so the cube/arrowhead
+	# at the end is part of the clickable region. ARROW_HEAD * 0.5 covers
+	# half the cone in front of the segment endpoint, SCALE_BOX * 0.5
+	# covers the cube that straddles the scale tip.
+	var tx: float = ARROW_LEN + ARROW_HEAD * 0.5
+	var sx: float = SCALE_LEN + SCALE_BOX * 0.5
 	if mode == MODE_TRANSLATE_AXES:
 		axis_specs = [
-			[HANDLE_X, b.x, ARROW_LEN],
-			[HANDLE_Y, b.y, ARROW_LEN],
-			[HANDLE_Z, b.z, ARROW_LEN],
+			[HANDLE_X, b.x, tx],
+			[HANDLE_Y, b.y, tx],
+			[HANDLE_Z, b.z, tx],
 		]
 	elif mode == MODE_TRANSLATE_6:
 		axis_specs = [
-			[HANDLE_X,     b.x,  ARROW_LEN],
-			[HANDLE_NEG_X, -b.x, ARROW_LEN],
-			[HANDLE_Y,     b.y,  ARROW_LEN],
-			[HANDLE_NEG_Y, -b.y, ARROW_LEN],
-			[HANDLE_Z,     b.z,  ARROW_LEN],
-			[HANDLE_NEG_Z, -b.z, ARROW_LEN],
+			[HANDLE_X,     b.x,  tx],
+			[HANDLE_NEG_X, -b.x, tx],
+			[HANDLE_Y,     b.y,  tx],
+			[HANDLE_NEG_Y, -b.y, tx],
+			[HANDLE_Z,     b.z,  tx],
+			[HANDLE_NEG_Z, -b.z, tx],
 		]
 	elif mode == MODE_SCALE:
 		axis_specs = [
-			[HANDLE_SCALE_X, b.x, SCALE_LEN],
-			[HANDLE_SCALE_Y, b.y, SCALE_LEN],
-			[HANDLE_SCALE_Z, b.z, SCALE_LEN],
+			[HANDLE_SCALE_X, b.x, sx],
+			[HANDLE_SCALE_Y, b.y, sx],
+			[HANDLE_SCALE_Z, b.z, sx],
+		]
+	elif mode == MODE_SCALE_6:
+		axis_specs = [
+			[HANDLE_SCALE_X,  b.x,  sx],
+			[HANDLE_NSCALE_X, -b.x, sx],
+			[HANDLE_SCALE_Y,  b.y,  sx],
+			[HANDLE_NSCALE_Y, -b.y, sx],
+			[HANDLE_SCALE_Z,  b.z,  sx],
+			[HANDLE_NSCALE_Z, -b.z, sx],
 		]
 	for spec in axis_specs:
 		var name: String = spec[0]

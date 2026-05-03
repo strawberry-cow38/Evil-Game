@@ -155,7 +155,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
 		if _selected_prop != null and not _camera.is_looking():
 			_gizmo.set_target(_selected_prop)
-			_gizmo.set_mode(_gizmo.MODE_SCALE)
+			_gizmo.cycle_scale()
 	# Delete → remove selected effect.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_DELETE:
 		if _selected_prop != null and not _camera.is_looking():
@@ -538,19 +538,17 @@ func _try_start_gizmo_drag() -> bool:
 			return false
 		var local_r: Vector3 = hit_r.point - _drag_anchor
 		_drag_start_angle = atan2(local_r.dot(v), local_r.dot(u))
-	elif handle.begins_with("s"):
+	elif handle in ["sx", "sy", "sz", "-sx", "-sy", "-sz"]:
 		# Scale axis drag — capture start scale + signed projection along
 		# the axis. Motion ratio (current / start) drives the scale axis.
+		# Negative-side handle uses the same scale index; the captured axis
+		# vector points toward the handle, so dragging outward (away from
+		# origin in either +X or -X) yields a positive ratio either way.
 		_drag_axis = pick.get("axis", Vector3.RIGHT).normalized()
 		_drag_start_scale = _selected_prop.scale
-		_drag_scale_index = 0
-		if handle == "sy":
-			_drag_scale_index = 1
-		elif handle == "sz":
-			_drag_scale_index = 2
+		_drag_scale_index = "xyz".find(handle.right(1))
 		var ap_s: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
 		var dist_s: float = (ap_s - _drag_anchor).dot(_drag_axis)
-		# Guard against starting too close to origin (would divide by ~0).
 		if absf(dist_s) < 0.05:
 			dist_s = 0.05 if dist_s >= 0.0 else -0.05
 		_drag_start_dist = dist_s
@@ -585,7 +583,7 @@ func _continue_gizmo_drag() -> void:
 		var t: Transform3D = _selected_prop.global_transform
 		t.basis = new_basis
 		_selected_prop.global_transform = t
-	elif _drag_handle.begins_with("s"):
+	elif _drag_handle in ["sx", "sy", "sz", "-sx", "-sy", "-sz"]:
 		var ap_s: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
 		var dist_s: float = (ap_s - _drag_anchor).dot(_drag_axis)
 		var ratio: float = dist_s / _drag_start_dist
