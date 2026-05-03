@@ -61,6 +61,8 @@ const CASING_VOL_DB := -24.0
 const CASING_PITCH_MIN := 0.92
 const CASING_PITCH_MAX := 1.10
 const CASING_VOICES := 6
+const RELOAD_SOUND_PATH := "res://assets/audio/reload.ogg"
+const RELOAD_VOL_DB := -10.0
 const IMPACT_VOL_DB := -6.0
 const IMPACT_PITCH_MIN := 0.92
 const IMPACT_PITCH_MAX := 1.08
@@ -95,6 +97,8 @@ var _impact_idx := 0
 var _casing_stream: AudioStream
 var _casing_voices: Array[AudioStreamPlayer3D] = []
 var _casing_idx := 0
+var _reload_player: AudioStreamPlayer3D
+var _reload_stream: AudioStream
 
 func _ready() -> void:
 	_rng.randomize()
@@ -145,12 +149,29 @@ func _setup_audio() -> void:
 		cp.max_distance = 18.0
 		add_child(cp)
 		_casing_voices.append(cp)
+	# Reload sound — single voice on the weapon, plays start of reload.
+	_reload_stream = _load_wav(RELOAD_SOUND_PATH)
+	_reload_player = AudioStreamPlayer3D.new()
+	_reload_player.stream = _reload_stream
+	_reload_player.bus = "Master"
+	_reload_player.volume_db = RELOAD_VOL_DB
+	_reload_player.unit_size = 6.0
+	_reload_player.max_distance = 25.0
+	add_child(_reload_player)
 
 func _load_wav(res_path: String) -> AudioStream:
 	var abs_path: String = ProjectSettings.globalize_path(res_path)
 	if not FileAccess.file_exists(abs_path):
 		return null
 	return AudioStreamOggVorbis.load_from_file(abs_path)
+
+func _start_reload() -> void:
+	_reloading = true
+	_reload_remaining = RELOAD_TIME
+	_burst_remaining = 0
+	if _reload_player != null and _reload_stream != null:
+		_reload_player.stop()
+		_reload_player.play()
 
 func _schedule_casing() -> void:
 	if _casing_stream == null or _casing_voices.is_empty():
@@ -240,9 +261,7 @@ func _process(delta: float) -> void:
 		_burst_remaining = 0
 
 	if Input.is_action_just_pressed("reload") and not _reloading and _ammo < MAG_SIZE:
-		_reloading = true
-		_reload_remaining = RELOAD_TIME
-		_burst_remaining = 0
+		_start_reload()
 
 	if _reloading:
 		_reload_remaining -= delta
@@ -271,9 +290,7 @@ func _process(delta: float) -> void:
 			_burst_remaining = max(_burst_remaining - 1, 0)
 		if _ammo == 0:
 			# Auto-reload when mag empties.
-			_reloading = true
-			_reload_remaining = RELOAD_TIME
-			_burst_remaining = 0
+			_start_reload()
 
 	if now - _last_fire_time > RECOIL_RESET_DELAY:
 		_recoil_index = 0
