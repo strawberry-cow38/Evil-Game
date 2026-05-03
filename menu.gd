@@ -184,6 +184,7 @@ func _build_ui() -> void:
 	_list.item_selected.connect(func(_i): _refresh_preview())
 	_list.item_clicked.connect(_on_item_clicked)
 	_list.item_activated.connect(_on_item_activated)
+	_list.gui_input.connect(_on_list_gui_input)
 	content.add_child(_list)
 
 	var preview_panel := PanelContainer.new()
@@ -561,6 +562,19 @@ func _on_item_clicked(_idx: int, _pos: Vector2, _btn: int) -> void:
 func _on_item_activated(_idx: int) -> void:
 	# Enter / double-click on row → equip.
 	_equip_selected()
+
+func _on_list_gui_input(event: InputEvent) -> void:
+	# Mouse wheel cycles row selection instead of scrolling the ItemList — the
+	# list almost never overflows and selection-by-wheel matches how the rest
+	# of the menu (W/S, ↑/↓) navigates.
+	if event is InputEventMouseButton and event.pressed:
+		var btn: int = (event as InputEventMouseButton).button_index
+		if btn == MOUSE_BUTTON_WHEEL_UP:
+			_move_selection(-1)
+			accept_event()
+		elif btn == MOUSE_BUTTON_WHEEL_DOWN:
+			_move_selection(1)
+			accept_event()
 
 func _open_inspect() -> void:
 	var row: Dictionary = _selected_row()
