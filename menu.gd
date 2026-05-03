@@ -12,9 +12,9 @@ const CATEGORIES: Array = [
 	{"label": "All",       "kinds": []},
 	{"label": "Weapons",   "kinds": ["weapon"]},
 	{"label": "Ammo",      "kinds": ["ammo"]},
-	{"label": "Medical",   "kinds": ["medical"]},
+	{"label": "Medical",   "kinds": ["medical", "food"]},
 	{"label": "Apparel",   "kinds": ["apparel", "armor", "clothing"]},
-	{"label": "Resources", "kinds": ["food", "resource"]},
+	{"label": "Resources", "kinds": ["resource"]},
 	{"label": "Building",  "kinds": ["building", "material"]},
 	{"label": "Misc",      "kinds": ["__misc__"]},
 ]
