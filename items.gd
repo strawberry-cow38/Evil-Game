@@ -30,7 +30,7 @@ const DEFS := {
 	"ammo_9x18":    {"name": "9×18mm Makarov",  "weight": 0.010, "value":  1, "color": Color(0.72, 0.66, 0.50), "kind": "ammo", "damage": 28, "falloff_start":  25.0, "falloff_end":  80.0, "damage_min": 10, "desc": "Soviet pistol round. Feeds the Makarov."},
 	"ammo_762nato": {"name": "7.62×51mm NATO",  "weight": 0.025, "value":  2, "color": Color(0.80, 0.55, 0.18), "kind": "ammo", "damage": 55, "falloff_start": 200.0, "falloff_end": 500.0, "damage_min": 38, "desc": "Full-power NATO rifle round. Feeds the M60."},
 	"ammo_40mm":    {"name": "40mm Grenade",    "weight": 0.230, "value": 15, "color": Color(0.30, 0.55, 0.30), "kind": "ammo", "damage":  0, "falloff_start": 9999.0, "falloff_end": 9999.0, "damage_min": 0, "desc": "Low-velocity 40mm HE grenade. Feeds the MGL."},
-	"ammo_12ga":      {"name": "12 Gauge Buckshot", "weight": 0.045, "value":  3, "color": Color(0.65, 0.10, 0.10), "kind": "ammo", "damage": 18, "falloff_start":  12.0, "falloff_end":  50.0, "damage_min":  6, "pellets": 8, "pellet_spread_deg": 5.5, "desc": "12 gauge buckshot. 8 pellets, devastating up close, falls off fast."},
+	"ammo_12ga":      {"name": "12 Gauge Buckshot", "weight": 0.045, "value":  3, "color": Color(0.65, 0.10, 0.10), "kind": "ammo", "damage": 18, "falloff_start":  12.0, "falloff_end":  50.0, "damage_min":  6, "pellets": 8, "pellet_spread_deg": 2.2, "desc": "12 gauge buckshot. 8 pellets, devastating up close, falls off fast."},
 	"ammo_12ga_slug": {"name": "12 Gauge Slug",     "weight": 0.052, "value":  5, "color": Color(0.55, 0.40, 0.10), "kind": "ammo", "damage": 95, "falloff_start":  40.0, "falloff_end": 120.0, "damage_min": 55, "desc": "12 gauge solid slug. Single projectile, hits like a truck at range."},
 }
 
