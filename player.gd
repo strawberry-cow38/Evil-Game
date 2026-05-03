@@ -348,6 +348,11 @@ func _close_reload_pie_and_apply() -> void:
 	_pie.close()
 	_pie_active = false
 	if picked != "" and _weapon.has_method("set_selected_ammo"):
+		# Switching cartridge types empties the mag back to inventory first —
+		# shotgun tubes can't mix buckshot and slugs.
+		var current: String = _weapon.get_selected_ammo() if _weapon.has_method("get_selected_ammo") else ""
+		if picked != current and _weapon.has_method("unload_mag"):
+			_weapon.unload_mag()
 		_weapon.set_selected_ammo(picked)
 	var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
 	if not reloading and _weapon.has_method("start_reload"):

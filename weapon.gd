@@ -533,6 +533,17 @@ func set_selected_ammo(id: String) -> void:
 		return
 	_selected_ammo = id
 
+# Dump every loaded round back into inventory under the *current* selected
+# ammo. Used when switching cartridge types — can't mix shells in the same
+# tube, so empty before refilling.
+func unload_mag() -> void:
+	if _ammo <= 0:
+		return
+	var ammo_id := get_selected_ammo()
+	if _inventory != null and ammo_id != "" and _inventory.has_method("add"):
+		_inventory.add(ammo_id, _ammo)
+	_ammo = 0
+
 func get_reserve_ammo() -> int:
 	if _inventory == null:
 		return 0
