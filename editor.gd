@@ -34,6 +34,10 @@ var _ramp_start: Vector3 = Vector3.INF
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	# Restore previously-edited heights if we're coming back from F9 play.
+	if MapState.has_map() and MapState.heights.size() == _terrain.heights.size():
+		_terrain.heights = MapState.heights.duplicate()
+		_terrain.rebuild()
 	_brush_ring.terrain = _terrain
 	_brush_ring.set_radius(_brush_radius)
 	_brush_ring.hide_ring()

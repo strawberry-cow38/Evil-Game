@@ -22,3 +22,8 @@ func _ready() -> void:
 	# array; overwrite + rebuild with the real heights.
 	terrain.heights = MapState.heights.duplicate()
 	terrain.rebuild()
+
+func _input(event: InputEvent) -> void:
+	# F9 toggles back to the editor with the current map intact.
+	if event.is_action_pressed("editor_play") or (event is InputEventKey and event.pressed and event.keycode == KEY_F9):
+		get_tree().change_scene_to_file("res://editor.tscn")
