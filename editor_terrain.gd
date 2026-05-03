@@ -187,6 +187,42 @@ func ramp_stroke(start: Vector3, end: Vector3, radius: float) -> void:
 			heights[_idx(x, y)] = lerpf(heights[_idx(x, y)], target, f)
 	_mark_dirty()
 
+# March a ray against the *live* heightmap (not the collider, which
+# only updates on stroke release). Returns the world-space hit point
+# or Vector3.INF on miss. Used by the editor's cursor pick so brush
+# tools track the freshly-modified surface frame-by-frame instead of
+# riding the stale ConcavePolygon.
+func ray_pick(from: Vector3, dir: Vector3, max_dist: float = 500.0) -> Vector3:
+	var d: Vector3 = dir.normalized()
+	if absf(d.length()) < 0.001:
+		return Vector3.INF
+	# Skip ahead to the first time the ray crosses into the terrain
+	# AABB on Y so we don't waste steps in empty sky.
+	var step: float = 0.4
+	var t: float = 0.0
+	var p: Vector3 = from
+	var prev_dy: float = p.y - sample_height(p)
+	while t < max_dist:
+		t += step
+		p = from + d * t
+		# Out of grid bounds — keep marching but treat as "no surface here".
+		var g := world_to_grid(p)
+		if g.x < 0.0 or g.x > float(GRID_W - 1) or g.y < 0.0 or g.y > float(GRID_H - 1):
+			prev_dy = 1.0
+			continue
+		var th: float = sample_height(p)
+		var dy: float = p.y - th
+		if dy <= 0.0 and prev_dy > 0.0:
+			# Crossed surface — refine via linear interp between the
+			# previous and current step.
+			var frac: float = prev_dy / (prev_dy - dy)
+			var hit_t: float = (t - step) + step * frac
+			var hit_p: Vector3 = from + d * hit_t
+			hit_p.y = sample_height(hit_p)
+			return hit_p
+		prev_dy = dy
+	return Vector3.INF
+
 func sample_height(world_pos: Vector3) -> float:
 	var g := world_to_grid(world_pos)
 	var x0: int = clampi(int(floor(g.x)), 0, GRID_W - 2)

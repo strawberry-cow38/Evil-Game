@@ -196,12 +196,24 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 			_terrain.smooth_brush(world_pos, _brush_radius, 6.0 * s, delta)
 
 func _raycast_cursor() -> Dictionary:
+	# For terrain brush tools we march against the *live* heightmap so
+	# the cursor tracks freshly-modified ground instead of the stale
+	# ConcavePolygon collider (which only refreshes on stroke release).
+	# Spawn / non-terrain tools fall back to physics raycast.
+	if _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP]:
+		var mouse := get_viewport().get_mouse_position()
+		var from := _camera.project_ray_origin(mouse)
+		var dir := _camera.project_ray_normal(mouse)
+		var p: Vector3 = _terrain.ray_pick(from, dir)
+		if p == Vector3.INF:
+			return {}
+		return {"position": p, "normal": Vector3.UP}
 	var vp := get_viewport()
-	var mouse := vp.get_mouse_position()
-	var from := _camera.project_ray_origin(mouse)
-	var to := from + _camera.project_ray_normal(mouse) * 1000.0
+	var mp := vp.get_mouse_position()
+	var fr := _camera.project_ray_origin(mp)
+	var to := fr + _camera.project_ray_normal(mp) * 1000.0
 	var space := get_world_3d().direct_space_state
-	var q := PhysicsRayQueryParameters3D.create(from, to)
+	var q := PhysicsRayQueryParameters3D.create(fr, to)
 	return space.intersect_ray(q)
 
 func _is_over_ui() -> bool:

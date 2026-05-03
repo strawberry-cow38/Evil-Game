@@ -40,7 +40,7 @@ func _ready() -> void:
 	vbox.add_child(_strength_label)
 	_strength_slider = HSlider.new()
 	_strength_slider.min_value = 0.05
-	_strength_slider.max_value = 3.0
+	_strength_slider.max_value = 100.0
 	_strength_slider.step = 0.05
 	_strength_slider.value = 1.0
 	_strength_slider.custom_minimum_size = Vector2(240, 18)
