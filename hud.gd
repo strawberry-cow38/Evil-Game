@@ -1,5 +1,7 @@
 extends CanvasLayer
 
+const Items = preload("res://items.gd")
+
 @export var player_path: NodePath
 @export var weapon_path: NodePath
 
@@ -37,13 +39,16 @@ func _process(delta: float) -> void:
 		var reserve: int = _weapon.get_reserve_ammo() if _weapon.has_method("get_reserve_ammo") else 0
 		var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
 		var prog: float = _weapon.get_reload_progress() if _weapon.has_method("get_reload_progress") else 0.0
+		var ammo_id: String = _weapon.get_selected_ammo() if _weapon.has_method("get_selected_ammo") else ""
+		var ammo_name: String = Items.item_name(ammo_id) if ammo_id != "" else ""
+		var ammo_suffix: String = ("  · %s" % ammo_name) if ammo_name != "" else ""
 		if reloading:
 			var bar_len := 10
 			var filled := int(round(prog * bar_len))
 			var bar := "[" + "=".repeat(filled) + " ".repeat(bar_len - filled) + "]"
-			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)  %s" % [name, mode, ammo, mag, reserve, bar]
+			_ammo_label.text = "%s  [%s]%s\n%d / %d   (%d)  %s" % [name, mode, ammo_suffix, ammo, mag, reserve, bar]
 		else:
-			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)" % [name, mode, ammo, mag, reserve]
+			_ammo_label.text = "%s  [%s]%s\n%d / %d   (%d)" % [name, mode, ammo_suffix, ammo, mag, reserve]
 		_update_low_ammo_flash(delta, ammo, mag, reloading)
 
 func _update_low_ammo_flash(delta: float, ammo: int, mag: int, reloading: bool) -> void:
