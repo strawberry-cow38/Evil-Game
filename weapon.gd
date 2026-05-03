@@ -293,14 +293,17 @@ func _apply_weapon(key: String) -> void:
 		v.stop()
 		v.stream = _fire_stream_list[0] if not _fire_stream_list.is_empty() else null
 
-func _cycle_weapon(direction: int) -> void:
+func equip(key: String) -> void:
 	if _reloading:
 		return
-	var idx: int = WEAPON_ORDER.find(_current_weapon)
-	if idx < 0:
-		idx = 0
-	idx = (idx + direction + WEAPON_ORDER.size()) % WEAPON_ORDER.size()
-	_apply_weapon(WEAPON_ORDER[idx])
+	if not PROFILES.has(key):
+		return
+	if key == _current_weapon:
+		return
+	_apply_weapon(key)
+
+func get_current_weapon() -> String:
+	return _current_weapon
 
 func _setup_audio() -> void:
 	# .import is gitignored on this source-pull repo, so res:// won't resolve the
@@ -472,14 +475,6 @@ func _process(delta: float) -> void:
 		return
 
 	var now := Time.get_ticks_msec() / 1000.0
-
-	# E is shared with `interact`. If the player is looking at a pickup, the
-	# loot action wins and the weapon swap is suppressed for that press.
-	var skip_weapon_e: bool = _player != null and _player.has_method("has_interact_target") and _player.has_interact_target()
-	if Input.is_action_just_pressed("weapon_next") and not skip_weapon_e:
-		_cycle_weapon(1)
-	elif Input.is_action_just_pressed("weapon_prev"):
-		_cycle_weapon(-1)
 
 	if Input.is_action_just_pressed("cycle_fire_mode") and not _reloading:
 		var modes: Array = _available_modes()

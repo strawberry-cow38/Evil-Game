@@ -20,10 +20,14 @@ const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
 const INTERACT_MASK := 0xFFFFFFFF
 
+const STARTING_WEAPONS: Array[String] = ["akm", "m16a2", "bizon", "mp5sd", "m249", "m60", "mgl"]
+
 @export var menu_path: NodePath
 @export var inventory_path: NodePath
+@export var weapon_path: NodePath
 
 @onready var _camera: Camera3D = $Camera3D
+@onready var _weapon: Node = get_node(weapon_path) if weapon_path != NodePath() else null
 
 var _yaw := 0.0
 var _pitch := 0.0
@@ -41,6 +45,27 @@ func _ready() -> void:
 	if inventory_path != NodePath():
 		_inventory = get_node(inventory_path)
 	_build_prompt()
+	_seed_starting_inventory()
+	if _inventory != null and _inventory.has_signal("equipped_changed"):
+		_inventory.equipped_changed.connect(_on_equipped_changed)
+
+func _seed_starting_inventory() -> void:
+	if _inventory == null or not _inventory.has_method("grant"):
+		return
+	for id in STARTING_WEAPONS:
+		_inventory.grant(id, 1)
+	# Auto-equip first weapon and bind digit defaults so the player isn't naked.
+	if STARTING_WEAPONS.size() > 0:
+		_inventory.set_equipped(STARTING_WEAPONS[0])
+	for i in range(STARTING_WEAPONS.size()):
+		var slot: int = i + 1
+		if slot > 9:
+			break
+		_inventory.set_favorite(slot, STARTING_WEAPONS[i])
+
+func _on_equipped_changed(id: String) -> void:
+	if _weapon != null and _weapon.has_method("equip") and id != "":
+		_weapon.equip(id)
 
 func _build_prompt() -> void:
 	# Tiny center-bottom hint label, lives on its own CanvasLayer so the HUD
@@ -98,6 +123,8 @@ func _process(delta: float) -> void:
 	_update_interact_target()
 	if not is_menu_open() and _interact_target != null and Input.is_action_just_pressed("interact"):
 		_loot(_interact_target)
+	if not is_menu_open():
+		_check_equip_hotkeys()
 	_ads = Input.is_action_pressed("ads") and not is_menu_open()
 
 	# Smooth camera height between stand/crouch.
@@ -175,6 +202,15 @@ func _update_interact_target() -> void:
 		_prompt_label.text = "[E] Pick up %s" % pickup.get_label()
 	else:
 		_prompt_label.text = ""
+
+func _check_equip_hotkeys() -> void:
+	if _inventory == null:
+		return
+	for slot in range(1, 10):
+		if Input.is_action_just_pressed("equip_%d" % slot):
+			var id: String = _inventory.favorite_id(slot)
+			if id != "" and _inventory.has_item(id):
+				_inventory.set_equipped(id)
 
 func _loot(target: Node) -> void:
 	if _inventory == null or target == null or not _inventory.has_method("add"):

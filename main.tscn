@@ -120,6 +120,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 script = ExtResource("1_player")
 menu_path = NodePath("../Menu")
 inventory_path = NodePath("Inventory")
+weapon_path = NodePath("Weapon")
 
 [node name="Inventory" type="Node" parent="Player"]
 script = ExtResource("5_inventory")
