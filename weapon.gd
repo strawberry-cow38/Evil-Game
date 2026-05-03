@@ -17,18 +17,18 @@ const TRACER_LIFETIME := 0.06              # s
 # Recoil pattern: (yaw_deg, pitch_deg) per shot. Pitch is "kick up" so positive = up.
 # AKM: harsher, climbs hard, drifts right.
 const RECOIL_PATTERN_AKM: Array[Vector2] = [
-	Vector2( 0.10, 0.70),
-	Vector2( 0.20, 0.85),
-	Vector2( 0.05, 1.00),
-	Vector2( 0.30, 1.05),
+	Vector2(-0.10, 0.70),
+	Vector2(-0.20, 0.85),
 	Vector2(-0.05, 1.00),
-	Vector2( 0.40, 0.95),
-	Vector2(-0.10, 0.90),
-	Vector2( 0.55, 0.85),
-	Vector2(-0.15, 0.80),
-	Vector2( 0.65, 0.75),
-	Vector2(-0.20, 0.70),
-	Vector2( 0.75, 0.65),
+	Vector2(-0.30, 1.05),
+	Vector2( 0.05, 1.00),
+	Vector2(-0.40, 0.95),
+	Vector2( 0.10, 0.90),
+	Vector2(-0.55, 0.85),
+	Vector2( 0.15, 0.80),
+	Vector2(-0.65, 0.75),
+	Vector2( 0.20, 0.70),
+	Vector2(-0.75, 0.65),
 ]
 # M16A2: classic vertical climb, mild horizontal drift.
 const RECOIL_PATTERN_M16: Array[Vector2] = [
