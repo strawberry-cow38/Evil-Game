@@ -92,18 +92,18 @@ const RECOIL_PATTERN_MAKAROV: Array[Vector2] = [
 ]
 # PP-19 Bizon: 9mm helical-mag SMG. Light recoil, mostly vertical with mild drift.
 const RECOIL_PATTERN_BIZON: Array[Vector2] = [
-	Vector2( 0.10, 0.55),
-	Vector2(-0.15, 0.65),
-	Vector2( 0.20, 0.75),
-	Vector2(-0.25, 0.80),
-	Vector2( 0.30, 0.80),
-	Vector2(-0.35, 0.78),
-	Vector2( 0.40, 0.75),
-	Vector2(-0.45, 0.72),
 	Vector2( 0.50, 0.70),
-	Vector2(-0.55, 0.68),
-	Vector2( 0.60, 0.65),
-	Vector2(-0.65, 0.62),
+	Vector2(-0.65, 0.85),
+	Vector2( 0.85, 0.95),
+	Vector2(-1.00, 1.00),
+	Vector2( 1.15, 1.05),
+	Vector2(-1.30, 1.05),
+	Vector2( 1.45, 1.05),
+	Vector2(-1.55, 1.00),
+	Vector2( 1.60, 0.95),
+	Vector2(-1.65, 0.90),
+	Vector2( 1.65, 0.85),
+	Vector2(-1.65, 0.80),
 ]
 # MP5: between AK and M16 vertically, but very horizontal — wide left/right swings.
 const RECOIL_PATTERN_MP5: Array[Vector2] = [
