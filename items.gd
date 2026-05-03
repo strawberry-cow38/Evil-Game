@@ -24,6 +24,7 @@ const DEFS := {
 	"makarov":{"name": "PM Makarov",   "weight": 0.66, "value":  120, "color": Color(0.18, 0.18, 0.20), "kind": "weapon", "desc": "Soviet 9×18 service pistol. 8-round mag.", "slots": ["Muzzle"]},
 	"shotgun_combat": {"name": "XM1014",         "weight": 3.30, "value": 380, "color": Color(0.22, 0.18, 0.16), "kind": "weapon", "desc": "Semi-auto 12 gauge combat shotgun. 6-round tube, shell-by-shell reload.", "slots": ["Optic", "Muzzle"]},
 	"p90":            {"name": "FN P90",         "weight": 2.70, "value": 480, "color": Color(0.18, 0.18, 0.18), "kind": "weapon", "desc": "Bullpup PDW. 50-round top-mount mag in 5.7×28mm. High cyclic, flat recoil.", "slots": ["Optic", "Muzzle"]},
+	"m700":           {"name": "Remington M700", "weight": 4.50, "value": 700, "color": Color(0.22, 0.16, 0.10), "kind": "weapon", "desc": "Bolt-action 7.62 NATO sniper. 5-round internal mag. 6× scope. Surgical.", "slots": ["Muzzle"]},
 
 	"ammo_762x39":  {"name": "7.62×39mm",       "weight": 0.016, "value":  1, "color": Color(0.85, 0.65, 0.20), "kind": "ammo", "damage": 50, "falloff_start": 100.0, "falloff_end": 300.0, "damage_min": 30, "desc": "Soviet intermediate cartridge. Feeds the AKM."},
 	"ammo_556nato": {"name": "5.56×45mm NATO",  "weight": 0.012, "value":  1, "color": Color(0.90, 0.78, 0.40), "kind": "ammo", "damage": 40, "falloff_start": 120.0, "falloff_end": 350.0, "damage_min": 22, "desc": "NATO standard. Feeds the M16A2 and M249."},

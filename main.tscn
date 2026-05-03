@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://dummy.gd" id="8_dummy"]
 [ext_resource type="Script" path="res://dummy_head.gd" id="9_dummy_head"]
 [ext_resource type="Script" path="res://pie_menu.gd" id="10_pie"]
+[ext_resource type="Script" path="res://scope_overlay.gd" id="11_scope"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -148,6 +149,7 @@ menu_path = NodePath("../Menu")
 inventory_path = NodePath("Inventory")
 weapon_path = NodePath("Weapon")
 pie_menu_path = NodePath("../PieMenuLayer/PieMenu")
+scope_overlay_path = NodePath("../ScopeLayer/ScopeOverlay")
 
 [node name="Inventory" type="Node" parent="Player"]
 script = ExtResource("5_inventory")
@@ -211,6 +213,15 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 script = ExtResource("10_pie")
+
+[node name="ScopeLayer" type="CanvasLayer" parent="."]
+layer = 20
+
+[node name="ScopeOverlay" type="ColorRect" parent="ScopeLayer"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+script = ExtResource("11_scope")
 
 [node name="PickupSpawner" type="Node3D" parent="."]
 script = ExtResource("7_spawner")

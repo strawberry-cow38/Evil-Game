@@ -64,6 +64,10 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 const RECOIL_PATTERN_MGL: Array[Vector2] = [
 	Vector2(-0.40, 2.80),
 ]
+# Remington M700: bolt-action sniper, single heavy kick per cycle.
+const RECOIL_PATTERN_M700: Array[Vector2] = [
+	Vector2(-0.20, 3.40),
+]
 # M249 SAW: heavy LMG climb, big sustained pitch + wide drift.
 const RECOIL_PATTERN_M249: Array[Vector2] = [
 	Vector2(-0.20, 1.20),
@@ -324,6 +328,21 @@ const PROFILES := {
 		"ammo_id": "ammo_57x28",
 		"reload_time": 3.6,
 	},
+	"m700": {
+		"name": "Remington M700",
+		"mag_size": 5,
+		"rpm": 50.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm.ogg"],
+		"fire_hold": 0.30,
+		"fire_fade": 0.45,
+		"recoil_pattern": RECOIL_PATTERN_M700,
+		"bloom_mult": 0.6,
+		"ammo_id": "ammo_762nato",
+		"reload_time": 4.2,
+		"scope": true,
+		"ads_fov": 13.0,
+	},
 	"mgl": {
 		"name": "MGL",
 		"mag_size": 6,
@@ -342,7 +361,7 @@ const PROFILES := {
 		"no_shell_impact": true,
 	},
 }
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m249", "m60", "mgl", "shotgun_combat"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
@@ -763,6 +782,14 @@ func _play_fire_sound() -> void:
 
 func is_ads() -> bool:
 	return _player != null and _player.has_method("is_ads") and _player.is_ads()
+
+# True if the equipped weapon should render the scope overlay when ADS.
+func has_scope() -> bool:
+	return bool(_profile.get("scope", false))
+
+# Per-weapon ADS FOV override (sniper scopes are much narrower than 55°).
+func get_ads_fov(default_fov: float) -> float:
+	return float(_profile.get("ads_fov", default_fov))
 
 func get_weapon_name() -> String:
 	return _profile.get("name", "?")

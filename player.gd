@@ -27,7 +27,7 @@ const DROP_SPREAD := 0.45            # m random radius around drop anchor
 const DROP_HEIGHT := 0.35            # m above floor
 const DROP_WALL_BUFFER := 0.30       # m back-off from wall hit point
 
-const STARTING_WEAPONS: Array[String] = ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m249", "m60", "mgl", "shotgun_combat"]
+const STARTING_WEAPONS: Array[String] = ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
 # Quality + condition demo seed — varied so every tier color shows up in the
 # inventory list right at game start.
 const STARTING_WEAPON_INSTANCES: Array = [
@@ -38,6 +38,7 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "mp5sd",   "condition": 0.88, "quality": 4},  # Excellent Pristine
 	{"id": "p90",     "condition": 0.91, "quality": 3},  # Good Pristine
 	{"id": "makarov", "condition": 0.42, "quality": 2},  # Normal Damaged
+	{"id": "m700",    "condition": 0.97, "quality": 5},  # Masterwork Pristine
 	{"id": "m249",    "condition": 0.78, "quality": 3},  # Good Worn
 	{"id": "m60",     "condition": 0.20, "quality": 0},  # Awful Ruined
 	{"id": "mgl",     "condition": 1.00, "quality": 6},  # Legendary Pristine
@@ -63,6 +64,7 @@ const RELOAD_HOLD_THRESHOLD := 0.20
 @export var inventory_path: NodePath
 @export var weapon_path: NodePath
 @export var pie_menu_path: NodePath
+@export var scope_overlay_path: NodePath
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _weapon: Node = get_node(weapon_path) if weapon_path != NodePath() else null
@@ -74,6 +76,7 @@ var _ads := false
 var _menu: Node
 var _inventory: Node
 var _pie: Node
+var _scope: Node
 var _interact_target: Node = null    # current Pickup the player is looking at, if any
 var _prompt_label: Label
 var _rng := RandomNumberGenerator.new()
@@ -90,6 +93,8 @@ func _ready() -> void:
 		_inventory = get_node(inventory_path)
 	if pie_menu_path != NodePath():
 		_pie = get_node(pie_menu_path)
+	if scope_overlay_path != NodePath():
+		_scope = get_node(scope_overlay_path)
 	_build_prompt()
 	_seed_starting_inventory()
 	if _inventory != null and _inventory.has_signal("equipped_changed"):
@@ -209,10 +214,23 @@ func _process(delta: float) -> void:
 	pos.y = lerpf(pos.y, target_y, alpha)
 	_camera.position = pos
 
-	# ADS FOV zoom.
-	var target_fov: float = FOV_ADS if _ads else FOV_HIP
+	# ADS FOV zoom. Sniper scopes override the default ADS FOV via profile.
+	var ads_fov: float = FOV_ADS
+	if _weapon != null and _weapon.has_method("get_ads_fov"):
+		ads_fov = _weapon.get_ads_fov(FOV_ADS)
+	var target_fov: float = ads_fov if _ads else FOV_HIP
 	var fov_alpha: float = 1.0 - exp(-ADS_LERP_RATE * delta)
 	_camera.fov = lerpf(_camera.fov, target_fov, fov_alpha)
+
+	# Scope overlay visible only when ADS on a scoped weapon. Wait until the
+	# zoom is most of the way in so the black mask doesn't appear pre-zoom.
+	if _scope != null:
+		var scoped: bool = _weapon != null and _weapon.has_method("has_scope") and _weapon.has_scope()
+		var zoomed_in: bool = absf(_camera.fov - ads_fov) < 5.0
+		if _ads and scoped and zoomed_in:
+			_scope.show_scope()
+		else:
+			_scope.hide_scope()
 
 func _physics_process(delta: float) -> void:
 	if is_menu_open():
