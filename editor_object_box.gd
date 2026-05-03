@@ -10,8 +10,11 @@ const CATALOG := preload("res://editor_objects_catalog.gd")
 const COLOR_NORMAL := Color(0.45, 1.0, 0.6, 1.0)
 const COLOR_SELECTED := Color(1.0, 0.95, 0.35, 1.0)
 
+const PAD := 0.08
+const FALLBACK_SIZE := Vector3(2.0, 2.0, 2.0)
+
 var object_id: String = ""
-var box_size: Vector3 = Vector3(2.0, 2.0, 2.0)
+var _local_aabb: AABB = AABB(-FALLBACK_SIZE * 0.5, FALLBACK_SIZE)
 
 var _mesh_instance: MeshInstance3D
 var _material: StandardMaterial3D
@@ -25,10 +28,13 @@ func _ready() -> void:
 	_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
-	_rebuild()
 	var content: Node3D = CATALOG.build(object_id)
 	if content != null:
 		add_child(content)
+		var aabb: AABB = _compute_content_aabb(content)
+		if aabb.size.length_squared() > 0.0:
+			_local_aabb = aabb.grow(PAD)
+	_rebuild()
 
 func set_selected(v: bool) -> void:
 	_selected = v
@@ -36,20 +42,20 @@ func set_selected(v: bool) -> void:
 		_material.albedo_color = COLOR_SELECTED if v else COLOR_NORMAL
 
 func get_aabb_local() -> AABB:
-	var h: Vector3 = box_size * 0.5
-	return AABB(-h, box_size)
+	return _local_aabb
 
 func _rebuild() -> void:
-	var h: Vector3 = box_size * 0.5
+	var lo: Vector3 = _local_aabb.position
+	var hi: Vector3 = _local_aabb.position + _local_aabb.size
 	var c: Array = [
-		Vector3(-h.x, -h.y, -h.z),
-		Vector3( h.x, -h.y, -h.z),
-		Vector3( h.x, -h.y,  h.z),
-		Vector3(-h.x, -h.y,  h.z),
-		Vector3(-h.x,  h.y, -h.z),
-		Vector3( h.x,  h.y, -h.z),
-		Vector3( h.x,  h.y,  h.z),
-		Vector3(-h.x,  h.y,  h.z),
+		Vector3(lo.x, lo.y, lo.z),
+		Vector3(hi.x, lo.y, lo.z),
+		Vector3(hi.x, lo.y, hi.z),
+		Vector3(lo.x, lo.y, hi.z),
+		Vector3(lo.x, hi.y, lo.z),
+		Vector3(hi.x, hi.y, lo.z),
+		Vector3(hi.x, hi.y, hi.z),
+		Vector3(lo.x, hi.y, hi.z),
 	]
 	var edges: Array = [
 		[0,1],[1,2],[2,3],[3,0],
@@ -63,3 +69,34 @@ func _rebuild() -> void:
 		im.surface_add_vertex(c[e[1]])
 	im.surface_end()
 	_mesh_instance.mesh = im
+
+func _compute_content_aabb(content: Node3D) -> AABB:
+	var meshes: Array = []
+	_collect_meshes(content, meshes)
+	if meshes.is_empty():
+		return AABB()
+	var first: bool = true
+	var out: AABB = AABB()
+	for mi in meshes:
+		var rel: Transform3D = content.transform * _relative_transform(mi, content)
+		var transformed: AABB = rel * mi.get_aabb()
+		if first:
+			out = transformed
+			first = false
+		else:
+			out = out.merge(transformed)
+	return out
+
+func _collect_meshes(n: Node, out: Array) -> void:
+	if n is MeshInstance3D:
+		out.append(n)
+	for c in n.get_children():
+		_collect_meshes(c, out)
+
+func _relative_transform(node: Node3D, root: Node3D) -> Transform3D:
+	var xform: Transform3D = Transform3D.IDENTITY
+	var cur: Node3D = node
+	while cur != null and cur != root:
+		xform = cur.transform * xform
+		cur = cur.get_parent() as Node3D
+	return xform

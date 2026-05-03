@@ -10,8 +10,11 @@ const CATALOG := preload("res://editor_effect_catalog.gd")
 const COLOR_NORMAL := Color(0.4, 0.85, 1.0, 1.0)
 const COLOR_SELECTED := Color(1.0, 0.95, 0.35, 1.0)
 
+const PAD := 0.08  # margin around content so box doesn't z-fight surface
+const FALLBACK_SIZE := Vector3(2.0, 2.0, 2.0)  # used if catalog has no mesh
+
 var effect_id: String = ""
-var box_size: Vector3 = Vector3(2.0, 2.0, 2.0)
+var _local_aabb: AABB = AABB(-FALLBACK_SIZE * 0.5, FALLBACK_SIZE)
 
 var _mesh_instance: MeshInstance3D
 var _material: StandardMaterial3D
@@ -25,12 +28,15 @@ func _ready() -> void:
 	_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
-	_rebuild()
 	# If the catalog knows this effect id, drop its content (the actual
-	# visual) inside the box. Box stays as bounds indicator on top.
+	# visual) inside the box first — we need its bounds to size the box.
 	var content: Node3D = CATALOG.build(effect_id)
 	if content != null:
 		add_child(content)
+		var aabb: AABB = _compute_content_aabb(content)
+		if aabb.size.length_squared() > 0.0:
+			_local_aabb = aabb.grow(PAD)
+	_rebuild()
 
 func set_selected(v: bool) -> void:
 	_selected = v
@@ -38,21 +44,20 @@ func set_selected(v: bool) -> void:
 		_material.albedo_color = COLOR_SELECTED if v else COLOR_NORMAL
 
 func get_aabb_local() -> AABB:
-	# Half-extents from box_size.
-	var h: Vector3 = box_size * 0.5
-	return AABB(-h, box_size)
+	return _local_aabb
 
 func _rebuild() -> void:
-	var h: Vector3 = box_size * 0.5
+	var lo: Vector3 = _local_aabb.position
+	var hi: Vector3 = _local_aabb.position + _local_aabb.size
 	var c: Array = [
-		Vector3(-h.x, -h.y, -h.z),
-		Vector3( h.x, -h.y, -h.z),
-		Vector3( h.x, -h.y,  h.z),
-		Vector3(-h.x, -h.y,  h.z),
-		Vector3(-h.x,  h.y, -h.z),
-		Vector3( h.x,  h.y, -h.z),
-		Vector3( h.x,  h.y,  h.z),
-		Vector3(-h.x,  h.y,  h.z),
+		Vector3(lo.x, lo.y, lo.z),
+		Vector3(hi.x, lo.y, lo.z),
+		Vector3(hi.x, lo.y, hi.z),
+		Vector3(lo.x, lo.y, hi.z),
+		Vector3(lo.x, hi.y, lo.z),
+		Vector3(hi.x, hi.y, lo.z),
+		Vector3(hi.x, hi.y, hi.z),
+		Vector3(lo.x, hi.y, hi.z),
 	]
 	var edges: Array = [
 		[0,1],[1,2],[2,3],[3,0],
@@ -66,3 +71,40 @@ func _rebuild() -> void:
 		im.surface_add_vertex(c[e[1]])
 	im.surface_end()
 	_mesh_instance.mesh = im
+
+# Walks `content` (a child of this box) and unions every MeshInstance3D's
+# bounds, transformed up into this box's local space. Returns AABB() if
+# no meshes found.
+func _compute_content_aabb(content: Node3D) -> AABB:
+	var meshes: Array = []
+	_collect_meshes(content, meshes)
+	if meshes.is_empty():
+		return AABB()
+	var first: bool = true
+	var out: AABB = AABB()
+	for mi in meshes:
+		var rel: Transform3D = content.transform * _relative_transform(mi, content)
+		var transformed: AABB = rel * mi.get_aabb()
+		if first:
+			out = transformed
+			first = false
+		else:
+			out = out.merge(transformed)
+	return out
+
+func _collect_meshes(n: Node, out: Array) -> void:
+	if n is MeshInstance3D:
+		out.append(n)
+	for c in n.get_children():
+		_collect_meshes(c, out)
+
+# Transform that takes coords from `node`'s local space up to `root`'s
+# local space (root not included). Used so we don't rely on
+# global_transform during _ready.
+func _relative_transform(node: Node3D, root: Node3D) -> Transform3D:
+	var xform: Transform3D = Transform3D.IDENTITY
+	var cur: Node3D = node
+	while cur != null and cur != root:
+		xform = cur.transform * xform
+		cur = cur.get_parent() as Node3D
+	return xform

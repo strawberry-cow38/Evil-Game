@@ -486,8 +486,11 @@ func _pick_prop_under_cursor() -> void:
 		if t >= 0.0 and t < best_t:
 			best_t = t
 			best = box
-	if best != null:
-		_select_prop(best)
+	# Clicking on empty space (no box hit) deselects — same convention as
+	# every other 3D editor. Gizmo handle picks short-circuit before this
+	# runs, so dragging an arrow off into space won't accidentally drop
+	# the selection.
+	_select_prop(best)
 
 func _delete_selected_prop() -> void:
 	if _selected_prop == null:
