@@ -155,7 +155,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _active_tool == TOOL_T_FLATTEN and event.pressed and Input.is_key_pressed(KEY_SHIFT):
 		var fh := _raycast_cursor()
 		if not fh.is_empty():
-			_flatten_target = fh.position.y
+			_flatten_target = _terrain.sample_height(fh.position)
 		return
 	# Ramp tool: click-down picks start, click-up commits with end point.
 	if _active_tool == TOOL_T_RAMP:
