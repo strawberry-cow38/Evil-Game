@@ -229,7 +229,7 @@ func _build_ui() -> void:
 	pv.add_child(_preview_count)
 
 	_equip_btn = Button.new()
-	_equip_btn.text = "Equip [Enter]"
+	_equip_btn.text = "Equip [Enter / Dbl-Click]"
 	_equip_btn.add_theme_font_size_override("font_size", 18)
 	_equip_btn.pressed.connect(_equip_selected)
 	pv.add_child(_equip_btn)
@@ -245,7 +245,7 @@ func _build_ui() -> void:
 	footer.add_child(_sort_label)
 
 	_hint_label = Label.new()
-	_hint_label.text = "[Enter/Click] equip  [X] inspect  [R] drop  [Q] favorite→1-9  [←/→] category  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
+	_hint_label.text = "[Enter/Dbl-Click] equip  [X] inspect  [R] drop  [Q] favorite→1-9  [←/→] category  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
 	_hint_label.modulate = Color(0.75, 0.75, 0.75)
 	_hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -484,7 +484,7 @@ func _refresh_preview() -> void:
 		_preview_value.text = ""
 		_preview_count.text = ""
 		_equip_btn.disabled = true
-		_equip_btn.text = "Equip [Enter]"
+		_equip_btn.text = "Equip [Enter / Dbl-Click]"
 		return
 	var id: String = String(row.id)
 	_preview_color.color = Items.item_color(id)
@@ -512,7 +512,7 @@ func _refresh_preview() -> void:
 	if equippable and int(row.uid) == equipped_uid:
 		_equip_btn.text = "Equipped"
 	else:
-		_equip_btn.text = "Equip [Enter]"
+		_equip_btn.text = "Equip [Enter / Dbl-Click]"
 
 func _refresh_sort_label() -> void:
 	var arrow := "↑" if _sort_asc else "↓"
@@ -553,13 +553,13 @@ func _equip_selected() -> void:
 	else:
 		_inventory.set_equipped(uid)
 
-func _on_item_clicked(_idx: int, _pos: Vector2, btn: int) -> void:
+func _on_item_clicked(_idx: int, _pos: Vector2, _btn: int) -> void:
+	# Single click only selects + previews. Double-click (or Enter) equips so
+	# the inspect/preview flow doesn't accidentally swap your weapon.
 	_refresh_preview()
-	if btn == MOUSE_BUTTON_LEFT:
-		_equip_selected()
 
 func _on_item_activated(_idx: int) -> void:
-	# Enter/double-click on row.
+	# Enter / double-click on row → equip.
 	_equip_selected()
 
 func _open_inspect() -> void:
