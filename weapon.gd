@@ -45,6 +45,21 @@ const RECOIL_PATTERN_M16: Array[Vector2] = [
 	Vector2(-0.75, 0.65),
 	Vector2( 0.85, 0.55),
 ]
+# MP5: between AK and M16 vertically, but very horizontal — wide left/right swings.
+const RECOIL_PATTERN_MP5: Array[Vector2] = [
+	Vector2( 0.40, 0.55),
+	Vector2(-0.55, 0.70),
+	Vector2( 0.70, 0.80),
+	Vector2(-0.85, 0.85),
+	Vector2( 1.00, 0.90),
+	Vector2(-1.15, 0.95),
+	Vector2( 1.25, 0.95),
+	Vector2(-1.30, 0.90),
+	Vector2( 1.35, 0.85),
+	Vector2(-1.40, 0.80),
+	Vector2( 1.45, 0.75),
+	Vector2(-1.50, 0.70),
+]
 const RECOIL_JITTER_DEG := 0.12
 const CROUCH_RECOIL_MULT := 0.5
 const HIP_RECOIL_MULT := 1.30      # extra kick when not ADS
@@ -89,6 +104,7 @@ const PROFILES := {
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_AKM,
+		"bloom_mult": 1.0,
 	},
 	"m16a2": {
 		"name": "M16A2",
@@ -99,9 +115,21 @@ const PROFILES := {
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_M16,
+		"bloom_mult": 1.0,
+	},
+	"mp5": {
+		"name": "MP5",
+		"mag_size": 30,
+		"rpm": 800.0,
+		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
+		"fire_sound": "res://assets/audio/Shot_GTEK9mmSMG.ogg",
+		"fire_hold": 0.18,
+		"fire_fade": 0.28,
+		"recoil_pattern": RECOIL_PATTERN_MP5,
+		"bloom_mult": 2.2,
 	},
 }
-const WEAPON_ORDER := ["akm", "m16a2"]
+const WEAPON_ORDER := ["akm", "m16a2", "mp5"]
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
@@ -325,6 +353,7 @@ func get_current_bloom_deg() -> float:
 		bloom_deg += MOVE_BLOOM_DEG
 	if airborne:
 		bloom_deg += AIR_BLOOM_DEG
+	bloom_deg *= float(_profile.get("bloom_mult", 1.0))
 	return bloom_deg
 
 func _process(delta: float) -> void:
