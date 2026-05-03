@@ -100,7 +100,7 @@ const PROFILES := {
 		"mag_size": 30,
 		"rpm": 600.0,
 		"modes": [FireMode.SEMI, FireMode.AUTO],
-		"fire_sound": "res://assets/audio/Shot_GTEK762mmSoviet.ogg",
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mmSoviet.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_AKM,
@@ -111,25 +111,28 @@ const PROFILES := {
 		"mag_size": 30,
 		"rpm": 700.0,
 		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
-		"fire_sound": "res://assets/audio/Shot_GTEK556mm.ogg",
+		"fire_sounds": ["res://assets/audio/Shot_GTEK556mm.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_M16,
 		"bloom_mult": 1.0,
 	},
-	"mp5": {
-		"name": "MP5",
+	"mp5sd": {
+		"name": "MP5SD",
 		"mag_size": 30,
 		"rpm": 800.0,
 		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
-		"fire_sound": "res://assets/audio/Shot_GTEK9mmSMG.ogg",
-		"fire_hold": 0.18,
-		"fire_fade": 0.28,
+		"fire_sounds": [
+			"res://assets/audio/Shot_MP5SD_A.ogg",
+			"res://assets/audio/Shot_MP5SD_B.ogg",
+		],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_MP5,
 		"bloom_mult": 2.2,
 	},
 }
-const WEAPON_ORDER := ["akm", "m16a2", "mp5"]
+const WEAPON_ORDER := ["akm", "m16a2", "mp5sd"]
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
@@ -146,7 +149,7 @@ var _applied_yaw := 0.0
 var _applied_pitch := 0.0
 var _current_weapon: String = "akm"
 var _profile: Dictionary = {}
-var _fire_streams: Dictionary = {}     # weapon key -> AudioStream
+var _fire_streams: Dictionary = {}     # weapon key -> Array[AudioStream]
 var _ammo := 0
 var _fire_mode: FireMode = FireMode.AUTO
 var _burst_remaining := 0
@@ -155,7 +158,7 @@ var _reload_remaining := 0.0
 var _audio_voices: Array[AudioStreamPlayer3D] = []
 var _audio_tweens: Array[Tween] = []
 var _audio_idx := 0
-var _fire_stream: AudioStream
+var _fire_stream_list: Array = []
 var _impact_streams: Dictionary = {}    # "dirt"/"concrete" -> AudioStream
 var _impact_voices: Array[AudioStreamPlayer3D] = []
 var _impact_idx := 0
@@ -185,11 +188,12 @@ func _apply_weapon(key: String) -> void:
 	_recoil_index = 0
 	_target_yaw = _applied_yaw
 	_target_pitch = _applied_pitch
-	# Swap the fire-sound stream on every voice in the pool.
-	_fire_stream = _fire_streams.get(key, null)
+	# Swap the fire-sound stream(s) on every voice in the pool. Stream is picked
+	# per-shot in _play_fire_sound when the weapon has multiple variants.
+	_fire_stream_list = _fire_streams.get(key, [])
 	for v in _audio_voices:
 		v.stop()
-		v.stream = _fire_stream
+		v.stream = _fire_stream_list[0] if not _fire_stream_list.is_empty() else null
 
 func _cycle_weapon(direction: int) -> void:
 	if _reloading:
@@ -204,14 +208,19 @@ func _setup_audio() -> void:
 	# .import is gitignored on this source-pull repo, so res:// won't resolve the
 	# .ogg via GD.Load. Load the file straight off disk at runtime.
 	for key in WEAPON_ORDER:
-		var path: String = PROFILES[key].fire_sound
-		_fire_streams[key] = _load_wav(path)
-	_fire_stream = _fire_streams.get(_current_weapon, null)
+		var paths: Array = PROFILES[key].get("fire_sounds", [])
+		var streams: Array = []
+		for path in paths:
+			var s: AudioStream = _load_wav(path)
+			if s != null:
+				streams.append(s)
+		_fire_streams[key] = streams
+	_fire_stream_list = _fire_streams.get(_current_weapon, [])
 	# Voice pool so fast-fire shots don't restart each other mid-fade —
 	# the fade-out on shot N keeps ringing while shot N+1 starts on a fresh voice.
 	for i in range(FIRE_VOICES):
 		var p := AudioStreamPlayer3D.new()
-		p.stream = _fire_stream
+		p.stream = _fire_stream_list[0] if not _fire_stream_list.is_empty() else null
 		p.volume_db = FIRE_VOL_DB
 		p.unit_size = 14.0
 		p.max_distance = 120.0
@@ -283,7 +292,7 @@ func _schedule_casing() -> void:
 	)
 
 func _play_fire_sound() -> void:
-	if _fire_stream == null or _audio_voices.is_empty():
+	if _fire_stream_list.is_empty() or _audio_voices.is_empty():
 		return
 	var idx: int = _audio_idx
 	_audio_idx = (_audio_idx + 1) % _audio_voices.size()
@@ -292,6 +301,7 @@ func _play_fire_sound() -> void:
 	var prev: Tween = _audio_tweens[idx]
 	if prev != null and prev.is_valid():
 		prev.kill()
+	voice.stream = _fire_stream_list[_rng.randi() % _fire_stream_list.size()]
 	voice.volume_db = FIRE_VOL_DB
 	voice.pitch_scale = _rng.randf_range(FIRE_PITCH_MIN, FIRE_PITCH_MAX)
 	voice.play()
