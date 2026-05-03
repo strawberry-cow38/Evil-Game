@@ -37,8 +37,9 @@ var _category_idx := 0
 var _sort_mode: SortMode = SortMode.NAME
 var _sort_asc := true
 
-# Cached order of item ids matching the current ItemList rows.
-var _row_ids: Array[String] = []
+# Cached row metadata keyed to current ItemList rows. Each entry mirrors the
+# inventory entry dict (id, uid, is_instance, condition, quality, ...).
+var _rows: Array[Dictionary] = []
 
 # Favorite-binding mode: when true, next 1..9 press binds the selected item.
 var _binding_mode := false
@@ -395,32 +396,51 @@ func _refresh_list() -> void:
 	entries = filtered
 	entries.sort_custom(_compare_entries)
 
-	var selected_id: String = ""
-	var sel: PackedInt32Array = _list.get_selected_items()
-	if sel.size() > 0 and sel[0] < _row_ids.size():
-		selected_id = _row_ids[sel[0]]
-
-	var equipped: String = String(_inventory.get("equipped"))
+	# Try to keep the current selection across refresh by matching uid first
+	# (instances are unique) then id (stackables).
+	var prev: Dictionary = _selected_row()
 	_list.clear()
-	_row_ids.clear()
+	_rows.clear()
 	var new_select := -1
+	var equipped_uid: int = int(_inventory.get("equipped_uid"))
 	for i in range(entries.size()):
 		var e: Dictionary = entries[i]
-		var slot: int = int(_inventory.find_favorite_slot(e.id))
-		var fav_marker: String = "  ★%d" % slot if slot > 0 else ""
-		var eq_marker: String = "  [E]" if e.id == equipped else ""
-		var label: String = "%s   x%d   %.2f kg   ¢%d%s%s" % [
-			e.name, e.count, e.weight_total, e.value_each, fav_marker, eq_marker,
-		]
+		var label: String = _row_label(e, equipped_uid)
 		_list.add_item(label)
-		_list.set_item_icon(i, _swatch_icon(Items.item_color(e.id)))
-		_row_ids.append(e.id)
-		if e.id == selected_id:
-			new_select = i
+		var icon_color: Color = Items.item_color(String(e.id))
+		if bool(e.is_instance):
+			# Tint the swatch toward quality color so legendary stuff pops.
+			var qc: Color = Items.quality_color(int(e.quality))
+			icon_color = icon_color.lerp(qc, 0.45)
+		_list.set_item_icon(i, _swatch_icon(icon_color))
+		_rows.append(e)
+		if not prev.is_empty():
+			if bool(e.is_instance) and bool(prev.get("is_instance", false)):
+				if int(e.uid) == int(prev.get("uid", 0)):
+					new_select = i
+			elif not bool(e.is_instance) and not bool(prev.get("is_instance", false)):
+				if String(e.id) == String(prev.get("id", "")):
+					new_select = i
 	if _list.item_count > 0:
 		if new_select < 0:
 			new_select = 0
 		_list.select(new_select)
+
+func _row_label(e: Dictionary, equipped_uid: int) -> String:
+	if bool(e.is_instance):
+		var slot: int = int(_inventory.find_favorite_slot_for_uid(int(e.uid)))
+		var fav_marker: String = "  ★%d" % slot if slot > 0 else ""
+		var eq_marker: String = "  [E]" if int(e.uid) == equipped_uid else ""
+		var qual: String = Items.quality_name(int(e.quality))
+		var tier: Dictionary = Items.condition_tier(float(e.condition), String(e.kind))
+		return "%s %s   %.2f kg   ¢%d   %s %d%%%s%s" % [
+			qual, e.name, e.weight_total, e.value_each,
+			tier.name, int(round(float(e.condition) * 100.0)),
+			fav_marker, eq_marker,
+		]
+	return "%s   x%d   %.2f kg   ¢%d" % [
+		e.name, e.count, e.weight_total, e.value_each,
+	]
 
 func _compare_entries(a: Dictionary, b: Dictionary) -> bool:
 	var lt := false
@@ -433,18 +453,30 @@ func _compare_entries(a: Dictionary, b: Dictionary) -> bool:
 			lt = a.value_each < b.value_each
 	return lt if _sort_asc else not lt
 
-func _selected_id() -> String:
+func _selected_row() -> Dictionary:
 	var sel: PackedInt32Array = _list.get_selected_items()
 	if sel.is_empty():
-		return ""
+		return {}
 	var idx: int = sel[0]
-	if idx < 0 or idx >= _row_ids.size():
-		return ""
-	return _row_ids[idx]
+	if idx < 0 or idx >= _rows.size():
+		return {}
+	return _rows[idx]
+
+func _selected_id() -> String:
+	var r: Dictionary = _selected_row()
+	return String(r.get("id", ""))
+
+func _selected_uid() -> int:
+	var r: Dictionary = _selected_row()
+	return int(r.get("uid", 0))
+
+func _selected_is_instance() -> bool:
+	var r: Dictionary = _selected_row()
+	return bool(r.get("is_instance", false))
 
 func _refresh_preview() -> void:
-	var id: String = _selected_id()
-	if id == "":
+	var row: Dictionary = _selected_row()
+	if row.is_empty():
 		_preview_color.color = Color(0.2, 0.2, 0.2)
 		_preview_name.text = "—"
 		_preview_kind.text = ""
@@ -454,16 +486,30 @@ func _refresh_preview() -> void:
 		_equip_btn.disabled = true
 		_equip_btn.text = "Equip [Enter]"
 		return
+	var id: String = String(row.id)
 	_preview_color.color = Items.item_color(id)
 	_preview_name.text = Items.item_name(id)
-	_preview_kind.text = Items.item_kind(id).capitalize()
 	_preview_per_weight.text = "Weight: %.2f kg each" % Items.item_weight(id)
 	_preview_value.text = "Value:  ¢%d each" % Items.item_value(id)
-	var c: int = _inventory.counts.get(id, 0)
-	_preview_count.text = "Held:    x%d  (%.2f kg total)" % [c, Items.item_weight(id) * c]
-	var equippable: bool = Items.item_kind(id) == "weapon"
+	if bool(row.is_instance):
+		var qual: String = Items.quality_name(int(row.quality))
+		var qcol: Color = Items.quality_color(int(row.quality))
+		var tier: Dictionary = Items.condition_tier(float(row.condition), Items.item_kind(id))
+		_preview_kind.text = "%s · %s · %s %d%%" % [
+			Items.item_kind(id).capitalize(), qual,
+			tier.name, int(round(float(row.condition) * 100.0)),
+		]
+		_preview_kind.modulate = qcol
+		_preview_count.text = "Held:    1 instance  (%.2f kg)" % Items.item_weight(id)
+	else:
+		_preview_kind.text = Items.item_kind(id).capitalize()
+		_preview_kind.modulate = Color(0.75, 0.85, 1.0)
+		var c: int = _inventory.counts.get(id, 0)
+		_preview_count.text = "Held:    x%d  (%.2f kg total)" % [c, Items.item_weight(id) * c]
+	var equippable: bool = bool(row.is_instance) and Items.item_kind(id) == "weapon"
 	_equip_btn.disabled = not equippable
-	if equippable and String(_inventory.get("equipped")) == id:
+	var equipped_uid: int = int(_inventory.get("equipped_uid"))
+	if equippable and int(row.uid) == equipped_uid:
 		_equip_btn.text = "Equipped"
 	else:
 		_equip_btn.text = "Equip [Enter]"
@@ -495,16 +541,17 @@ func _swatch_icon(color: Color) -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 func _equip_selected() -> void:
-	var id: String = _selected_id()
-	if id == "":
+	var row: Dictionary = _selected_row()
+	if row.is_empty() or not bool(row.is_instance):
 		return
-	if Items.item_kind(id) != "weapon":
+	if Items.item_kind(String(row.id)) != "weapon":
 		return
+	var uid: int = int(row.uid)
 	# Toggle: clicking the already-equipped weapon unequips it.
-	if String(_inventory.get("equipped")) == id:
-		_inventory.set_equipped("")
+	if int(_inventory.get("equipped_uid")) == uid:
+		_inventory.set_equipped(0)
 	else:
-		_inventory.set_equipped(id)
+		_inventory.set_equipped(uid)
 
 func _on_item_clicked(_idx: int, _pos: Vector2, btn: int) -> void:
 	_refresh_preview()
@@ -516,20 +563,34 @@ func _on_item_activated(_idx: int) -> void:
 	_equip_selected()
 
 func _open_inspect() -> void:
-	var id: String = _selected_id()
-	if id == "":
+	var row: Dictionary = _selected_row()
+	if row.is_empty():
 		return
+	var id: String = String(row.id)
 	_inspect_color.color = Items.item_color(id)
-	_inspect_name.text = Items.item_name(id)
+	if bool(row.is_instance):
+		var qual: String = Items.quality_name(int(row.quality))
+		var qcol: Color = Items.quality_color(int(row.quality))
+		var tier: Dictionary = Items.condition_tier(float(row.condition), Items.item_kind(id))
+		_inspect_name.text = "%s %s" % [qual, Items.item_name(id)]
+		_inspect_name.modulate = qcol
+		_inspect_stats.text = "Kind:       %s\nQuality:    %s\nCondition:  %s (%d%%)\nWeight:     %.2f kg\nValue:      ¢%d" % [
+			Items.item_kind(id).capitalize(), qual,
+			tier.name, int(round(float(row.condition) * 100.0)),
+			Items.item_weight(id), Items.item_value(id),
+		]
+	else:
+		_inspect_name.text = Items.item_name(id)
+		_inspect_name.modulate = Color(1, 1, 1)
+		var c: int = _inventory.counts.get(id, 0)
+		_inspect_stats.text = "Kind:    %s\nWeight:  %.2f kg each\nValue:   ¢%d each\nHeld:    x%d  (%.2f kg)" % [
+			Items.item_kind(id).capitalize(),
+			Items.item_weight(id),
+			Items.item_value(id),
+			c,
+			Items.item_weight(id) * c,
+		]
 	_inspect_desc.text = Items.item_desc(id)
-	var c: int = _inventory.counts.get(id, 0)
-	_inspect_stats.text = "Kind:    %s\nWeight:  %.2f kg each\nValue:   ¢%d each\nHeld:    x%d  (%.2f kg)" % [
-		Items.item_kind(id).capitalize(),
-		Items.item_weight(id),
-		Items.item_value(id),
-		c,
-		Items.item_weight(id) * c,
-	]
 	for child in _inspect_slots_box.get_children():
 		child.queue_free()
 	var slots: Array = Items.item_slots(id)
@@ -579,9 +640,9 @@ func _input(event: InputEvent) -> void:
 			return
 		for slot in range(1, 10):
 			if event.is_action_pressed("equip_%d" % slot):
-				var id: String = _selected_id()
-				if id != "":
-					_inventory.set_favorite(slot, id)
+				var uid: int = _selected_uid()
+				if uid != 0:
+					_inventory.set_favorite(slot, uid)
 				_binding_mode = false
 				_refresh_status()
 				get_viewport().set_input_as_handled()
@@ -605,7 +666,9 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("favorite"):
-		if _selected_id() != "":
+		# Only instance items (weapons/apparel) get favorite slots — they're
+		# the only things you'd want bound to a hotkey.
+		if _selected_uid() != 0:
 			_binding_mode = true
 			_refresh_status()
 		get_viewport().set_input_as_handled()
@@ -642,14 +705,16 @@ func _input(event: InputEvent) -> void:
 		return
 
 func _drop_selected() -> void:
-	var id: String = _selected_id()
-	if id == "" or _inventory == null:
+	var row: Dictionary = _selected_row()
+	if row.is_empty() or _inventory == null:
 		return
-	# Inventory is a child of the Player node — call drop_item there.
 	var player: Node = _inventory.get_parent()
-	if player == null or not player.has_method("drop_item"):
+	if player == null:
 		return
-	player.drop_item(id, 1)
+	if bool(row.is_instance) and player.has_method("drop_instance"):
+		player.drop_instance(int(row.uid))
+	elif player.has_method("drop_item"):
+		player.drop_item(String(row.id), 1)
 
 func _move_selection(direction: int) -> void:
 	if _list.item_count == 0:

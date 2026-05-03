@@ -4,6 +4,9 @@ const Items = preload("res://items.gd")
 
 @export var item_id: String = "apple"
 @export var count: int = 1
+# Optional instance payload for unstackable items (weapons/apparel). If
+# non-empty, looter calls inventory.add_instance to preserve condition+quality.
+var instance: Dictionary = {}
 
 func _ready() -> void:
 	add_to_group("pickup")
@@ -50,6 +53,11 @@ func _ready() -> void:
 
 func get_label() -> String:
 	var n: String = Items.item_name(item_id)
+	if not instance.is_empty():
+		var q: int = int(instance.get("quality", Items.QUALITY_NORMAL))
+		var cond: float = float(instance.get("condition", 1.0))
+		var tier: Dictionary = Items.condition_tier(cond, Items.item_kind(item_id))
+		return "%s %s (%s)" % [Items.quality_name(q), n, tier.name]
 	if count > 1:
 		return "%s x%d" % [n, count]
 	return n

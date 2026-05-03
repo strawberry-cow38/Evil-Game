@@ -20,6 +20,7 @@ const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
 const INTERACT_MASK := 0xFFFFFFFF
 
+const Items = preload("res://items.gd")
 const PICKUP_SCRIPT := preload("res://pickup.gd")
 const DROP_FORWARD := 1.1            # m in front of player center
 const DROP_SPREAD := 0.45            # m random radius around drop anchor
@@ -27,6 +28,18 @@ const DROP_HEIGHT := 0.35            # m above floor
 const DROP_WALL_BUFFER := 0.30       # m back-off from wall hit point
 
 const STARTING_WEAPONS: Array[String] = ["akm", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
+# Quality + condition demo seed — varied so every tier color shows up in the
+# inventory list right at game start.
+const STARTING_WEAPON_INSTANCES: Array = [
+	{"id": "akm",     "condition": 1.00, "quality": 2},  # Normal Pristine
+	{"id": "m16a2",   "condition": 0.92, "quality": 3},  # Good Pristine
+	{"id": "bizon",   "condition": 0.65, "quality": 1},  # Poor Worn
+	{"id": "mp5sd",   "condition": 0.88, "quality": 4},  # Excellent Pristine
+	{"id": "makarov", "condition": 0.42, "quality": 2},  # Normal Damaged
+	{"id": "m249",    "condition": 0.78, "quality": 3},  # Good Worn
+	{"id": "m60",     "condition": 0.20, "quality": 0},  # Awful Ruined
+	{"id": "mgl",     "condition": 1.00, "quality": 6},  # Legendary Pristine
+]
 const STARTING_AMMO: Dictionary = {
 	"ammo_762x39":  200,
 	"ammo_556nato": 200,
@@ -68,26 +81,42 @@ func _ready() -> void:
 func _seed_starting_inventory() -> void:
 	if _inventory == null or not _inventory.has_method("grant"):
 		return
-	for id in STARTING_WEAPONS:
-		_inventory.grant(id, 1)
+	for entry in STARTING_WEAPON_INSTANCES:
+		_inventory.grant_instance(
+			String(entry.id),
+			float(entry.condition),
+			int(entry.quality),
+		)
 	for id in STARTING_AMMO.keys():
 		_inventory.grant(id, int(STARTING_AMMO[id]))
-	# Auto-equip first weapon and bind digit defaults so the player isn't naked.
-	if STARTING_WEAPONS.size() > 0:
-		_inventory.set_equipped(STARTING_WEAPONS[0])
-	for i in range(STARTING_WEAPONS.size()):
-		var slot: int = i + 1
-		if slot > 9:
-			break
-		_inventory.set_favorite(slot, STARTING_WEAPONS[i])
+	# Walk the freshly-spawned weapon instances in grant order; auto-equip the
+	# first and bind subsequent ones to digit slots 1..9 so the player isn't
+	# naked.
+	var slot := 1
+	var first_uid := 0
+	for inst in _inventory.instances:
+		if Items.item_kind(String(inst.item_id)) != "weapon":
+			continue
+		if first_uid == 0:
+			first_uid = int(inst.uid)
+		if slot <= 9:
+			_inventory.set_favorite(slot, int(inst.uid))
+			slot += 1
+	if first_uid != 0:
+		_inventory.set_equipped(first_uid)
 
-func _on_equipped_changed(id: String) -> void:
+func _on_equipped_changed(uid: int) -> void:
 	if _weapon == null:
 		return
-	if id == "" and _weapon.has_method("unequip"):
-		_weapon.unequip()
-	elif id != "" and _weapon.has_method("equip"):
-		_weapon.equip(id)
+	if uid == 0:
+		if _weapon.has_method("unequip"):
+			_weapon.unequip()
+		return
+	var inst: Dictionary = _inventory.get_instance(uid)
+	if inst.is_empty():
+		return
+	if _weapon.has_method("equip"):
+		_weapon.equip(String(inst.item_id))
 
 func _build_prompt() -> void:
 	# Tiny center-bottom hint label, lives on its own CanvasLayer so the HUD
@@ -230,25 +259,32 @@ func _check_equip_hotkeys() -> void:
 		return
 	for slot in range(1, 10):
 		if Input.is_action_just_pressed("equip_%d" % slot):
-			var id: String = _inventory.favorite_id(slot)
-			if id != "" and _inventory.has_item(id):
-				_inventory.set_equipped(id)
+			var uid: int = _inventory.favorite_uid(slot)
+			if uid != 0 and _inventory.has_uid(uid):
+				_inventory.set_equipped(uid)
 
+# Stackable drop path (ammo, food, etc).
 func drop_item(id: String, count: int = 1) -> bool:
 	if _inventory == null or count <= 0:
 		return false
-	if not _inventory.has_method("remove") or not _inventory.has_item(id):
+	if not _inventory.has_item(id):
 		return false
-	# If we drop the currently-equipped weapon to zero, unequip first.
-	var was_equipped: bool = String(_inventory.get("equipped")) == id
 	if not _inventory.remove(id, count):
 		return false
-	if was_equipped and not _inventory.has_item(id):
-		_inventory.set_equipped("")
-	_spawn_drop(id, count)
+	_spawn_drop(id, count, {})
 	return true
 
-func _spawn_drop(id: String, count: int) -> void:
+# Instance drop path (weapons, apparel) — preserves condition + quality.
+func drop_instance(uid: int) -> bool:
+	if _inventory == null or uid == 0:
+		return false
+	var inst: Dictionary = _inventory.remove_instance(uid)
+	if inst.is_empty():
+		return false
+	_spawn_drop(String(inst.item_id), 1, inst)
+	return true
+
+func _spawn_drop(id: String, count: int, instance: Dictionary) -> void:
 	# Anchor in front of the player on the floor plane (ignore camera pitch).
 	var fwd: Vector3 = -global_transform.basis.z
 	fwd.y = 0.0
@@ -281,15 +317,23 @@ func _spawn_drop(id: String, count: int) -> void:
 	var p := PICKUP_SCRIPT.new()
 	p.item_id = id
 	p.count = count
+	if not instance.is_empty():
+		p.instance = instance.duplicate(true)
 	get_tree().current_scene.add_child(p)
 	p.global_position = anchor
 
 func _loot(target: Node) -> void:
-	if _inventory == null or target == null or not _inventory.has_method("add"):
+	if _inventory == null or target == null:
 		return
-	var id: String = target.get("item_id")
+	var id: String = String(target.get("item_id"))
 	var count: int = int(target.get("count"))
-	if _inventory.add(id, count):
+	var inst: Dictionary = target.get("instance") if target.get("instance") != null else {}
+	var ok: bool
+	if not inst.is_empty():
+		ok = _inventory.add_instance(inst)
+	else:
+		ok = _inventory.add(id, count)
+	if ok:
 		target.queue_free()
 		_interact_target = null
 		_prompt_label.text = ""

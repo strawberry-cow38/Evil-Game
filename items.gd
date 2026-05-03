@@ -53,3 +53,49 @@ static func item_desc(id: String) -> String:
 
 static func item_slots(id: String) -> Array:
 	return DEFS.get(id, {}).get("slots", [])
+
+# --- Instance system -------------------------------------------------------
+# Kinds whose items are unstackable: each pickup is a unique instance with
+# its own Condition (% wear) and Quality (craftsmanship tier).
+const INSTANCE_KINDS: Array = ["weapon", "apparel", "armor", "clothing"]
+
+const QUALITY_AWFUL := 0
+const QUALITY_POOR := 1
+const QUALITY_NORMAL := 2
+const QUALITY_GOOD := 3
+const QUALITY_EXCELLENT := 4
+const QUALITY_MASTERWORK := 5
+const QUALITY_LEGENDARY := 6
+
+const QUALITY := {
+	0: {"name": "Awful",      "color": Color(0.55, 0.50, 0.45)},
+	1: {"name": "Poor",       "color": Color(0.75, 0.70, 0.65)},
+	2: {"name": "Normal",     "color": Color(0.95, 0.95, 0.95)},
+	3: {"name": "Good",       "color": Color(0.50, 0.95, 0.55)},
+	4: {"name": "Excellent",  "color": Color(0.40, 0.80, 1.00)},
+	5: {"name": "Masterwork", "color": Color(0.85, 0.45, 0.95)},
+	6: {"name": "Legendary",  "color": Color(1.00, 0.65, 0.18)},
+}
+
+static func is_instance_kind(id: String) -> bool:
+	return INSTANCE_KINDS.has(item_kind(id))
+
+static func quality_name(q: int) -> String:
+	return String(QUALITY.get(clampi(q, 0, 6), QUALITY[QUALITY_NORMAL])["name"])
+
+static func quality_color(q: int) -> Color:
+	return QUALITY.get(clampi(q, 0, 6), QUALITY[QUALITY_NORMAL])["color"]
+
+# Returns {"name": String, "color": Color}. Uses "Tattered" for soft goods,
+# "Damaged" for weapons/armor at the same tier band.
+static func condition_tier(condition: float, kind: String) -> Dictionary:
+	var c: float = clampf(condition, 0.0, 1.0)
+	if c < 0.25:
+		return {"name": "Ruined", "color": Color(0.95, 0.20, 0.18)}
+	if c < 0.50:
+		var soft: bool = kind == "apparel" or kind == "clothing"
+		var nm: String = "Tattered" if soft else "Damaged"
+		return {"name": nm, "color": Color(0.95, 0.55, 0.15)}
+	if c < 0.80:
+		return {"name": "Worn", "color": Color(0.90, 0.85, 0.25)}
+	return {"name": "Pristine", "color": Color(0.30, 0.95, 0.35)}
