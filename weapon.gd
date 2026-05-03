@@ -272,6 +272,7 @@ const PROFILES := {
 }
 const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
+const Items = preload("res://items.gd")
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
@@ -754,6 +755,22 @@ func _fire(now: float) -> void:
 	if has_hit:
 		var material := _classify_material(hit_collider)
 		_schedule_impact(hit_pos, hit_normal, material, impact_delay)
+		_schedule_damage(hit_collider, impact_delay)
+
+func _schedule_damage(collider: Object, delay: float) -> void:
+	if collider == null or not collider.has_method("take_damage"):
+		return
+	var dmg: int = Items.ammo_damage(String(_profile.get("ammo_id", "")))
+	if dmg <= 0:
+		return
+	if delay <= 0.0:
+		collider.call("take_damage", dmg)
+		return
+	var timer := get_tree().create_timer(delay)
+	timer.timeout.connect(func():
+		if is_instance_valid(collider):
+			collider.call("take_damage", dmg)
+	)
 
 func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 	var mesh := ImmediateMesh.new()

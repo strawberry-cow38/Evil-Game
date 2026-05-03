@@ -23,12 +23,12 @@ const DEFS := {
 	"mgl":    {"name": "Milkor MGL",   "weight": 5.50, "value":  800, "color": Color(0.18, 0.30, 0.20), "kind": "weapon", "desc": "40mm 6-round revolving grenade launcher. Goes boom.", "slots": ["Optic"]},
 	"makarov":{"name": "PM Makarov",   "weight": 0.66, "value":  120, "color": Color(0.18, 0.18, 0.20), "kind": "weapon", "desc": "Soviet 9×18 service pistol. 8-round mag.", "slots": ["Muzzle"]},
 
-	"ammo_762x39":  {"name": "7.62×39mm",       "weight": 0.016, "value":  1, "color": Color(0.85, 0.65, 0.20), "kind": "ammo", "desc": "Soviet intermediate cartridge. Feeds the AKM."},
-	"ammo_556nato": {"name": "5.56×45mm NATO",  "weight": 0.012, "value":  1, "color": Color(0.90, 0.78, 0.40), "kind": "ammo", "desc": "NATO standard. Feeds the M16A2 and M249."},
-	"ammo_9mm":     {"name": "9×19mm",          "weight": 0.012, "value":  1, "color": Color(0.78, 0.72, 0.55), "kind": "ammo", "desc": "Pistol cartridge. Feeds the Bizon and MP5SD."},
-	"ammo_9x18":    {"name": "9×18mm Makarov",  "weight": 0.010, "value":  1, "color": Color(0.72, 0.66, 0.50), "kind": "ammo", "desc": "Soviet pistol round. No weapon uses it yet."},
-	"ammo_762nato": {"name": "7.62×51mm NATO",  "weight": 0.025, "value":  2, "color": Color(0.80, 0.55, 0.18), "kind": "ammo", "desc": "Full-power NATO rifle round. Feeds the M60."},
-	"ammo_40mm":    {"name": "40mm Grenade",    "weight": 0.230, "value": 15, "color": Color(0.30, 0.55, 0.30), "kind": "ammo", "desc": "Low-velocity 40mm HE grenade. Feeds the MGL."},
+	"ammo_762x39":  {"name": "7.62×39mm",       "weight": 0.016, "value":  1, "color": Color(0.85, 0.65, 0.20), "kind": "ammo", "damage": 50, "desc": "Soviet intermediate cartridge. Feeds the AKM."},
+	"ammo_556nato": {"name": "5.56×45mm NATO",  "weight": 0.012, "value":  1, "color": Color(0.90, 0.78, 0.40), "kind": "ammo", "damage": 40, "desc": "NATO standard. Feeds the M16A2 and M249."},
+	"ammo_9mm":     {"name": "9×19mm",          "weight": 0.012, "value":  1, "color": Color(0.78, 0.72, 0.55), "kind": "ammo", "damage": 30, "desc": "Pistol cartridge. Feeds the Bizon and MP5SD."},
+	"ammo_9x18":    {"name": "9×18mm Makarov",  "weight": 0.010, "value":  1, "color": Color(0.72, 0.66, 0.50), "kind": "ammo", "damage": 28, "desc": "Soviet pistol round. Feeds the Makarov."},
+	"ammo_762nato": {"name": "7.62×51mm NATO",  "weight": 0.025, "value":  2, "color": Color(0.80, 0.55, 0.18), "kind": "ammo", "damage": 55, "desc": "Full-power NATO rifle round. Feeds the M60."},
+	"ammo_40mm":    {"name": "40mm Grenade",    "weight": 0.230, "value": 15, "color": Color(0.30, 0.55, 0.30), "kind": "ammo", "damage":  0, "desc": "Low-velocity 40mm HE grenade. Feeds the MGL."},
 }
 
 static func item_def(id: String) -> Dictionary:
@@ -54,6 +54,9 @@ static func item_desc(id: String) -> String:
 
 static func item_slots(id: String) -> Array:
 	return DEFS.get(id, {}).get("slots", [])
+
+static func ammo_damage(id: String) -> int:
+	return int(DEFS.get(id, {}).get("damage", 0))
 
 # --- Instance system -------------------------------------------------------
 # Kinds whose items are unstackable: each pickup is a unique instance with
