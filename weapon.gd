@@ -71,6 +71,8 @@ const PROFILES := {
 		"rpm": 600.0,
 		"modes": [FireMode.SEMI, FireMode.AUTO],
 		"fire_sound": "res://assets/audio/Shot_GTEK762mmSoviet.ogg",
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
 	},
 	"m16a2": {
 		"name": "M16A2",
@@ -78,6 +80,8 @@ const PROFILES := {
 		"rpm": 800.0,
 		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
 		"fire_sound": "res://assets/audio/Shot_GTEK556mm.ogg",
+		"fire_hold": 0.09,
+		"fire_fade": 0.16,
 	},
 }
 const WEAPON_ORDER := ["akm", "m16a2"]
@@ -247,9 +251,11 @@ func _play_fire_sound() -> void:
 	voice.pitch_scale = _rng.randf_range(FIRE_PITCH_MIN, FIRE_PITCH_MAX)
 	voice.play()
 	# Hold full volume briefly, then fade the tail to silence and stop the voice.
+	var hold: float = float(_profile.get("fire_hold", FIRE_HOLD_TIME))
+	var fade: float = float(_profile.get("fire_fade", FIRE_FADE_TIME))
 	var t: Tween = create_tween()
-	t.tween_interval(FIRE_HOLD_TIME)
-	t.tween_property(voice, "volume_db", FIRE_FADE_DB, FIRE_FADE_TIME)
+	t.tween_interval(hold)
+	t.tween_property(voice, "volume_db", FIRE_FADE_DB, fade)
 	t.tween_callback(voice.stop)
 	_audio_tweens[idx] = t
 
