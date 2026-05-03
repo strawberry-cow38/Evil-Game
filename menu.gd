@@ -5,6 +5,22 @@ const Items = preload("res://items.gd")
 const TAB_INVENTORY := "Inventory"
 const TABS: Array = [TAB_INVENTORY]   # extensible — add stats/map/etc here later
 
+# Category filter for the inventory list. "All" matches anything; the rest
+# match by item kind. "Misc" is the catch-all for anything not claimed by a
+# named category.
+const CATEGORIES: Array = [
+	{"label": "All",       "kinds": []},
+	{"label": "Weapons",   "kinds": ["weapon"]},
+	{"label": "Ammo",      "kinds": ["ammo"]},
+	{"label": "Medical",   "kinds": ["medical"]},
+	{"label": "Apparel",   "kinds": ["apparel", "armor", "clothing"]},
+	{"label": "Resources", "kinds": ["food", "resource"]},
+	{"label": "Building",  "kinds": ["building", "material"]},
+	{"label": "Misc",      "kinds": ["__misc__"]},
+]
+# Kinds claimed by named categories — anything outside this set falls into Misc.
+const NAMED_KINDS: Array = ["weapon", "apparel", "armor", "clothing", "ammo", "medical", "food", "resource", "building", "material"]
+
 enum SortMode { NAME, WEIGHT_TOTAL, VALUE_EACH }
 const SORT_LABELS := {
 	SortMode.NAME: "Name",
@@ -17,6 +33,7 @@ const SORT_LABELS := {
 var _inventory: Node
 var _open := false
 var _tab_idx := 0
+var _category_idx := 0
 var _sort_mode: SortMode = SortMode.NAME
 var _sort_asc := true
 
@@ -30,6 +47,8 @@ var _binding_mode := false
 var _root: Control
 var _tab_box: HBoxContainer
 var _tab_buttons: Array[Button] = []
+var _category_box: HBoxContainer
+var _category_buttons: Array[Button] = []
 var _list: ItemList
 var _preview_color: ColorRect
 var _preview_name: Label
@@ -128,6 +147,21 @@ func _build_ui() -> void:
 		_tab_box.add_child(b)
 		_tab_buttons.append(b)
 
+	# Category bar (All / Weapons / Ammo / etc).
+	_category_box = HBoxContainer.new()
+	_category_box.add_theme_constant_override("separation", 4)
+	vb.add_child(_category_box)
+	for i in range(CATEGORIES.size()):
+		var cb := Button.new()
+		cb.text = String(CATEGORIES[i].label)
+		cb.toggle_mode = true
+		cb.focus_mode = Control.FOCUS_NONE
+		cb.add_theme_font_size_override("font_size", 16)
+		var cidx := i
+		cb.pressed.connect(func(): _select_category(cidx))
+		_category_box.add_child(cb)
+		_category_buttons.append(cb)
+
 	vb.add_child(HSeparator.new())
 
 	var content := HBoxContainer.new()
@@ -210,7 +244,7 @@ func _build_ui() -> void:
 	footer.add_child(_sort_label)
 
 	_hint_label = Label.new()
-	_hint_label.text = "[Enter/Click] equip  [X] inspect  [R] drop  [Q] favorite→1-9  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
+	_hint_label.text = "[Enter/Click] equip  [X] inspect  [R] drop  [Q] favorite→1-9  [←/→] category  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
 	_hint_label.modulate = Color(0.75, 0.75, 0.75)
 	_hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -232,6 +266,7 @@ func _build_ui() -> void:
 
 	_build_inspect_overlay()
 	_select_tab(0)
+	_select_category(0)
 
 func _build_inspect_overlay() -> void:
 	_inspect_root = Control.new()
@@ -321,6 +356,22 @@ func _select_tab(i: int) -> void:
 	for j in range(_tab_buttons.size()):
 		_tab_buttons[j].button_pressed = (j == _tab_idx)
 
+func _select_category(i: int) -> void:
+	_category_idx = clampi(i, 0, CATEGORIES.size() - 1)
+	for j in range(_category_buttons.size()):
+		_category_buttons[j].button_pressed = (j == _category_idx)
+	if _open:
+		_refresh_list()
+		_refresh_preview()
+
+func _category_matches(kind: String) -> bool:
+	var kinds: Array = CATEGORIES[_category_idx].kinds
+	if kinds.is_empty():
+		return true
+	if kinds.has("__misc__"):
+		return not NAMED_KINDS.has(kind)
+	return kinds.has(kind)
+
 func _on_inventory_changed() -> void:
 	if _open:
 		_refresh()
@@ -336,6 +387,12 @@ func _refresh_list() -> void:
 	if _inventory == null:
 		return
 	var entries: Array = _inventory.entries()
+	# Filter by current category before sort.
+	var filtered: Array = []
+	for e in entries:
+		if _category_matches(String(e.kind)):
+			filtered.append(e)
+	entries = filtered
 	entries.sort_custom(_compare_entries)
 
 	var selected_id: String = ""
@@ -554,11 +611,11 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("nav_left"):
-		_select_tab((_tab_idx - 1 + TABS.size()) % TABS.size())
+		_select_category((_category_idx - 1 + CATEGORIES.size()) % CATEGORIES.size())
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("nav_right"):
-		_select_tab((_tab_idx + 1) % TABS.size())
+		_select_category((_category_idx + 1) % CATEGORIES.size())
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("sort_mode"):
