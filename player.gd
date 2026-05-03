@@ -41,6 +41,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_camera.rotation.x = _pitch
 	elif event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
+	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE:
+		# Click anywhere in the window re-grabs the cursor; swallow the click
+		# so the gun doesn't fire on the same press.
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
 	_ads = Input.is_action_pressed("ads")
