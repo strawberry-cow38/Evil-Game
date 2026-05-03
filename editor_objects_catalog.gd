@@ -28,4 +28,12 @@ static func _build_demo_crate() -> Node3D:
 	mi.material_override = mat
 	mi.position = Vector3(0, 0.6, 0)
 	holder.add_child(mi)
+	var body := StaticBody3D.new()
+	body.position = Vector3(0, 0.6, 0)
+	var shape := CollisionShape3D.new()
+	var box_shape := BoxShape3D.new()
+	box_shape.size = Vector3(1.4, 1.2, 1.4)
+	shape.shape = box_shape
+	body.add_child(shape)
+	holder.add_child(body)
 	return holder
