@@ -10,7 +10,7 @@ const CATALOG := preload("res://editor_objects_catalog.gd")
 const COLOR_NORMAL := Color(0.45, 1.0, 0.6, 1.0)
 const COLOR_SELECTED := Color(1.0, 0.95, 0.35, 1.0)
 
-const PAD := 0.08
+const PAD := 0.0  # strict fit — wireframe sits exactly on the content's AABB
 const FALLBACK_SIZE := Vector3(2.0, 2.0, 2.0)
 
 var object_id: String = ""

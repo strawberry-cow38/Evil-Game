@@ -10,7 +10,7 @@ const CATALOG := preload("res://editor_effect_catalog.gd")
 const COLOR_NORMAL := Color(0.4, 0.85, 1.0, 1.0)
 const COLOR_SELECTED := Color(1.0, 0.95, 0.35, 1.0)
 
-const PAD := 0.08  # margin around content so box doesn't z-fight surface
+const PAD := 0.0  # strict fit — wireframe sits exactly on the content's AABB
 const FALLBACK_SIZE := Vector3(2.0, 2.0, 2.0)  # used if catalog has no mesh
 
 var effect_id: String = ""
