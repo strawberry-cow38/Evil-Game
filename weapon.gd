@@ -45,6 +45,21 @@ const RECOIL_PATTERN_M16: Array[Vector2] = [
 	Vector2(-0.75, 0.65),
 	Vector2( 0.85, 0.55),
 ]
+# M60: heavy 7.62 LMG thump, big climb + drift, slower cyclic than M249.
+const RECOIL_PATTERN_M60: Array[Vector2] = [
+	Vector2(-0.25, 1.40),
+	Vector2(-0.45, 1.60),
+	Vector2(-0.10, 1.80),
+	Vector2(-0.60, 1.90),
+	Vector2( 0.10, 1.90),
+	Vector2(-0.80, 1.85),
+	Vector2( 0.20, 1.80),
+	Vector2(-0.95, 1.75),
+	Vector2( 0.30, 1.70),
+	Vector2(-1.10, 1.65),
+	Vector2( 0.40, 1.60),
+	Vector2(-1.25, 1.55),
+]
 # Milkor MGL: single launcher thump per pull.
 const RECOIL_PATTERN_MGL: Array[Vector2] = [
 	Vector2(-0.40, 2.80),
@@ -162,6 +177,17 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_M249,
 		"bloom_mult": 1.6,
 	},
+	"m60": {
+		"name": "M60",
+		"mag_size": 100,
+		"rpm": 600.0,
+		"modes": [FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm_BeltA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_M60,
+		"bloom_mult": 1.7,
+	},
 	"mgl": {
 		"name": "MGL",
 		"mag_size": 6,
@@ -176,7 +202,7 @@ const PROFILES := {
 		"projectile_velocity": 75.0,
 	},
 }
-const WEAPON_ORDER := ["akm", "m16a2", "mp5sd", "m249", "mgl"]
+const WEAPON_ORDER := ["akm", "m16a2", "mp5sd", "m249", "m60", "mgl"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 
 @export var camera_path: NodePath
