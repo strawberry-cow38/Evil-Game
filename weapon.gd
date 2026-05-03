@@ -171,6 +171,18 @@ const PROFILES := {
 		"bloom_mult": 1.0,
 		"ammo_id": "ammo_762x39",
 	},
+	"sks": {
+		"name": "SKS",
+		"mag_size": 10,
+		"rpm": 380.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mmSoviet.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_AKM,
+		"bloom_mult": 0.85,
+		"ammo_id": "ammo_762x39",
+	},
 	"m16a2": {
 		"name": "M16A2",
 		"mag_size": 30,
@@ -258,7 +270,7 @@ const PROFILES := {
 		"ammo_id": "ammo_40mm",
 	},
 }
-const WEAPON_ORDER := ["akm", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 
 @export var camera_path: NodePath
