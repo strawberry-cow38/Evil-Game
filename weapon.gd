@@ -48,6 +48,10 @@ const FIRE_SOUND_PATH := "res://assets/audio/Shot_GTEK762mmSoviet.ogg"
 const FIRE_PITCH_MIN := 0.94
 const FIRE_PITCH_MAX := 1.06
 const FIRE_VOL_DB := -4.0
+const FIRE_HOLD_TIME := 0.08    # full-volume window before fade kicks in
+const FIRE_FADE_TIME := 0.12    # fade-out length, kills the tail echo
+const FIRE_FADE_DB := -50.0
+const FIRE_VOICES := 4
 enum FireMode { SEMI, BURST, AUTO }
 
 @export var camera_path: NodePath
@@ -68,7 +72,9 @@ var _fire_mode: FireMode = FireMode.AUTO
 var _burst_remaining := 0
 var _reloading := false
 var _reload_remaining := 0.0
-var _audio: AudioStreamPlayer3D
+var _audio_voices: Array[AudioStreamPlayer3D] = []
+var _audio_tweens: Array[Tween] = []
+var _audio_idx := 0
 var _fire_stream: AudioStream
 
 func _ready() -> void:
@@ -85,13 +91,38 @@ func _setup_audio() -> void:
 	var abs_path: String = ProjectSettings.globalize_path(FIRE_SOUND_PATH)
 	if FileAccess.file_exists(abs_path):
 		_fire_stream = AudioStreamOggVorbis.load_from_file(abs_path)
-	_audio = AudioStreamPlayer3D.new()
-	_audio.stream = _fire_stream
-	_audio.volume_db = FIRE_VOL_DB
-	_audio.unit_size = 14.0
-	_audio.max_distance = 120.0
-	_audio.bus = "Master"
-	add_child(_audio)
+	# Voice pool so fast-fire shots don't restart each other mid-fade —
+	# the fade-out on shot N keeps ringing while shot N+1 starts on a fresh voice.
+	for i in range(FIRE_VOICES):
+		var p := AudioStreamPlayer3D.new()
+		p.stream = _fire_stream
+		p.volume_db = FIRE_VOL_DB
+		p.unit_size = 14.0
+		p.max_distance = 120.0
+		p.bus = "Master"
+		add_child(p)
+		_audio_voices.append(p)
+		_audio_tweens.append(null)
+
+func _play_fire_sound() -> void:
+	if _fire_stream == null or _audio_voices.is_empty():
+		return
+	var idx: int = _audio_idx
+	_audio_idx = (_audio_idx + 1) % _audio_voices.size()
+	var voice: AudioStreamPlayer3D = _audio_voices[idx]
+	# Cancel any in-flight fade on this voice before reusing it.
+	var prev: Tween = _audio_tweens[idx]
+	if prev != null and prev.is_valid():
+		prev.kill()
+	voice.volume_db = FIRE_VOL_DB
+	voice.pitch_scale = _rng.randf_range(FIRE_PITCH_MIN, FIRE_PITCH_MAX)
+	voice.play()
+	# Hold full volume briefly, then fade the tail to silence and stop the voice.
+	var t: Tween = create_tween()
+	t.tween_interval(FIRE_HOLD_TIME)
+	t.tween_property(voice, "volume_db", FIRE_FADE_DB, FIRE_FADE_TIME)
+	t.tween_callback(voice.stop)
+	_audio_tweens[idx] = t
 
 func is_ads() -> bool:
 	return _player != null and _player.has_method("is_ads") and _player.is_ads()
@@ -224,9 +255,7 @@ func _fire(now: float) -> void:
 	_target_pitch += deg_to_rad(pat.y + jitter_pitch) * mult
 	_recoil_index += 1
 
-	if _audio != null and _fire_stream != null:
-		_audio.pitch_scale = _rng.randf_range(FIRE_PITCH_MIN, FIRE_PITCH_MAX)
-		_audio.play()
+	_play_fire_sound()
 
 	# Sim trajectory from camera origin in camera-forward direction.
 	var origin: Vector3 = _camera.global_transform.origin
