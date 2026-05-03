@@ -206,19 +206,15 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 			_terrain.smooth_brush(world_pos, _brush_radius, 6.0 * s, delta)
 
 func _raycast_cursor() -> Dictionary:
-	# Cursor pos = mouse ray vs flat y=0 plane. No physics, no live
-	# heightmap walk — keeps brush input cheap and totally decoupled
-	# from terrain state (collider can be stale, terrain can be huge,
-	# doesn't matter).
+	# 3D mouse pick against the live heightmap (not the collider —
+	# collider only refreshes on stroke release, so it'd lag the brush
+	# while painting). ray_pick marches the heightmap directly.
 	var mouse := get_viewport().get_mouse_position()
 	var from := _camera.project_ray_origin(mouse)
 	var dir := _camera.project_ray_normal(mouse)
-	if absf(dir.y) < 0.0001:
+	var p: Vector3 = _terrain.ray_pick(from, dir)
+	if p == Vector3.INF:
 		return {}
-	var t: float = -from.y / dir.y
-	if t <= 0.0:
-		return {}
-	var p: Vector3 = from + dir * t
 	return {"position": p, "normal": Vector3.UP}
 
 func _is_over_ui() -> bool:
