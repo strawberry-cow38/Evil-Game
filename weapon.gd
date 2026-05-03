@@ -60,6 +60,9 @@ func _ready() -> void:
 	if player_path != NodePath():
 		_player = get_node(player_path)
 
+func is_ads() -> bool:
+	return _player != null and _player.has_method("is_ads") and _player.is_ads()
+
 func get_current_bloom_deg() -> float:
 	if _player == null:
 		return 0.0

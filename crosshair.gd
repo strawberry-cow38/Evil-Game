@@ -23,6 +23,10 @@ func _ready() -> void:
 		_camera = get_node(camera_path)
 
 func _process(delta: float) -> void:
+	var ads: bool = _weapon != null and _weapon.has_method("is_ads") and _weapon.is_ads()
+	visible = not ads
+	if not visible:
+		return
 	var target: float = _compute_radius_px()
 	var alpha: float = 1.0 - exp(-SMOOTH_RATE * delta)
 	_radius_px = lerpf(_radius_px, target, alpha)
