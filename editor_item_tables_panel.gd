@@ -42,6 +42,10 @@ var _picker: Node = null  # editor_item_picker_panel — wired via set_picker()
 # weight slider moves (or entries are added/removed) so the displayed
 # percentages always sum to 100% relative to the table's current weights.
 var _pct_labels: Dictionary = {}
+# Per-row sliders, keyed by entry index. Sliding one redistributes the
+# remaining 100 - v across the others, so every other slider needs to
+# move too (with signals blocked to avoid feedback).
+var _sliders: Dictionary = {}
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -182,7 +186,7 @@ func _on_create_pressed() -> void:
 		"name": nm,
 		"color": col,
 		"entries": [
-			{"id": REGISTRY.NOTHING_ID, "weight": 1.0},
+			{"id": REGISTRY.NOTHING_ID, "weight": 100.0},
 		],
 	}
 	_next_id += 1
@@ -275,6 +279,7 @@ func _refresh_entries() -> void:
 	for c in _entries_box.get_children():
 		c.queue_free()
 	_pct_labels.clear()
+	_sliders.clear()
 	if _active_index < 0:
 		return
 	var entries: Array = tables[_active_index].get("entries", [])
@@ -298,6 +303,7 @@ func _refresh_entries() -> void:
 		var entry_idx: int = i
 		slider.value_changed.connect(func(v: float): _on_weight_changed(entry_idx, v))
 		row.add_child(slider)
+		_sliders[entry_idx] = slider
 		var pct_lbl := Label.new()
 		pct_lbl.custom_minimum_size = Vector2(40, 0)
 		pct_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -340,8 +346,82 @@ func _on_weight_changed(entry_idx: int, v: float) -> void:
 	var entries: Array = tables[_active_index].get("entries", [])
 	if entry_idx < 0 or entry_idx >= entries.size():
 		return
-	entries[entry_idx]["weight"] = v
+	var v_clamped: float = clampf(v, 0.0, 100.0)
+	entries[entry_idx]["weight"] = v_clamped
+	_redistribute_others(entry_idx, v_clamped)
+	_push_slider_values()
 	_refresh_pcts()
+
+# Scale every entry except `changed_idx` so the table re-totals to 100.
+# If the others currently sum to zero, split the remaining target evenly
+# across them (otherwise raising the only non-zero slider could never
+# come back down).
+func _redistribute_others(changed_idx: int, changed_v: float) -> void:
+	if _active_index < 0:
+		return
+	var entries: Array = tables[_active_index].get("entries", [])
+	var remaining: float = 100.0 - changed_v
+	if remaining < 0.0:
+		remaining = 0.0
+	var other_sum: float = 0.0
+	var other_count: int = 0
+	for i in range(entries.size()):
+		if i == changed_idx:
+			continue
+		var w: float = float(entries[i].get("weight", 0.0))
+		if w < 0.0:
+			w = 0.0
+		other_sum += w
+		other_count += 1
+	if other_count == 0:
+		return
+	if other_sum > 0.0001:
+		var scale: float = remaining / other_sum
+		for i in range(entries.size()):
+			if i == changed_idx:
+				continue
+			var w2: float = maxf(float(entries[i].get("weight", 0.0)), 0.0)
+			entries[i]["weight"] = w2 * scale
+	else:
+		var each: float = remaining / float(other_count)
+		for i in range(entries.size()):
+			if i == changed_idx:
+				continue
+			entries[i]["weight"] = each
+
+func _push_slider_values() -> void:
+	if _active_index < 0:
+		return
+	var entries: Array = tables[_active_index].get("entries", [])
+	for i in range(entries.size()):
+		var s: HSlider = _sliders.get(i, null)
+		if s == null:
+			continue
+		s.set_block_signals(true)
+		s.value = float(entries[i].get("weight", 0.0))
+		s.set_block_signals(false)
+
+# Renormalize the active table's weights to sum to exactly 100. Used
+# after structural changes (item add/remove) so the percentage system
+# stays internally consistent.
+func _normalize_to_100() -> void:
+	if _active_index < 0:
+		return
+	var entries: Array = tables[_active_index].get("entries", [])
+	if entries.is_empty():
+		return
+	var total: float = 0.0
+	for e in entries:
+		var w: float = maxf(float(e.get("weight", 0.0)), 0.0)
+		total += w
+	if total > 0.0001:
+		var scale: float = 100.0 / total
+		for e in entries:
+			e["weight"] = maxf(float(e.get("weight", 0.0)), 0.0) * scale
+	else:
+		var each: float = 100.0 / float(entries.size())
+		for e in entries:
+			e["weight"] = each
 
 func _on_entry_remove(entry_idx: int) -> void:
 	if _active_index < 0:
@@ -350,6 +430,7 @@ func _on_entry_remove(entry_idx: int) -> void:
 	if entry_idx < 0 or entry_idx >= entries.size():
 		return
 	entries.remove_at(entry_idx)
+	_normalize_to_100()
 	_refresh_entries()
 
 func _on_add_item_pressed() -> void:
@@ -368,5 +449,7 @@ func _on_items_picked(ids: Array) -> void:
 		var sid: String = String(id)
 		if existing.has(sid):
 			continue
-		entries.append({"id": sid, "weight": 10.0})
+		# New items join at 0% so the existing distribution is preserved;
+		# user slides them up to allocate (which auto-shrinks the others).
+		entries.append({"id": sid, "weight": 0.0})
 	_refresh_entries()
