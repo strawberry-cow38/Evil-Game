@@ -284,6 +284,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_SHOTGUN,
 		"bloom_mult": 1.2,
 		"ammo_id": "ammo_12ga",
+		"ammo_ids": ["ammo_12ga", "ammo_12ga_slug"],
 		"per_round_reload": true,
 		"reload_time_per_round": 0.85,
 	},
@@ -323,6 +324,10 @@ var _saved_fire_modes: Dictionary = {}
 # Per-instance current magazine count so swapping doesn't dupe ammo or refill
 # mid-fight. Also keyed by uid.
 var _saved_ammo: Dictionary = {}
+# Per-instance selected ammo id (multi-ammo weapons like XM1014). Keyed by uid.
+var _saved_selected_ammo: Dictionary = {}
+# Currently selected ammo id for the equipped weapon. Defaults to profile's ammo_id.
+var _selected_ammo: String = ""
 # uid of the currently equipped instance (0 = unknown / direct-key equip).
 var _current_uid: int = 0
 var _rng := RandomNumberGenerator.new()
@@ -376,6 +381,7 @@ func _apply_weapon(key: String, uid: int = 0) -> void:
 	if PROFILES.has(_current_weapon):
 		_saved_fire_modes[out_key] = _fire_mode
 		_saved_ammo[out_key] = _ammo
+		_saved_selected_ammo[out_key] = _selected_ammo
 	_current_weapon = key
 	_current_uid = uid
 	_profile = PROFILES[key]
@@ -388,6 +394,14 @@ func _apply_weapon(key: String, uid: int = 0) -> void:
 		_fire_mode = saved_mode
 	else:
 		_fire_mode = modes[0]
+	# Restore selected ammo if remembered + still compatible; otherwise default
+	# to profile's primary ammo_id.
+	var compat: Array = get_compatible_ammo_ids()
+	var saved_ammo = _saved_selected_ammo.get(in_key, "")
+	if saved_ammo != "" and compat.has(String(saved_ammo)):
+		_selected_ammo = String(saved_ammo)
+	else:
+		_selected_ammo = String(_profile.get("ammo_id", ""))
 	_burst_remaining = 0
 	_recoil_index = 0
 	_target_yaw = _applied_yaw
@@ -497,13 +511,39 @@ func _load_wav(res_path: String) -> AudioStream:
 		return null
 	return AudioStreamOggVorbis.load_from_file(abs_path)
 
+# --- Multi-ammo support ---------------------------------------------------
+# Most weapons feed a single cartridge (profile.ammo_id). The XM1014 accepts
+# both buckshot and slugs and the player picks via the radial reload menu.
+func get_compatible_ammo_ids() -> Array:
+	var ids: Array = _profile.get("ammo_ids", [])
+	if not ids.is_empty():
+		return ids
+	var single: String = String(_profile.get("ammo_id", ""))
+	return [single] if single != "" else []
+
+func get_selected_ammo() -> String:
+	if _selected_ammo != "":
+		return _selected_ammo
+	return String(_profile.get("ammo_id", ""))
+
+func set_selected_ammo(id: String) -> void:
+	if id == "":
+		return
+	if not get_compatible_ammo_ids().has(id):
+		return
+	_selected_ammo = id
+
 func get_reserve_ammo() -> int:
 	if _inventory == null:
 		return 0
-	var ammo_id = _profile.get("ammo_id", "")
+	var ammo_id := get_selected_ammo()
 	if ammo_id == "":
 		return 0
 	return int(_inventory.counts.get(ammo_id, 0))
+
+# Public entry point for reload — player handles input and calls this.
+func start_reload() -> void:
+	_start_reload()
 
 func _start_reload() -> void:
 	if _reloading or _ammo >= get_mag_size():
@@ -528,7 +568,7 @@ func _start_reload() -> void:
 			_reload_player.play()
 
 func _finish_reload() -> void:
-	var ammo_id = _profile.get("ammo_id", "")
+	var ammo_id := get_selected_ammo()
 	if _inventory != null and ammo_id != "" and _reload_amount > 0:
 		# Re-clamp against reserve at finish time in case inventory changed mid-reload.
 		var actual: int = min(_reload_amount, int(_inventory.counts.get(ammo_id, 0)))
@@ -539,7 +579,7 @@ func _finish_reload() -> void:
 
 # Per-round reload tick: pull a single round from inventory into the mag.
 func _load_one_round() -> void:
-	var ammo_id = _profile.get("ammo_id", "")
+	var ammo_id := get_selected_ammo()
 	if _inventory == null or ammo_id == "":
 		return
 	if int(_inventory.counts.get(ammo_id, 0)) <= 0:
@@ -643,8 +683,11 @@ func get_current_bloom_deg() -> float:
 	return bloom_deg
 
 func _process(delta: float) -> void:
-	# Freeze all weapon input + recoil decay while the inventory menu is up.
+	# Freeze all weapon input + recoil decay while the inventory menu or pie
+	# is up.
 	if _player != null and _player.has_method("is_menu_open") and _player.is_menu_open():
+		return
+	if _player != null and _player.has_method("is_pie_open") and _player.is_pie_open():
 		return
 	# Empty hands — no fire, no reload, no recoil decay (decay would still
 	# run, but there's nothing meaningful to decay since no shots add to it).
@@ -661,9 +704,6 @@ func _process(delta: float) -> void:
 		idx = (idx + 1) % modes.size()
 		_fire_mode = modes[idx]
 		_burst_remaining = 0
-
-	if Input.is_action_just_pressed("reload") and not _reloading and _ammo < get_mag_size():
-		_start_reload()
 
 	if _reloading:
 		_reload_remaining -= delta
@@ -841,7 +881,7 @@ func _fire(now: float) -> void:
 func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
 	if collider == null or not collider.has_method("take_damage"):
 		return
-	var dmg: int = Items.ammo_damage_at(String(_profile.get("ammo_id", "")), distance)
+	var dmg: int = Items.ammo_damage_at(get_selected_ammo(), distance)
 	if dmg <= 0:
 		return
 	if delay <= 0.0:

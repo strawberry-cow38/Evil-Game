@@ -9,6 +9,7 @@
 [ext_resource type="Script" path="res://pickup_spawner.gd" id="7_spawner"]
 [ext_resource type="Script" path="res://dummy.gd" id="8_dummy"]
 [ext_resource type="Script" path="res://dummy_head.gd" id="9_dummy_head"]
+[ext_resource type="Script" path="res://pie_menu.gd" id="10_pie"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -146,6 +147,7 @@ script = ExtResource("1_player")
 menu_path = NodePath("../Menu")
 inventory_path = NodePath("Inventory")
 weapon_path = NodePath("Weapon")
+pie_menu_path = NodePath("../PieMenuLayer/PieMenu")
 
 [node name="Inventory" type="Node" parent="Player"]
 script = ExtResource("5_inventory")
@@ -200,6 +202,15 @@ Speed: 0.00 m/s"
 [node name="Menu" type="CanvasLayer" parent="."]
 script = ExtResource("6_menu")
 inventory_path = NodePath("../Player/Inventory")
+
+[node name="PieMenuLayer" type="CanvasLayer" parent="."]
+layer = 40
+
+[node name="PieMenu" type="Control" parent="PieMenuLayer"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+script = ExtResource("10_pie")
 
 [node name="PickupSpawner" type="Node3D" parent="."]
 script = ExtResource("7_spawner")

@@ -50,11 +50,17 @@ const STARTING_AMMO: Dictionary = {
 	"ammo_762nato": 200,
 	"ammo_40mm":    200,
 	"ammo_12ga":    100,
+	"ammo_12ga_slug": 50,
 }
+
+# Reload-as-pie threshold: holding R longer than this opens the radial menu;
+# tap-release reloads with the currently selected ammo.
+const RELOAD_HOLD_THRESHOLD := 0.20
 
 @export var menu_path: NodePath
 @export var inventory_path: NodePath
 @export var weapon_path: NodePath
+@export var pie_menu_path: NodePath
 
 @onready var _camera: Camera3D = $Camera3D
 @onready var _weapon: Node = get_node(weapon_path) if weapon_path != NodePath() else null
@@ -65,9 +71,13 @@ var _crouched := false
 var _ads := false
 var _menu: Node
 var _inventory: Node
+var _pie: Node
 var _interact_target: Node = null    # current Pickup the player is looking at, if any
 var _prompt_label: Label
 var _rng := RandomNumberGenerator.new()
+var _reload_held: bool = false
+var _reload_press_time: float = 0.0
+var _pie_active: bool = false
 
 func _ready() -> void:
 	_rng.randomize()
@@ -76,6 +86,8 @@ func _ready() -> void:
 		_menu = get_node(menu_path)
 	if inventory_path != NodePath():
 		_inventory = get_node(inventory_path)
+	if pie_menu_path != NodePath():
+		_pie = get_node(pie_menu_path)
 	_build_prompt()
 	_seed_starting_inventory()
 	if _inventory != null and _inventory.has_signal("equipped_changed"):
@@ -149,11 +161,14 @@ func is_ads() -> bool:
 func is_menu_open() -> bool:
 	return _menu != null and _menu.has_method("is_open") and _menu.is_open()
 
+func is_pie_open() -> bool:
+	return _pie != null and _pie.has_method("is_open") and _pie.is_open()
+
 func has_interact_target() -> bool:
 	return _interact_target != null
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not is_pie_open():
 		_yaw -= event.relative.x * MOUSE_SENSITIVITY
 		_pitch -= event.relative.y * MOUSE_SENSITIVITY
 		_pitch = clamp(_pitch, -1.4, 1.4)
@@ -179,10 +194,11 @@ func _process(delta: float) -> void:
 		_loot(_interact_target)
 	if not is_menu_open():
 		_check_equip_hotkeys()
+		_handle_reload_input()
 	# Reloading kicks the player out of ADS — can't aim down sights with the
 	# weapon torn open. Holding the ADS button is also ignored mid-reload.
 	var weapon_reloading: bool = _weapon != null and _weapon.has_method("is_reloading") and _weapon.is_reloading()
-	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not weapon_reloading
+	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not is_pie_open() and not weapon_reloading
 
 	# Smooth camera height between stand/crouch.
 	var target_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
@@ -268,6 +284,74 @@ func _check_equip_hotkeys() -> void:
 			var uid: int = _inventory.favorite_uid(slot)
 			if uid != 0 and _inventory.has_uid(uid):
 				_inventory.set_equipped(uid)
+
+# Tap R reloads with currently selected ammo. Holding R past the threshold
+# opens the radial pie menu listing every compatible cartridge for the equipped
+# weapon; releasing R picks the highlighted segment and starts the reload.
+# Single-ammo weapons skip the pie entirely and reload on press (no hold-to-pie
+# delay since there's nothing to choose).
+func _handle_reload_input() -> void:
+	if _weapon == null:
+		return
+	var compat: Array = _weapon.get_compatible_ammo_ids() if _weapon.has_method("get_compatible_ammo_ids") else []
+	var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
+
+	if Input.is_action_just_pressed("reload"):
+		_reload_held = true
+		_reload_press_time = Time.get_ticks_msec() / 1000.0
+		# Single-ammo: trigger immediately, skip the hold-detection window.
+		if compat.size() <= 1:
+			if not reloading and _weapon.has_method("start_reload"):
+				_weapon.start_reload()
+			_reload_held = false
+		return
+
+	# Open the pie once the hold threshold elapses (only for multi-ammo weapons,
+	# and only if we're not already mid-reload — pie can't switch ammo mid-cycle).
+	if _reload_held and not _pie_active and _pie != null and compat.size() > 1 and not reloading:
+		var held: float = (Time.get_ticks_msec() / 1000.0) - _reload_press_time
+		if held >= RELOAD_HOLD_THRESHOLD:
+			_open_reload_pie(compat)
+
+	if Input.is_action_just_released("reload"):
+		var was_held := _reload_held
+		_reload_held = false
+		if _pie_active:
+			_close_reload_pie_and_apply()
+		elif was_held:
+			# Tap-release with multi-ammo: reload with current selection.
+			if not reloading and _weapon.has_method("start_reload"):
+				_weapon.start_reload()
+
+func _open_reload_pie(compat: Array) -> void:
+	if _pie == null:
+		return
+	var opts: Array = []
+	for id in compat:
+		var sid := String(id)
+		var def: Dictionary = Items.item_def(sid)
+		var count: int = int(_inventory.counts.get(sid, 0)) if _inventory != null else 0
+		opts.append({
+			"id": sid,
+			"name": String(def.get("name", sid)),
+			"count": count,
+			"color": Color(def.get("color", Color(0.85, 0.85, 0.85))),
+		})
+	_pie.open(opts)
+	_pie_active = true
+
+func _close_reload_pie_and_apply() -> void:
+	if _pie == null:
+		_pie_active = false
+		return
+	var picked: String = _pie.get_picked()
+	_pie.close()
+	_pie_active = false
+	if picked != "" and _weapon.has_method("set_selected_ammo"):
+		_weapon.set_selected_ammo(picked)
+	var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
+	if not reloading and _weapon.has_method("start_reload"):
+		_weapon.start_reload()
 
 # Stackable drop path (ammo, food, etc).
 func drop_item(id: String, count: int = 1) -> bool:
