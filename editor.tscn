@@ -69,6 +69,20 @@ offset_right = 280.0
 offset_bottom = -12.0
 script = ExtResource("7_radius")
 
+[node name="FpsLabel" type="Label" parent="UI"]
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -150.0
+offset_top = 84.0
+offset_right = -12.0
+offset_bottom = 110.0
+horizontal_alignment = 2
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(1, 1, 1, 0.9)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+text = "FPS: 0"
+
 [node name="HelpLabel" type="Label" parent="UI"]
 anchor_left = 1.0
 anchor_top = 1.0

@@ -30,6 +30,7 @@ const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to 
 @onready var _top_bar: Control = $UI/TopBar
 @onready var _sub_bar: Control = $UI/SubBar
 @onready var _radius_widget: Control = $UI/RadiusWidget
+@onready var _fps_label: Label = $UI/FpsLabel
 
 var _active_tool: String = TOOL_NONE
 var _brush_radius: float = 4.0
@@ -91,6 +92,7 @@ func _enter_play_mode() -> void:
 	get_tree().change_scene_to_file(PLAY_SCENE)
 
 func _process(delta: float) -> void:
+	_fps_label.text = "FPS: %d" % Engine.get_frames_per_second()
 	# Hide all hover visuals by default; per-tool branches re-enable them.
 	_spawn_ghost.visible = false
 	_flatten_ring.hide_ring()
