@@ -52,6 +52,12 @@ const FIRE_HOLD_TIME := 0.22    # full-volume window before fade kicks in
 const FIRE_FADE_TIME := 0.32    # fade-out length, kills the tail echo
 const FIRE_FADE_DB := -50.0
 const FIRE_VOICES := 4
+const IMPACT_DIRT_PATH := "res://assets/audio/impact_dirt.ogg"
+const IMPACT_CONCRETE_PATH := "res://assets/audio/impact_concrete.ogg"
+const IMPACT_VOL_DB := -6.0
+const IMPACT_PITCH_MIN := 0.92
+const IMPACT_PITCH_MAX := 1.08
+const IMPACT_VOICES := 6
 enum FireMode { SEMI, BURST, AUTO }
 
 @export var camera_path: NodePath
@@ -76,6 +82,9 @@ var _audio_voices: Array[AudioStreamPlayer3D] = []
 var _audio_tweens: Array[Tween] = []
 var _audio_idx := 0
 var _fire_stream: AudioStream
+var _impact_streams: Dictionary = {}    # "dirt"/"concrete" -> AudioStream
+var _impact_voices: Array[AudioStreamPlayer3D] = []
+var _impact_idx := 0
 
 func _ready() -> void:
 	_rng.randomize()
@@ -103,6 +112,24 @@ func _setup_audio() -> void:
 		add_child(p)
 		_audio_voices.append(p)
 		_audio_tweens.append(null)
+	# Impact streams (loaded at runtime — same .import-gitignored reason).
+	_impact_streams["dirt"] = _load_wav(IMPACT_DIRT_PATH)
+	_impact_streams["concrete"] = _load_wav(IMPACT_CONCRETE_PATH)
+	# Roving impact voices live on the scene root so they play at the world
+	# position of the hit, not at the gun.
+	for i in range(IMPACT_VOICES):
+		var ip := AudioStreamPlayer3D.new()
+		ip.bus = "Master"
+		ip.volume_db = IMPACT_VOL_DB
+		ip.unit_size = 14.0
+		ip.max_distance = 120.0
+		_impact_voices.append(ip)
+
+func _load_wav(res_path: String) -> AudioStream:
+	var abs_path: String = ProjectSettings.globalize_path(res_path)
+	if not FileAccess.file_exists(abs_path):
+		return null
+	return AudioStreamOggVorbis.load_from_file(abs_path)
 
 func _play_fire_sound() -> void:
 	if _fire_stream == null or _audio_voices.is_empty():
@@ -277,6 +304,8 @@ func _fire(now: float) -> void:
 	var pos := origin
 	var t := 0.0
 	var hit_pos := Vector3.ZERO
+	var hit_normal := Vector3.UP
+	var hit_collider: Object = null
 	var has_hit := false
 	while t < MAX_SIM_TIME:
 		var next_pos := pos + vel * STEP_DT + gravity * 0.5 * STEP_DT * STEP_DT
@@ -289,6 +318,8 @@ func _fire(now: float) -> void:
 		var r := space.intersect_ray(q)
 		if r and r.has("position"):
 			hit_pos = r.position
+			hit_normal = r.get("normal", Vector3.UP)
+			hit_collider = r.get("collider", null)
 			has_hit = true
 			break
 		pos = next_pos
@@ -301,7 +332,8 @@ func _fire(now: float) -> void:
 	var impact_delay := distance / MUZZLE_VELOCITY
 	_spawn_tracer(origin, hit_pos)
 	if has_hit:
-		_schedule_impact(hit_pos, impact_delay)
+		var material := _classify_material(hit_collider)
+		_schedule_impact(hit_pos, hit_normal, material, impact_delay)
 
 func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 	var mesh := ImmediateMesh.new()
@@ -323,25 +355,82 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 	var timer := get_tree().create_timer(TRACER_LIFETIME)
 	timer.timeout.connect(func(): if is_instance_valid(mi): mi.queue_free())
 
-func _schedule_impact(world_pos: Vector3, delay: float) -> void:
+func _classify_material(collider: Object) -> String:
+	if collider == null:
+		return "concrete"
+	var n: String = ""
+	if collider is Node:
+		n = (collider as Node).name
+	if n == "Ground":
+		return "dirt"
+	if n.begins_with("Wall"):
+		return "concrete"
+	return "concrete"
+
+func _schedule_impact(world_pos: Vector3, normal: Vector3, material: String, delay: float) -> void:
 	if delay <= 0.0:
-		_apply_impact(world_pos)
+		_apply_impact(world_pos, normal, material)
 		return
 	var timer := get_tree().create_timer(delay)
-	timer.timeout.connect(func(): _apply_impact(world_pos))
+	timer.timeout.connect(func(): _apply_impact(world_pos, normal, material))
 
-func _apply_impact(world_pos: Vector3) -> void:
-	# Placeholder hit marker — small short-lived sphere.
-	var mi := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.04
-	sm.height = 0.08
-	mi.mesh = sm
+func _apply_impact(world_pos: Vector3, normal: Vector3, material: String) -> void:
+	_play_impact_sound(world_pos, material)
+	_spawn_impact_particles(world_pos, normal, material)
+
+func _play_impact_sound(world_pos: Vector3, material: String) -> void:
+	if not _impact_streams.has(material):
+		return
+	var stream: AudioStream = _impact_streams[material]
+	if stream == null or _impact_voices.is_empty():
+		return
+	var idx: int = _impact_idx
+	_impact_idx = (_impact_idx + 1) % _impact_voices.size()
+	var voice: AudioStreamPlayer3D = _impact_voices[idx]
+	if voice.is_inside_tree():
+		voice.get_parent().remove_child(voice)
+	get_tree().current_scene.add_child(voice)
+	voice.global_position = world_pos
+	voice.stream = stream
+	voice.pitch_scale = _rng.randf_range(IMPACT_PITCH_MIN, IMPACT_PITCH_MAX)
+	voice.volume_db = IMPACT_VOL_DB
+	voice.play()
+
+func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: String) -> void:
+	var p := CPUParticles3D.new()
+	p.one_shot = true
+	p.emitting = true
+	p.explosiveness = 1.0
+	p.amount = 18
+	p.lifetime = 0.55
+	p.local_coords = false
+	p.direction = normal
+	p.spread = 38.0
+	p.initial_velocity_min = 1.6
+	p.initial_velocity_max = 4.2
+	p.gravity = Vector3(0.0, -7.0, 0.0)
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.2
+	p.damping_min = 1.0
+	p.damping_max = 3.0
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.012
+	mesh.height = 0.024
+	mesh.radial_segments = 6
+	mesh.rings = 3
+	p.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1, 0.2, 0.2, 1)
-	mi.material_override = mat
-	get_tree().current_scene.add_child(mi)
-	mi.global_position = world_pos
-	var timer := get_tree().create_timer(0.6)
-	timer.timeout.connect(func(): if is_instance_valid(mi): mi.queue_free())
+	match material:
+		"dirt":
+			mat.albedo_color = Color(0.32, 0.22, 0.14, 1.0)
+		"concrete":
+			mat.albedo_color = Color(0.78, 0.76, 0.72, 1.0)
+		_:
+			mat.albedo_color = Color(0.7, 0.7, 0.7, 1.0)
+	p.mesh.surface_set_material(0, mat)
+	get_tree().current_scene.add_child(p)
+	p.global_position = world_pos
+	# Free shortly after particles finish.
+	var timer := get_tree().create_timer(p.lifetime + 0.4)
+	timer.timeout.connect(func(): if is_instance_valid(p): p.queue_free())
