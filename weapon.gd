@@ -397,40 +397,47 @@ func _play_impact_sound(world_pos: Vector3, material: String) -> void:
 	voice.play()
 
 func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: String) -> void:
-	var p := CPUParticles3D.new()
-	p.one_shot = true
-	p.emitting = true
-	p.explosiveness = 1.0
-	p.amount = 18
-	p.lifetime = 0.55
-	p.local_coords = false
-	p.direction = normal
-	p.spread = 38.0
-	p.initial_velocity_min = 1.6
-	p.initial_velocity_max = 4.2
-	p.gravity = Vector3(0.0, -7.0, 0.0)
-	p.scale_amount_min = 0.6
-	p.scale_amount_max = 1.2
-	p.damping_min = 1.0
-	p.damping_max = 3.0
-	var mesh := SphereMesh.new()
-	mesh.radius = 0.012
-	mesh.height = 0.024
-	mesh.radial_segments = 6
-	mesh.rings = 3
-	p.mesh = mesh
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.disable_receive_shadows = true
 	match material:
 		"dirt":
-			mat.albedo_color = Color(0.32, 0.22, 0.14, 1.0)
+			mat.albedo_color = Color(0.42, 0.28, 0.18, 1.0)
 		"concrete":
-			mat.albedo_color = Color(0.78, 0.76, 0.72, 1.0)
+			mat.albedo_color = Color(0.85, 0.83, 0.78, 1.0)
 		_:
 			mat.albedo_color = Color(0.7, 0.7, 0.7, 1.0)
-	p.mesh.surface_set_material(0, mat)
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.03
+	mesh.height = 0.06
+	mesh.radial_segments = 6
+	mesh.rings = 3
+	mesh.material = mat
+
+	var p := CPUParticles3D.new()
+	p.mesh = mesh
+	p.one_shot = true
+	p.explosiveness = 1.0
+	p.amount = 22
+	p.lifetime = 0.6
+	p.local_coords = false
+	p.direction = normal.normalized()
+	p.spread = 42.0
+	p.initial_velocity_min = 1.8
+	p.initial_velocity_max = 4.5
+	p.gravity = Vector3(0.0, -7.0, 0.0)
+	p.scale_amount_min = 0.6
+	p.scale_amount_max = 1.4
+	p.damping_min = 1.0
+	p.damping_max = 3.0
+	# Cast/receive flags off so unshaded specks don't blow out shadow maps.
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
 	get_tree().current_scene.add_child(p)
-	p.global_position = world_pos
-	# Free shortly after particles finish.
+	p.global_position = world_pos + normal.normalized() * 0.02   # nudge off the surface
+	# Trigger emission after the node is in the tree + positioned.
+	p.restart()
+	p.emitting = true
+
 	var timer := get_tree().create_timer(p.lifetime + 0.4)
 	timer.timeout.connect(func(): if is_instance_valid(p): p.queue_free())
