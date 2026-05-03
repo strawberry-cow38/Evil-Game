@@ -80,8 +80,8 @@ const PROFILES := {
 		"rpm": 800.0,
 		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
 		"fire_sound": "res://assets/audio/Shot_GTEK556mm.ogg",
-		"fire_hold": 0.09,
-		"fire_fade": 0.16,
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
 	},
 }
 const WEAPON_ORDER := ["akm", "m16a2"]
