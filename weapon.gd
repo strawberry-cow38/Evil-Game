@@ -54,6 +54,13 @@ const FIRE_FADE_DB := -50.0
 const FIRE_VOICES := 4
 const IMPACT_DIRT_PATH := "res://assets/audio/impact_dirt.ogg"
 const IMPACT_CONCRETE_PATH := "res://assets/audio/impact_concrete.ogg"
+const CASING_PATH := "res://assets/audio/casing.ogg"
+const CASING_DELAY_MIN := 0.35
+const CASING_DELAY_MAX := 0.55
+const CASING_VOL_DB := -10.0
+const CASING_PITCH_MIN := 0.92
+const CASING_PITCH_MAX := 1.10
+const CASING_VOICES := 6
 const IMPACT_VOL_DB := -6.0
 const IMPACT_PITCH_MIN := 0.92
 const IMPACT_PITCH_MAX := 1.08
@@ -85,6 +92,9 @@ var _fire_stream: AudioStream
 var _impact_streams: Dictionary = {}    # "dirt"/"concrete" -> AudioStream
 var _impact_voices: Array[AudioStreamPlayer3D] = []
 var _impact_idx := 0
+var _casing_stream: AudioStream
+var _casing_voices: Array[AudioStreamPlayer3D] = []
+var _casing_idx := 0
 
 func _ready() -> void:
 	_rng.randomize()
@@ -124,12 +134,39 @@ func _setup_audio() -> void:
 		ip.unit_size = 14.0
 		ip.max_distance = 120.0
 		_impact_voices.append(ip)
+	# Casing voices live on the player so the clink follows them around.
+	_casing_stream = _load_wav(CASING_PATH)
+	for i in range(CASING_VOICES):
+		var cp := AudioStreamPlayer3D.new()
+		cp.stream = _casing_stream
+		cp.bus = "Master"
+		cp.volume_db = CASING_VOL_DB
+		cp.unit_size = 8.0
+		cp.max_distance = 30.0
+		add_child(cp)
+		_casing_voices.append(cp)
 
 func _load_wav(res_path: String) -> AudioStream:
 	var abs_path: String = ProjectSettings.globalize_path(res_path)
 	if not FileAccess.file_exists(abs_path):
 		return null
 	return AudioStreamOggVorbis.load_from_file(abs_path)
+
+func _schedule_casing() -> void:
+	if _casing_stream == null or _casing_voices.is_empty():
+		return
+	var delay: float = _rng.randf_range(CASING_DELAY_MIN, CASING_DELAY_MAX)
+	var pitch: float = _rng.randf_range(CASING_PITCH_MIN, CASING_PITCH_MAX)
+	var idx: int = _casing_idx
+	_casing_idx = (_casing_idx + 1) % _casing_voices.size()
+	var voice: AudioStreamPlayer3D = _casing_voices[idx]
+	var timer := get_tree().create_timer(delay)
+	timer.timeout.connect(func():
+		if not is_instance_valid(voice):
+			return
+		voice.pitch_scale = pitch
+		voice.play()
+	)
 
 func _play_fire_sound() -> void:
 	if _fire_stream == null or _audio_voices.is_empty():
@@ -283,6 +320,7 @@ func _fire(now: float) -> void:
 	_recoil_index += 1
 
 	_play_fire_sound()
+	_schedule_casing()
 
 	# Sim trajectory from camera origin in camera-forward direction.
 	var origin: Vector3 = _camera.global_transform.origin
