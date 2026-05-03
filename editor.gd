@@ -20,8 +20,10 @@ const TOOL_T_RAMP := "t_ramp"
 const TOOL_S_PLACE_SPAWN := "s_player_place"
 const TOOL_S_DELETE_SPAWN := "s_player_delete"
 const TOOL_L_EFFECTS := "l_effects"
+const TOOL_O_OBJECTS := "o_objects"
 
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
+const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
 const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 
 const BRUSH_STRENGTH := 12.0    # m/s for raise/lower at full falloff
@@ -36,6 +38,7 @@ const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to 
 @onready var _radius_widget: Control = $UI/RadiusWidget
 @onready var _fps_label: Label = $UI/FpsLabel
 @onready var _effects_panel: PanelContainer = $UI/EffectsPanel
+@onready var _objects_panel: PanelContainer = $UI/ObjectsPanel
 @onready var _space_toggle: PanelContainer = $UI/SpaceToggle
 
 var _active_tool: String = TOOL_NONE
@@ -49,11 +52,14 @@ var _spawn_visuals: Array[Node3D] = []
 var _spawn_marker_mat: StandardMaterial3D = null
 var _spawn_ghost_mat: StandardMaterial3D = null
 var _spawn_ghost: Node3D = null
-# Placed effects (Level → Effects). Each entry is the Node3D root of
-# the wireframe box; the source effect id lives on the node itself.
-var _placed_effects: Array[Node3D] = []
-var _selected_effect: Node3D = null
+# Placed props — wireframe-boxed nodes for both Effects and Objects.
+# Both editor_effect_box and editor_object_box implement the same
+# interface (set_selected, get_aabb_local) so picking + gizmo binding
+# treats them uniformly. Source id lives on each node.
+var _placed_props: Array[Node3D] = []
+var _selected_prop: Node3D = null
 var _armed_effect_id: String = ""
+var _armed_object_id: String = ""
 var _gizmo: Node3D = null
 # Drag state for translate gizmo. _drag_handle == "" means no drag in
 # progress. _drag_axis / _drag_normal pin the axis or plane the drag is
@@ -93,6 +99,8 @@ func _ready() -> void:
 	_sub_bar.tool_picked.connect(_on_tool_picked)
 	_effects_panel.effect_picked.connect(_on_effect_picked)
 	_effects_panel.visible = false
+	_objects_panel.object_picked.connect(_on_object_picked)
+	_objects_panel.visible = false
 	_space_toggle.space_changed.connect(_on_space_changed)
 	_radius_widget.radius_changed.connect(_on_radius_changed)
 	_radius_widget.strength_changed.connect(_on_strength_changed)
@@ -121,32 +129,37 @@ func _input(event: InputEvent) -> void:
 	if is_f9:
 		_enter_play_mode()
 		return
-	# E → place an armed effect at the cursor (Effects tool active).
+	# E → place an armed effect or object at the cursor (depends on tool).
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
-		if _active_tool == TOOL_L_EFFECTS and _armed_effect_id != "" and not _camera.is_looking() and not _is_over_ui():
-			var hit := _raycast_cursor()
-			if not hit.is_empty():
-				_spawn_effect_at(_armed_effect_id, hit.position)
+		if not _camera.is_looking() and not _is_over_ui():
+			if _active_tool == TOOL_L_EFFECTS and _armed_effect_id != "":
+				var hit := _raycast_cursor()
+				if not hit.is_empty():
+					_spawn_effect_at(_armed_effect_id, hit.position)
+			elif _active_tool == TOOL_O_OBJECTS and _armed_object_id != "":
+				var hit2 := _raycast_cursor()
+				if not hit2.is_empty():
+					_spawn_object_at(_armed_object_id, hit2.position)
 	# Q → translate gizmo. Only when an effect is selected and the
 	# camera isn't grabbing the key for fly-down (camera only consumes
 	# Q while MMB is held).
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_Q:
-		if _selected_effect != null and not _camera.is_looking():
-			_gizmo.set_target(_selected_effect)
+		if _selected_prop != null and not _camera.is_looking():
+			_gizmo.set_target(_selected_prop)
 			_gizmo.cycle_translate()
 	# W → rotate gizmo. R → scale gizmo.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_W:
-		if _selected_effect != null and not _camera.is_looking():
-			_gizmo.set_target(_selected_effect)
+		if _selected_prop != null and not _camera.is_looking():
+			_gizmo.set_target(_selected_prop)
 			_gizmo.set_mode(_gizmo.MODE_ROTATE)
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
-		if _selected_effect != null and not _camera.is_looking():
-			_gizmo.set_target(_selected_effect)
+		if _selected_prop != null and not _camera.is_looking():
+			_gizmo.set_target(_selected_prop)
 			_gizmo.set_mode(_gizmo.MODE_SCALE)
 	# Delete → remove selected effect.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_DELETE:
-		if _selected_effect != null and not _camera.is_looking():
-			_delete_selected_effect()
+		if _selected_prop != null and not _camera.is_looking():
+			_delete_selected_prop()
 
 func _enter_play_mode() -> void:
 	# Snapshot the current map into the autoload so the play scene can
@@ -267,14 +280,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		p3.y = _terrain.sample_height(p3)
 		_delete_nearest_spawn(p3)
 		return
-	# Effects tool: LMB picks a gizmo handle first (so dragging an
-	# arrow doesn't deselect the effect underneath). Falls through to
-	# pick the box itself if no handle was hit. Release ends the drag.
-	if _active_tool == TOOL_L_EFFECTS:
+	# Effects / Objects tools: LMB picks a gizmo handle first (so dragging
+	# an arrow doesn't deselect the prop underneath). Falls through to pick
+	# the box itself if no handle was hit. Release ends the drag.
+	if _active_tool == TOOL_L_EFFECTS or _active_tool == TOOL_O_OBJECTS:
 		if event.pressed:
 			if _try_start_gizmo_drag():
 				return
-			_pick_effect_under_cursor()
+			_pick_prop_under_cursor()
 		else:
 			_drag_handle = ""
 
@@ -314,7 +327,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _space_toggle]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _space_toggle]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -328,20 +341,25 @@ func _on_category_picked(category: String) -> void:
 	# from the sub-bar.
 	_active_tool = TOOL_NONE
 	_effects_panel.visible = false
+	_objects_panel.visible = false
 
 func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
-	# Gizmo only matters while the Effects tool is active.
+	_objects_panel.visible = (tool_id == TOOL_O_OBJECTS)
+	# Gizmo only matters while a placement tool is active.
 	if _gizmo != null:
-		if tool_id == TOOL_L_EFFECTS:
-			_gizmo.set_target(_selected_effect)
+		if tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS:
+			_gizmo.set_target(_selected_prop)
 		else:
 			_gizmo.set_target(null)
 			_drag_handle = ""
 
 func _on_effect_picked(id: String) -> void:
 	_armed_effect_id = id
+
+func _on_object_picked(id: String) -> void:
+	_armed_object_id = id
 
 func _on_space_changed(use_local: bool) -> void:
 	if _gizmo != null:
@@ -422,31 +440,40 @@ func _spawn_effect_at(effect_id: String, world_pos: Vector3) -> void:
 	add_child(box)
 	# global_position needs the node in the tree, so set after add_child.
 	box.global_position = world_pos
-	_placed_effects.append(box)
-	_select_effect(box)
+	_placed_props.append(box)
+	_select_prop(box)
 
-func _select_effect(box: Node3D) -> void:
-	if _selected_effect != null and is_instance_valid(_selected_effect):
-		_selected_effect.set_selected(false)
-	_selected_effect = box
+func _spawn_object_at(object_id: String, world_pos: Vector3) -> void:
+	var box: Node3D = Node3D.new()
+	box.set_script(OBJECT_BOX_SCRIPT)
+	box.object_id = object_id
+	add_child(box)
+	box.global_position = world_pos
+	_placed_props.append(box)
+	_select_prop(box)
+
+func _select_prop(box: Node3D) -> void:
+	if _selected_prop != null and is_instance_valid(_selected_prop):
+		_selected_prop.set_selected(false)
+	_selected_prop = box
 	if box != null:
 		box.set_selected(true)
 	# Re-bind the gizmo to the new selection. If nothing's selected the
 	# gizmo hides itself; if something IS selected, default to the
 	# translate gizmo so the user doesn't need to hit Q just to nudge it.
 	if _gizmo != null:
-		_gizmo.set_target(_selected_effect)
-		if _selected_effect != null and _gizmo.mode == _gizmo.MODE_NONE:
+		_gizmo.set_target(_selected_prop)
+		if _selected_prop != null and _gizmo.mode == _gizmo.MODE_NONE:
 			_gizmo.set_mode(_gizmo.MODE_TRANSLATE_AXES)
 
-func _pick_effect_under_cursor() -> void:
+func _pick_prop_under_cursor() -> void:
 	# Ray-vs-AABB pick over every placed effect; closest hit wins.
 	var mouse := get_viewport().get_mouse_position()
 	var from := _camera.project_ray_origin(mouse)
 	var dir := _camera.project_ray_normal(mouse)
 	var best: Node3D = null
 	var best_t: float = INF
-	for box in _placed_effects:
+	for box in _placed_props:
 		if not is_instance_valid(box):
 			continue
 		# Transform ray into box's local space (handles rotation/scale once
@@ -460,21 +487,21 @@ func _pick_effect_under_cursor() -> void:
 			best_t = t
 			best = box
 	if best != null:
-		_select_effect(best)
+		_select_prop(best)
 
-func _delete_selected_effect() -> void:
-	if _selected_effect == null:
+func _delete_selected_prop() -> void:
+	if _selected_prop == null:
 		return
-	var doomed: Node3D = _selected_effect
-	_placed_effects.erase(doomed)
-	_selected_effect = null
+	var doomed: Node3D = _selected_prop
+	_placed_props.erase(doomed)
+	_selected_prop = null
 	if _gizmo != null:
 		_gizmo.set_target(null)
 	_drag_handle = ""
 	doomed.queue_free()
 
 func _try_start_gizmo_drag() -> bool:
-	if _gizmo == null or _gizmo.mode == _gizmo.MODE_NONE or _selected_effect == null:
+	if _gizmo == null or _gizmo.mode == _gizmo.MODE_NONE or _selected_prop == null:
 		return false
 	if _is_over_ui() or _camera.is_looking():
 		return false
@@ -488,13 +515,13 @@ func _try_start_gizmo_drag() -> bool:
 	_drag_handle = handle
 	# Resolve the constraint (axis or plane) and capture the grab offset
 	# in world space so the cursor anchor doesn't snap on first motion.
-	_drag_anchor = _selected_effect.global_position
+	_drag_anchor = _selected_prop.global_position
 	if handle.begins_with("r"):
 		# Rotate ring drag — capture start basis + initial cursor angle on
 		# the ring plane. Motion computes delta angle and applies
 		# Basis(axis, delta) * start_basis (deltas-from-start avoid drift).
 		_drag_axis = pick.get("axis", Vector3.UP).normalized()
-		_drag_start_basis = _selected_effect.global_transform.basis
+		_drag_start_basis = _selected_prop.global_transform.basis
 		var u: Vector3 = _drag_axis.cross(Vector3.UP)
 		if u.length() < 0.001:
 			u = _drag_axis.cross(Vector3.RIGHT)
@@ -512,7 +539,7 @@ func _try_start_gizmo_drag() -> bool:
 		# Scale axis drag — capture start scale + signed projection along
 		# the axis. Motion ratio (current / start) drives the scale axis.
 		_drag_axis = pick.get("axis", Vector3.RIGHT).normalized()
-		_drag_start_scale = _selected_effect.scale
+		_drag_start_scale = _selected_prop.scale
 		_drag_scale_index = 0
 		if handle == "sy":
 			_drag_scale_index = 1
@@ -538,7 +565,7 @@ func _try_start_gizmo_drag() -> bool:
 	return true
 
 func _continue_gizmo_drag() -> void:
-	if _selected_effect == null or not is_instance_valid(_selected_effect):
+	if _selected_prop == null or not is_instance_valid(_selected_prop):
 		_drag_handle = ""
 		return
 	var mouse := get_viewport().get_mouse_position()
@@ -552,9 +579,9 @@ func _continue_gizmo_drag() -> void:
 		var ang: float = atan2(local_r.dot(_drag_axis_v), local_r.dot(_drag_axis_u))
 		var delta: float = ang - _drag_start_angle
 		var new_basis: Basis = Basis(_drag_axis, delta) * _drag_start_basis
-		var t: Transform3D = _selected_effect.global_transform
+		var t: Transform3D = _selected_prop.global_transform
 		t.basis = new_basis
-		_selected_effect.global_transform = t
+		_selected_prop.global_transform = t
 	elif _drag_handle.begins_with("s"):
 		var ap_s: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
 		var dist_s: float = (ap_s - _drag_anchor).dot(_drag_axis)
@@ -565,15 +592,15 @@ func _continue_gizmo_drag() -> void:
 			ratio = 0.05
 		var new_scale: Vector3 = _drag_start_scale
 		new_scale[_drag_scale_index] = _drag_start_scale[_drag_scale_index] * ratio
-		_selected_effect.scale = new_scale
+		_selected_prop.scale = new_scale
 	elif _drag_handle.begins_with("p"):
 		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
 		if hit_p.is_empty():
 			return
-		_selected_effect.global_position = hit_p.point + _drag_offset
+		_selected_prop.global_position = hit_p.point + _drag_offset
 	else:
 		var ap: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
-		_selected_effect.global_position = ap + _drag_offset
+		_selected_prop.global_position = ap + _drag_offset
 
 func _closest_point_on_axis(ro: Vector3, rd: Vector3, ap: Vector3, ax: Vector3) -> Vector3:
 	# Closest point on the infinite line (ap, ax) to the ray (ro, rd).

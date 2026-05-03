@@ -21,7 +21,9 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 		{"id": "s_player_place",  "label": "Place Player Spawn"},
 		{"id": "s_player_delete", "label": "Delete Player Spawn"},
 	],
-	"objects":     [],
+	"objects": [
+		{"id": "o_objects", "label": "Objects"},
+	],
 	"level": [
 		{"id": "l_effects", "label": "Effects"},
 	],
