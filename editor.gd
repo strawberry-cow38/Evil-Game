@@ -174,6 +174,26 @@ func _enter_play_mode() -> void:
 	MapState.heights = _terrain.heights.duplicate()
 	MapState.grid_w = _terrain.GRID_W
 	MapState.grid_h = _terrain.GRID_H
+	# Snapshot placed effects + objects so the play scene can rebuild them.
+	MapState.placed_props.clear()
+	for box in _placed_props:
+		if not is_instance_valid(box):
+			continue
+		var kind: String = ""
+		var id: String = ""
+		if "effect_id" in box and String(box.effect_id) != "":
+			kind = "effect"
+			id = String(box.effect_id)
+		elif "object_id" in box and String(box.object_id) != "":
+			kind = "object"
+			id = String(box.object_id)
+		else:
+			continue
+		MapState.placed_props.append({
+			"kind": kind,
+			"id": id,
+			"xform": box.global_transform,
+		})
 	get_tree().change_scene_to_file(PLAY_SCENE)
 
 func _process(delta: float) -> void:

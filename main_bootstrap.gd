@@ -7,6 +7,8 @@ extends Node3D
 # the menu still works.
 
 const EDITOR_TERRAIN := preload("res://editor_terrain.gd")
+const EFFECT_CATALOG := preload("res://editor_effect_catalog.gd")
+const OBJECT_CATALOG := preload("res://editor_objects_catalog.gd")
 
 func _ready() -> void:
 	var terrain_node: Node = null
@@ -34,6 +36,26 @@ func _ready() -> void:
 			if terrain_node != null and terrain_node.has_method("sample_height"):
 				ground_h = terrain_node.sample_height(sp)
 			player.global_position = Vector3(sp.x, ground_h + 1.2, sp.z)
+	# Rebuild placed effects + objects from the catalog. Wireframe boxes
+	# stay in the editor — play mode only spawns the visual content.
+	var props_root: Node3D = null
+	if not MapState.placed_props.is_empty():
+		props_root = Node3D.new()
+		props_root.name = "PlacedProps"
+		add_child(props_root)
+		for entry in MapState.placed_props:
+			var kind: String = String(entry.get("kind", ""))
+			var id: String = String(entry.get("id", ""))
+			var xform: Transform3D = entry.get("xform", Transform3D.IDENTITY)
+			var content: Node3D = null
+			if kind == "effect":
+				content = EFFECT_CATALOG.build(id)
+			elif kind == "object":
+				content = OBJECT_CATALOG.build(id)
+			if content == null:
+				continue
+			props_root.add_child(content)
+			content.global_transform = xform
 
 func _input(event: InputEvent) -> void:
 	# F9 toggles back to the editor with the current map intact.

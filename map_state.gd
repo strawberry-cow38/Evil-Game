@@ -11,6 +11,10 @@ var grid_h: int = 0
 # Player spawn points authored in the editor. Empty = play scene falls
 # back to its hardcoded spawn.
 var player_spawns: Array[Vector3] = []
+# Placed props authored in the editor. Each entry:
+#   { "kind": "effect"|"object", "id": String, "xform": Transform3D }
+# Play scene rebuilds the catalog content per entry and applies xform.
+var placed_props: Array = []
 
 func has_map() -> bool:
 	return heights.size() > 0 and grid_w > 0 and grid_h > 0
@@ -20,6 +24,7 @@ func clear() -> void:
 	grid_w = 0
 	grid_h = 0
 	player_spawns.clear()
+	placed_props.clear()
 
 func random_player_spawn() -> Vector3:
 	if player_spawns.is_empty():
