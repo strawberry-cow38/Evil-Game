@@ -22,7 +22,9 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 		{"id": "s_player_delete", "label": "Delete Player Spawn"},
 	],
 	"objects":     [],
-	"level":       [],
+	"level": [
+		{"id": "l_effects", "label": "Effects"},
+	],
 }
 
 var _hbox: HBoxContainer

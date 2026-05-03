@@ -19,6 +19,9 @@ const TOOL_T_SMOOTH := "t_smooth"
 const TOOL_T_RAMP := "t_ramp"
 const TOOL_S_PLACE_SPAWN := "s_player_place"
 const TOOL_S_DELETE_SPAWN := "s_player_delete"
+const TOOL_L_EFFECTS := "l_effects"
+
+const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 
 const BRUSH_STRENGTH := 12.0    # m/s for raise/lower at full falloff
 const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to remove it
@@ -31,6 +34,7 @@ const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to 
 @onready var _sub_bar: Control = $UI/SubBar
 @onready var _radius_widget: Control = $UI/RadiusWidget
 @onready var _fps_label: Label = $UI/FpsLabel
+@onready var _effects_panel: PanelContainer = $UI/EffectsPanel
 
 var _active_tool: String = TOOL_NONE
 var _brush_radius: float = 4.0
@@ -43,6 +47,11 @@ var _spawn_visuals: Array[Node3D] = []
 var _spawn_marker_mat: StandardMaterial3D = null
 var _spawn_ghost_mat: StandardMaterial3D = null
 var _spawn_ghost: Node3D = null
+# Placed effects (Level → Effects). Each entry is the Node3D root of
+# the wireframe box; the source effect id lives on the node itself.
+var _placed_effects: Array[Node3D] = []
+var _selected_effect: Node3D = null
+var _armed_effect_id: String = ""
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -60,6 +69,8 @@ func _ready() -> void:
 	_flatten_ring.hide_ring()
 	_top_bar.category_picked.connect(_on_category_picked)
 	_sub_bar.tool_picked.connect(_on_tool_picked)
+	_effects_panel.effect_picked.connect(_on_effect_picked)
+	_effects_panel.visible = false
 	_radius_widget.radius_changed.connect(_on_radius_changed)
 	_radius_widget.strength_changed.connect(_on_strength_changed)
 	_radius_widget.set_radius(_brush_radius)
@@ -82,6 +93,13 @@ func _input(event: InputEvent) -> void:
 		or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F9)
 	if is_f9:
 		_enter_play_mode()
+		return
+	# E → place an armed effect at the cursor (Effects tool active).
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
+		if _active_tool == TOOL_L_EFFECTS and _armed_effect_id != "" and not _camera.is_looking() and not _is_over_ui():
+			var hit := _raycast_cursor()
+			if not hit.is_empty():
+				_spawn_effect_at(_armed_effect_id, hit.position)
 
 func _enter_play_mode() -> void:
 	# Snapshot the current map into the autoload so the play scene can
@@ -192,6 +210,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		var p3: Vector3 = hit3.position
 		p3.y = _terrain.sample_height(p3)
 		_delete_nearest_spawn(p3)
+		return
+	# Effects tool: LMB picks the placed effect under the cursor (if
+	# any). E places a new one (handled in _input). Selection drives
+	# the gizmo work in later phases.
+	if _active_tool == TOOL_L_EFFECTS and event.pressed:
+		_pick_effect_under_cursor()
 
 func _apply_tool(world_pos: Vector3, delta: float) -> void:
 	var s: float = _brush_strength
@@ -229,7 +253,9 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel]:
+		if c == null or not c.visible:
+			continue
 		var r: Rect2 = c.get_global_rect()
 		if r.has_point(mp):
 			return true
@@ -240,9 +266,14 @@ func _on_category_picked(category: String) -> void:
 	# Picking a category clears the active tool until the user picks one
 	# from the sub-bar.
 	_active_tool = TOOL_NONE
+	_effects_panel.visible = false
 
 func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
+	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
+
+func _on_effect_picked(id: String) -> void:
+	_armed_effect_id = id
 
 func _on_radius_changed(r: float) -> void:
 	_brush_radius = r
@@ -311,3 +342,71 @@ func _delete_nearest_spawn(world_pos: Vector3) -> void:
 		var v: Node3D = _spawn_visuals[best_i]
 		_spawn_visuals.remove_at(best_i)
 		v.queue_free()
+
+func _spawn_effect_at(effect_id: String, world_pos: Vector3) -> void:
+	var box: Node3D = Node3D.new()
+	box.set_script(EFFECT_BOX_SCRIPT)
+	box.global_position = world_pos
+	box.effect_id = effect_id
+	add_child(box)
+	_placed_effects.append(box)
+	_select_effect(box)
+
+func _select_effect(box: Node3D) -> void:
+	if _selected_effect != null and is_instance_valid(_selected_effect):
+		_selected_effect.set_selected(false)
+	_selected_effect = box
+	if box != null:
+		box.set_selected(true)
+
+func _pick_effect_under_cursor() -> void:
+	# Ray-vs-AABB pick over every placed effect; closest hit wins.
+	var mouse := get_viewport().get_mouse_position()
+	var from := _camera.project_ray_origin(mouse)
+	var dir := _camera.project_ray_normal(mouse)
+	var best: Node3D = null
+	var best_t: float = INF
+	for box in _placed_effects:
+		if not is_instance_valid(box):
+			continue
+		# Transform ray into box's local space (handles rotation/scale once
+		# gizmos move parts around).
+		var inv: Transform3D = box.global_transform.affine_inverse()
+		var lo: Vector3 = inv * from
+		var ld: Vector3 = inv.basis * dir
+		var aabb: AABB = box.get_aabb_local()
+		var t: float = _ray_aabb(lo, ld, aabb)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best = box
+	if best != null:
+		_select_effect(best)
+
+func _ray_aabb(o: Vector3, d: Vector3, b: AABB) -> float:
+	# Slab method. Returns the entry t along the ray (≥0) or -1.0 if miss.
+	var tmin: float = -INF
+	var tmax: float = INF
+	for i in range(3):
+		var oi: float = o[i]
+		var di: float = d[i]
+		var bmin: float = b.position[i]
+		var bmax: float = b.position[i] + b.size[i]
+		if absf(di) < 1e-7:
+			if oi < bmin or oi > bmax:
+				return -1.0
+			continue
+		var inv_d: float = 1.0 / di
+		var t1: float = (bmin - oi) * inv_d
+		var t2: float = (bmax - oi) * inv_d
+		if t1 > t2:
+			var tmp: float = t1
+			t1 = t2
+			t2 = tmp
+		tmin = max(tmin, t1)
+		tmax = min(tmax, t2)
+		if tmin > tmax:
+			return -1.0
+	if tmax < 0.0:
+		return -1.0
+	return max(tmin, 0.0)
+
