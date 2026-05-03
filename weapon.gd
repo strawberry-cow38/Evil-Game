@@ -6,7 +6,8 @@ extends Node3D
 #   3. Schedules damage at impact_time = distance / muzzle_velocity
 #   4. Renders a tracer line for the full path
 
-const FIRE_INTERVAL := 0.10                # 600 RPM
+const MAX_RPM := 600.0
+const FIRE_INTERVAL := 60.0 / MAX_RPM      # hard-clamped at 600 RPM
 const MUZZLE_VELOCITY := 500.0             # m/s
 const BULLET_GRAVITY := 3.0                # m/s^2 (Rust-ish, gentle drop)
 const STEP_DT := 0.01                      # trajectory sim step
@@ -43,6 +44,10 @@ const WEAPON_NAME := "AK-style Rifle"
 const MAG_SIZE := 30
 const BURST_COUNT := 3
 const RELOAD_TIME := 2.0
+const FIRE_SOUND_PATH := "res://assets/audio/Shot_GTEK762mmSoviet.ogg"
+const FIRE_PITCH_MIN := 0.94
+const FIRE_PITCH_MAX := 1.06
+const FIRE_VOL_DB := -4.0
 enum FireMode { SEMI, BURST, AUTO }
 
 @export var camera_path: NodePath
@@ -63,6 +68,8 @@ var _fire_mode: FireMode = FireMode.AUTO
 var _burst_remaining := 0
 var _reloading := false
 var _reload_remaining := 0.0
+var _audio: AudioStreamPlayer3D
+var _fire_stream: AudioStream
 
 func _ready() -> void:
 	_rng.randomize()
@@ -70,6 +77,21 @@ func _ready() -> void:
 		_camera = get_node(camera_path)
 	if player_path != NodePath():
 		_player = get_node(player_path)
+	_setup_audio()
+
+func _setup_audio() -> void:
+	# .import is gitignored on this source-pull repo, so res:// won't resolve the
+	# .ogg via GD.Load. Load the file straight off disk at runtime.
+	var abs_path: String = ProjectSettings.globalize_path(FIRE_SOUND_PATH)
+	if FileAccess.file_exists(abs_path):
+		_fire_stream = AudioStreamOggVorbis.load_from_file(abs_path)
+	_audio = AudioStreamPlayer3D.new()
+	_audio.stream = _fire_stream
+	_audio.volume_db = FIRE_VOL_DB
+	_audio.unit_size = 14.0
+	_audio.max_distance = 120.0
+	_audio.bus = "Master"
+	add_child(_audio)
 
 func is_ads() -> bool:
 	return _player != null and _player.has_method("is_ads") and _player.is_ads()
@@ -201,6 +223,10 @@ func _fire(now: float) -> void:
 	_target_yaw += deg_to_rad(pat.x + jitter_yaw) * mult
 	_target_pitch += deg_to_rad(pat.y + jitter_pitch) * mult
 	_recoil_index += 1
+
+	if _audio != null and _fire_stream != null:
+		_audio.pitch_scale = _rng.randf_range(FIRE_PITCH_MIN, FIRE_PITCH_MAX)
+		_audio.play()
 
 	# Sim trajectory from camera origin in camera-forward direction.
 	var origin: Vector3 = _camera.global_transform.origin
