@@ -210,7 +210,7 @@ func _build_ui() -> void:
 	footer.add_child(_sort_label)
 
 	_hint_label = Label.new()
-	_hint_label.text = "[Enter/Click] equip  [X] inspect  [Q] favorite→1-9  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
+	_hint_label.text = "[Enter/Click] equip  [X] inspect  [R] drop  [Q] favorite→1-9  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
 	_hint_label.modulate = Color(0.75, 0.75, 0.75)
 	_hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -543,6 +543,10 @@ func _input(event: InputEvent) -> void:
 		_open_inspect()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("reload"):
+		_drop_selected()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("favorite"):
 		if _selected_id() != "":
 			_binding_mode = true
@@ -579,6 +583,16 @@ func _input(event: InputEvent) -> void:
 		_move_selection(1)
 		get_viewport().set_input_as_handled()
 		return
+
+func _drop_selected() -> void:
+	var id: String = _selected_id()
+	if id == "" or _inventory == null:
+		return
+	# Inventory is a child of the Player node — call drop_item there.
+	var player: Node = _inventory.get_parent()
+	if player == null or not player.has_method("drop_item"):
+		return
+	player.drop_item(id, 1)
 
 func _move_selection(direction: int) -> void:
 	if _list.item_count == 0:

@@ -20,6 +20,12 @@ const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
 const INTERACT_MASK := 0xFFFFFFFF
 
+const PICKUP_SCRIPT := preload("res://pickup.gd")
+const DROP_FORWARD := 1.1            # m in front of player center
+const DROP_SPREAD := 0.45            # m random radius around drop anchor
+const DROP_HEIGHT := 0.35            # m above floor
+const DROP_WALL_BUFFER := 0.30       # m back-off from wall hit point
+
 const STARTING_WEAPONS: Array[String] = ["akm", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
 const STARTING_AMMO: Dictionary = {
 	"ammo_762x39":  200,
@@ -45,8 +51,10 @@ var _menu: Node
 var _inventory: Node
 var _interact_target: Node = null    # current Pickup the player is looking at, if any
 var _prompt_label: Label
+var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:
+	_rng.randomize()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	if menu_path != NodePath():
 		_menu = get_node(menu_path)
@@ -225,6 +233,56 @@ func _check_equip_hotkeys() -> void:
 			var id: String = _inventory.favorite_id(slot)
 			if id != "" and _inventory.has_item(id):
 				_inventory.set_equipped(id)
+
+func drop_item(id: String, count: int = 1) -> bool:
+	if _inventory == null or count <= 0:
+		return false
+	if not _inventory.has_method("remove") or not _inventory.has_item(id):
+		return false
+	# If we drop the currently-equipped weapon to zero, unequip first.
+	var was_equipped: bool = String(_inventory.get("equipped")) == id
+	if not _inventory.remove(id, count):
+		return false
+	if was_equipped and not _inventory.has_item(id):
+		_inventory.set_equipped("")
+	_spawn_drop(id, count)
+	return true
+
+func _spawn_drop(id: String, count: int) -> void:
+	# Anchor in front of the player on the floor plane (ignore camera pitch).
+	var fwd: Vector3 = -global_transform.basis.z
+	fwd.y = 0.0
+	if fwd.length() < 0.001:
+		fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+
+	var anchor: Vector3 = global_position + fwd * DROP_FORWARD
+	# Random offset to scatter stacked drops so they don't overlap.
+	var ang: float = _rng.randf() * TAU
+	var rad: float = sqrt(_rng.randf()) * DROP_SPREAD
+	anchor += Vector3(cos(ang) * rad, 0.0, sin(ang) * rad)
+
+	# Wall-safety raycast at chest height: if the path from player to drop
+	# anchor crosses geometry, pull the anchor back behind the hit point.
+	var space := get_world_3d().direct_space_state
+	var ray_from: Vector3 = global_position + Vector3(0.0, 0.9, 0.0)
+	var ray_to: Vector3 = anchor + Vector3(0.0, 0.9, 0.0)
+	var q := PhysicsRayQueryParameters3D.create(ray_from, ray_to)
+	q.exclude = [get_rid()]
+	q.collision_mask = 0xFFFFFFFF
+	var r := space.intersect_ray(q)
+	if r and r.has("position"):
+		var hit: Vector3 = r.position
+		var pull_back: Vector3 = (ray_from - hit).normalized() * DROP_WALL_BUFFER
+		anchor = Vector3(hit.x + pull_back.x, anchor.y, hit.z + pull_back.z)
+
+	anchor.y = DROP_HEIGHT
+
+	var p := PICKUP_SCRIPT.new()
+	p.item_id = id
+	p.count = count
+	get_tree().current_scene.add_child(p)
+	p.global_position = anchor
 
 func _loot(target: Node) -> void:
 	if _inventory == null or target == null or not _inventory.has_method("add"):
