@@ -31,6 +31,7 @@ var _active_tool: String = TOOL_NONE
 var _brush_radius: float = 4.0
 var _flatten_target: float = 0.0
 var _ramp_start: Vector3 = Vector3.INF
+var _was_painting: bool = false
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -78,8 +79,13 @@ func _process(delta: float) -> void:
 	_brush_ring.place(hit.position)
 	if _is_over_ui():
 		return
-	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _active_tool != TOOL_T_RAMP:
+	var painting: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _active_tool != TOOL_T_RAMP
+	if painting:
 		_apply_tool(hit.position, delta)
+	# Stroke just ended: snapshot collision so play mode walks the new shape.
+	if _was_painting and not painting:
+		_terrain.end_stroke()
+	_was_painting = painting
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Ramp uses click-down for start, click-up for end.
@@ -94,6 +100,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			if _ramp_start != Vector3.INF:
 				_terrain.ramp_stroke(_ramp_start, hit.position, _brush_radius)
+				_terrain.end_stroke()
 				_ramp_start = Vector3.INF
 
 func _apply_tool(world_pos: Vector3, delta: float) -> void:
