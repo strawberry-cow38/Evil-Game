@@ -4,6 +4,9 @@
 [ext_resource type="Script" path="res://hud.gd" id="2_hud"]
 [ext_resource type="Script" path="res://weapon.gd" id="3_weapon"]
 [ext_resource type="Script" path="res://crosshair.gd" id="4_crosshair"]
+[ext_resource type="Script" path="res://inventory.gd" id="5_inventory"]
+[ext_resource type="Script" path="res://menu.gd" id="6_menu"]
+[ext_resource type="Script" path="res://pickup_spawner.gd" id="7_spawner"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -115,6 +118,11 @@ shape = SubResource("WallShapeEW_1")
 [node name="Player" type="CharacterBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 script = ExtResource("1_player")
+menu_path = NodePath("../Menu")
+inventory_path = NodePath("Inventory")
+
+[node name="Inventory" type="Node" parent="Player"]
+script = ExtResource("5_inventory")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Player"]
 shape = SubResource("Capsule_1")
@@ -161,6 +169,13 @@ theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 16
 text = "FPS: 0
 Speed: 0.00 m/s"
+
+[node name="Menu" type="CanvasLayer" parent="."]
+script = ExtResource("6_menu")
+inventory_path = NodePath("../Player/Inventory")
+
+[node name="PickupSpawner" type="Node3D" parent="."]
+script = ExtResource("7_spawner")
 
 [node name="Crosshair" type="Control" parent="HUD"]
 anchor_right = 1.0

@@ -441,9 +441,16 @@ func get_current_bloom_deg() -> float:
 	return bloom_deg
 
 func _process(delta: float) -> void:
+	# Freeze all weapon input + recoil decay while the inventory menu is up.
+	if _player != null and _player.has_method("is_menu_open") and _player.is_menu_open():
+		return
+
 	var now := Time.get_ticks_msec() / 1000.0
 
-	if Input.is_action_just_pressed("weapon_next"):
+	# E is shared with `interact`. If the player is looking at a pickup, the
+	# loot action wins and the weapon swap is suppressed for that press.
+	var skip_weapon_e: bool = _player != null and _player.has_method("has_interact_target") and _player.has_interact_target()
+	if Input.is_action_just_pressed("weapon_next") and not skip_weapon_e:
 		_cycle_weapon(1)
 	elif Input.is_action_just_pressed("weapon_prev"):
 		_cycle_weapon(-1)
