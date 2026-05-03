@@ -133,7 +133,7 @@ const BURST_COOLDOWN := 0.22           # gap after a burst completes before next
 const BURST_RPM_MULT := 1.10           # 10% faster intra-burst cyclic
 const BURST_RECOIL_MULT := 0.90        # 10% less recoil per burst shot
 const BURST_BLOOM_MULT := 0.90         # 10% less bloom while burst-firing
-const RELOAD_TIME := 2.0
+const RELOAD_TIME := 2.0                # default if a profile omits reload_time
 const FIRE_PITCH_MIN := 0.94
 const FIRE_PITCH_MAX := 1.06
 const FIRE_VOL_DB := -4.0
@@ -170,6 +170,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_AKM,
 		"bloom_mult": 1.0,
 		"ammo_id": "ammo_762x39",
+		"reload_time": 4.4,
 	},
 	"sks": {
 		"name": "SKS",
@@ -182,6 +183,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_AKM,
 		"bloom_mult": 0.85,
 		"ammo_id": "ammo_762x39",
+		"reload_time": 4.4,
 	},
 	"m16a2": {
 		"name": "M16A2",
@@ -194,6 +196,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_M16,
 		"bloom_mult": 1.0,
 		"ammo_id": "ammo_556nato",
+		"reload_time": 4.0,
 	},
 	"bizon": {
 		"name": "PP-19 Bizon",
@@ -206,6 +209,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_BIZON,
 		"bloom_mult": 1.4,
 		"ammo_id": "ammo_9x18",
+		"reload_time": 4.4,
 	},
 	"mp5sd": {
 		"name": "MP5SD",
@@ -218,6 +222,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_MP5,
 		"bloom_mult": 2.2,
 		"ammo_id": "ammo_9mm",
+		"reload_time": 4.0,
 	},
 	"m249": {
 		"name": "M249",
@@ -230,6 +235,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_M249,
 		"bloom_mult": 1.6,
 		"ammo_id": "ammo_556nato",
+		"reload_time": 7.5,
 	},
 	"m60": {
 		"name": "M60",
@@ -242,6 +248,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_M60,
 		"bloom_mult": 1.7,
 		"ammo_id": "ammo_762nato",
+		"reload_time": 7.5,
 	},
 	"makarov": {
 		"name": "PM Makarov",
@@ -254,6 +261,7 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_MAKAROV,
 		"bloom_mult": 1.6,
 		"ammo_id": "ammo_9x18",
+		"reload_time": 2.9,
 	},
 	"mgl": {
 		"name": "MGL",
@@ -268,6 +276,8 @@ const PROFILES := {
 		"projectile": true,
 		"projectile_velocity": 75.0,
 		"ammo_id": "ammo_40mm",
+		"per_round_reload": true,
+		"reload_time_per_round": 1.0,
 	},
 }
 const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
@@ -304,6 +314,7 @@ var _burst_cooldown_until := -1000.0
 var _reloading := false
 var _reload_remaining := 0.0
 var _reload_amount := 0   # rounds queued for transfer when reload finishes
+var _reload_total := 0.0  # full-cycle time for HUD progress (per-round = window)
 var _audio_voices: Array[AudioStreamPlayer3D] = []
 var _audio_tweens: Array[Tween] = []
 var _audio_idx := 0
@@ -472,11 +483,17 @@ func _start_reload() -> void:
 		return
 	_reload_amount = take
 	_reloading = true
-	_reload_remaining = RELOAD_TIME
 	_burst_remaining = 0
-	if _reload_player != null and _reload_stream != null:
-		_reload_player.stop()
-		_reload_player.play()
+	if bool(_profile.get("per_round_reload", false)):
+		# Each round loads independently; firing cancels the chain.
+		_reload_total = float(_profile.get("reload_time_per_round", 1.0))
+		_reload_remaining = _reload_total
+	else:
+		_reload_total = float(_profile.get("reload_time", RELOAD_TIME))
+		_reload_remaining = _reload_total
+		if _reload_player != null and _reload_stream != null:
+			_reload_player.stop()
+			_reload_player.play()
 
 func _finish_reload() -> void:
 	var ammo_id = _profile.get("ammo_id", "")
@@ -487,6 +504,18 @@ func _finish_reload() -> void:
 			_inventory.remove(ammo_id, actual)
 			_ammo += actual
 	_reload_amount = 0
+
+# Per-round reload tick: pull a single round from inventory into the mag.
+func _load_one_round() -> void:
+	var ammo_id = _profile.get("ammo_id", "")
+	if _inventory == null or ammo_id == "":
+		return
+	if int(_inventory.counts.get(ammo_id, 0)) <= 0:
+		_reload_amount = 0
+		return
+	_inventory.remove(ammo_id, 1)
+	_ammo += 1
+	_reload_amount -= 1
 
 func _schedule_casing() -> void:
 	if _casing_stream == null or _casing_voices.is_empty():
@@ -557,9 +586,9 @@ func is_reloading() -> bool:
 	return _reloading
 
 func get_reload_progress() -> float:
-	if not _reloading or RELOAD_TIME <= 0.0:
+	if not _reloading or _reload_total <= 0.0:
 		return 0.0
-	return clampf(1.0 - _reload_remaining / RELOAD_TIME, 0.0, 1.0)
+	return clampf(1.0 - _reload_remaining / _reload_total, 0.0, 1.0)
 
 func get_current_bloom_deg() -> float:
 	if _player == null:
@@ -607,13 +636,27 @@ func _process(delta: float) -> void:
 	if _reloading:
 		_reload_remaining -= delta
 		if _reload_remaining <= 0.0:
-			_reload_remaining = 0.0
-			_reloading = false
-			_finish_reload()
+			if bool(_profile.get("per_round_reload", false)):
+				# Transfer one round, then either start the next round's window
+				# or end the reload chain.
+				_load_one_round()
+				if _reload_amount > 0 and _ammo < get_mag_size():
+					_reload_remaining += _reload_total
+				else:
+					_reload_remaining = 0.0
+					_reloading = false
+					_reload_amount = 0
+			else:
+				_reload_remaining = 0.0
+				_reloading = false
+				_finish_reload()
 
-	# Decide whether to fire this frame based on mode.
+	# Decide whether to fire this frame based on mode. Per-round reload doesn't
+	# block fire input — pulling the trigger cancels the reload chain so you
+	# can pop off whatever you've already loaded.
+	var per_round: bool = bool(_profile.get("per_round_reload", false))
 	var want_fire := false
-	if not _reloading:
+	if not _reloading or per_round:
 		match _fire_mode:
 			FireMode.SEMI:
 				want_fire = Input.is_action_just_pressed("fire")
@@ -623,6 +666,10 @@ func _process(delta: float) -> void:
 				if Input.is_action_just_pressed("fire") and _burst_remaining == 0 and now >= _burst_cooldown_until:
 					_burst_remaining = BURST_COUNT
 				want_fire = _burst_remaining > 0
+	if want_fire and _reloading and per_round:
+		_reloading = false
+		_reload_remaining = 0.0
+		_reload_amount = 0
 
 	var interval: float = _fire_interval()
 	if _fire_mode == FireMode.BURST:
