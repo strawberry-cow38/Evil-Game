@@ -9,6 +9,8 @@ extends Node3D
 const EDITOR_TERRAIN := preload("res://editor_terrain.gd")
 const EFFECT_CATALOG := preload("res://editor_effect_catalog.gd")
 const OBJECT_CATALOG := preload("res://editor_objects_catalog.gd")
+const PICKUP := preload("res://pickup.gd")
+const NOTHING_ITEM_ID := "nothing"
 
 func _ready() -> void:
 	var terrain_node: Node = null
@@ -56,6 +58,59 @@ func _ready() -> void:
 				continue
 			props_root.add_child(content)
 			content.global_transform = xform
+	# Item-spawn rolls. For each placed cube, look up its table, roll the
+	# weighted entries (including the implicit "nothing" entry), and drop
+	# a pickup if the result isn't nothing.
+	if not MapState.item_spawn_points.is_empty():
+		var spawn_root := Node3D.new()
+		spawn_root.name = "ItemSpawns"
+		add_child(spawn_root)
+		var tables_by_id: Dictionary = {}
+		for t in MapState.item_tables:
+			tables_by_id[String(t.get("id", ""))] = t
+		for sp in MapState.item_spawn_points:
+			var tid: String = String(sp.get("table_id", ""))
+			var pos: Vector3 = sp.get("pos", Vector3.ZERO)
+			var rolled: String = _roll_table(tables_by_id.get(tid, {}))
+			if rolled == "" or rolled == NOTHING_ITEM_ID:
+				continue
+			var pickup := Area3D.new()
+			pickup.set_script(PICKUP)
+			pickup.item_id = rolled
+			pickup.count = 1
+			pickup.position = pos + Vector3(0, 0.3, 0)
+			spawn_root.add_child(pickup)
+
+func _roll_table(table: Dictionary) -> String:
+	if table.is_empty():
+		return ""
+	var entries: Array = table.get("entries", [])
+	var has_nothing: bool = false
+	var total: float = 0.0
+	for e in entries:
+		var w: float = float(e.get("weight", 1.0))
+		if w < 0.0:
+			w = 0.0
+		total += w
+		if String(e.get("id", "")) == NOTHING_ITEM_ID:
+			has_nothing = true
+	# Tables without an explicit nothing entry still get a baseline 1.0
+	# nothing-weight so a table with one item at weight 0 doesn't divide
+	# by zero or always spawn.
+	if not has_nothing:
+		total += 1.0
+	if total <= 0.0:
+		return ""
+	var roll: float = randf() * total
+	var acc: float = 0.0
+	for e in entries:
+		var w2: float = float(e.get("weight", 1.0))
+		if w2 < 0.0:
+			w2 = 0.0
+		acc += w2
+		if roll <= acc:
+			return String(e.get("id", ""))
+	return NOTHING_ITEM_ID
 
 func _input(event: InputEvent) -> void:
 	# F9 toggles back to the editor with the current map intact.

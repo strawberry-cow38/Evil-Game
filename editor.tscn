@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3 uid="uid://b8fpsbase00020"]
+[gd_scene load_steps=15 format=3 uid="uid://b8fpsbase00020"]
 
 [ext_resource type="Script" path="res://editor.gd" id="1_root"]
 [ext_resource type="Script" path="res://editor_camera.gd" id="2_cam"]
@@ -10,6 +10,8 @@
 [ext_resource type="Script" path="res://editor_effects_panel.gd" id="8_fxpanel"]
 [ext_resource type="Script" path="res://editor_space_toggle.gd" id="9_space"]
 [ext_resource type="Script" path="res://editor_objects_panel.gd" id="10_objpanel"]
+[ext_resource type="Script" path="res://editor_item_tables_panel.gd" id="11_tablepanel"]
+[ext_resource type="Script" path="res://editor_item_picker_panel.gd" id="12_pickerpanel"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_E1"]
 sky_horizon_color = Color(0.6, 0.7, 0.85, 1)
@@ -86,6 +88,30 @@ offset_top = 120.0
 offset_right = -12.0
 offset_bottom = -12.0
 script = ExtResource("10_objpanel")
+
+[node name="ItemTablesPanel" type="PanelContainer" parent="UI"]
+visible = false
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = 120.0
+offset_right = -12.0
+offset_bottom = -12.0
+script = ExtResource("11_tablepanel")
+
+[node name="ItemPickerPanel" type="PanelContainer" parent="UI"]
+visible = false
+anchor_left = 1.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -620.0
+offset_top = 120.0
+offset_right = -312.0
+offset_bottom = -12.0
+script = ExtResource("12_pickerpanel")
 
 [node name="RadiusWidget" type="PanelContainer" parent="UI"]
 anchor_top = 1.0

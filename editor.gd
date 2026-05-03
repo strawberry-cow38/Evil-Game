@@ -19,11 +19,14 @@ const TOOL_T_SMOOTH := "t_smooth"
 const TOOL_T_RAMP := "t_ramp"
 const TOOL_S_PLACE_SPAWN := "s_player_place"
 const TOOL_S_DELETE_SPAWN := "s_player_delete"
+const TOOL_S_ITEMS := "s_items"
+const TOOL_S_ITEMS_REMOVE := "s_items_remove"
 const TOOL_L_EFFECTS := "l_effects"
 const TOOL_O_OBJECTS := "o_objects"
 
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
+const ITEM_SPAWN_BOX_SCRIPT := preload("res://editor_item_spawn_box.gd")
 const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 
 const BRUSH_STRENGTH := 12.0    # m/s for raise/lower at full falloff
@@ -39,6 +42,8 @@ const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to 
 @onready var _fps_label: Label = $UI/FpsLabel
 @onready var _effects_panel: PanelContainer = $UI/EffectsPanel
 @onready var _objects_panel: PanelContainer = $UI/ObjectsPanel
+@onready var _item_tables_panel: PanelContainer = $UI/ItemTablesPanel
+@onready var _item_picker_panel: PanelContainer = $UI/ItemPickerPanel
 @onready var _space_toggle: PanelContainer = $UI/SpaceToggle
 
 var _active_tool: String = TOOL_NONE
@@ -58,6 +63,11 @@ var _spawn_ghost: Node3D = null
 # treats them uniformly. Source id lives on each node.
 var _placed_props: Array[Node3D] = []
 var _selected_prop: Node3D = null
+# Item-spawn cubes (Spawns → Items). Owned separately because they
+# don't participate in the gizmo / selection pipeline — they're plain
+# colored cubes whose contents come from a roll table at play-mode
+# bootstrap.
+var _placed_item_spawns: Array[Node3D] = []
 var _armed_effect_id: String = ""
 var _armed_object_id: String = ""
 var _gizmo: Node3D = null
@@ -108,6 +118,10 @@ func _ready() -> void:
 	_effects_panel.visible = false
 	_objects_panel.object_picked.connect(_on_object_picked)
 	_objects_panel.visible = false
+	_item_tables_panel.set_picker(_item_picker_panel)
+	_item_tables_panel.active_table_changed.connect(_on_active_table_changed)
+	_item_tables_panel.visible = false
+	_item_picker_panel.visible = false
 	_space_toggle.space_changed.connect(_on_space_changed)
 	_radius_widget.radius_changed.connect(_on_radius_changed)
 	_radius_widget.strength_changed.connect(_on_strength_changed)
@@ -194,6 +208,31 @@ func _enter_play_mode() -> void:
 			"id": id,
 			"xform": box.global_transform,
 		})
+	# Snapshot item-spawn tables + placed cubes. Tables are deep-duped so
+	# the play scene never aliases editor state (color edits in a future
+	# F9 session won't retro-affect a baked map).
+	MapState.item_tables.clear()
+	for t in _item_tables_panel.tables:
+		var entries_dup: Array = []
+		for e in t.get("entries", []):
+			entries_dup.append({
+				"id": String(e.get("id", "")),
+				"weight": float(e.get("weight", 1.0)),
+			})
+		MapState.item_tables.append({
+			"id": String(t.get("id", "")),
+			"name": String(t.get("name", "")),
+			"color": t.get("color", Color.WHITE),
+			"entries": entries_dup,
+		})
+	MapState.item_spawn_points.clear()
+	for box in _placed_item_spawns:
+		if not is_instance_valid(box):
+			continue
+		MapState.item_spawn_points.append({
+			"table_id": String(box.table_id),
+			"pos": box.global_position,
+		})
 	get_tree().change_scene_to_file(PLAY_SCENE)
 
 func _process(delta: float) -> void:
@@ -221,7 +260,7 @@ func _process(delta: float) -> void:
 		return
 	# Brush ring only makes sense for terrain brushes; spawn tools use
 	# pinpoint clicks.
-	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP]
+	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE]
 	if not is_brush_tool:
 		_brush_ring.hide_ring()
 		return
@@ -296,6 +335,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		MapState.player_spawns.append(p2)
 		_add_spawn_visual(p2)
 		return
+	# Item-spawn place: drop a colored cube tied to the active table.
+	if _active_tool == TOOL_S_ITEMS and event.pressed:
+		var t: Dictionary = _item_tables_panel.get_active_table()
+		if t.is_empty():
+			return
+		var hit_i := _raycast_cursor()
+		if hit_i.is_empty():
+			return
+		var p_i: Vector3 = hit_i.position
+		p_i.y = _terrain.sample_height(p_i)
+		_spawn_item_box(String(t.get("id", "")), t.get("color", Color.WHITE), p_i)
+		return
 	# Spawn delete: each press removes the closest marker within radius.
 	if _active_tool == TOOL_S_DELETE_SPAWN and event.pressed:
 		var hit3 := _raycast_cursor()
@@ -329,6 +380,8 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 			_terrain.flatten_brush(world_pos, _brush_radius, _flatten_target, 4.0 * s, delta)
 		TOOL_T_SMOOTH:
 			_terrain.smooth_brush(world_pos, _brush_radius, 6.0 * s, delta)
+		TOOL_S_ITEMS_REMOVE:
+			_remove_item_spawns_in_radius(world_pos, _brush_radius)
 
 func _raycast_cursor() -> Dictionary:
 	# Two cursor modes:
@@ -354,7 +407,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _space_toggle]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -374,6 +427,9 @@ func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
 	_objects_panel.visible = (tool_id == TOOL_O_OBJECTS)
+	_item_tables_panel.visible = (tool_id == TOOL_S_ITEMS)
+	if tool_id != TOOL_S_ITEMS:
+		_item_picker_panel.visible = false
 	# Gizmo only matters while a placement tool is active.
 	if _gizmo != null:
 		if tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS:
@@ -387,6 +443,23 @@ func _on_effect_picked(id: String) -> void:
 
 func _on_object_picked(id: String) -> void:
 	_armed_object_id = id
+
+func _on_active_table_changed(_idx: int) -> void:
+	# Live-recolor every spawn cube whose table id matches the (possibly
+	# edited) active table's color. Cheap — the placed-spawn list is short.
+	for box in _placed_item_spawns:
+		if not is_instance_valid(box):
+			continue
+		var t: Dictionary = _find_table(String(box.table_id))
+		if t.is_empty():
+			continue
+		box.set_color(t.get("color", Color.WHITE))
+
+func _find_table(table_id: String) -> Dictionary:
+	for t in _item_tables_panel.tables:
+		if String(t.get("id", "")) == table_id:
+			return t
+	return {}
 
 func _on_space_changed(use_local: bool) -> void:
 	if _gizmo != null:
@@ -469,6 +542,26 @@ func _spawn_effect_at(effect_id: String, world_pos: Vector3) -> void:
 	box.global_position = world_pos
 	_placed_props.append(box)
 	_select_prop(box)
+
+func _spawn_item_box(table_id: String, color: Color, world_pos: Vector3) -> void:
+	var box: Node3D = Node3D.new()
+	box.set_script(ITEM_SPAWN_BOX_SCRIPT)
+	box.table_id = table_id
+	box.color = color
+	add_child(box)
+	box.global_position = world_pos
+	_placed_item_spawns.append(box)
+
+func _remove_item_spawns_in_radius(world_pos: Vector3, radius: float) -> void:
+	var keep: Array[Node3D] = []
+	for box in _placed_item_spawns:
+		if not is_instance_valid(box):
+			continue
+		if box.global_position.distance_to(world_pos) <= radius:
+			box.queue_free()
+		else:
+			keep.append(box)
+	_placed_item_spawns = keep
 
 func _spawn_object_at(object_id: String, world_pos: Vector3) -> void:
 	var box: Node3D = Node3D.new()

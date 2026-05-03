@@ -15,6 +15,14 @@ var player_spawns: Array[Vector3] = []
 #   { "kind": "effect"|"object", "id": String, "xform": Transform3D }
 # Play scene rebuilds the catalog content per entry and applies xform.
 var placed_props: Array = []
+# Item-spawn tables authored in the editor. Each entry:
+#   { "id": String, "name": String, "color": Color,
+#     "entries": Array[ { "id": String, "weight": float } ] }
+# A "nothing" entry id means "roll-this-and-no-loot-spawns".
+var item_tables: Array = []
+# Placed item-spawn cubes. Each entry: { "table_id": String, "pos": Vector3 }.
+# Play scene rolls the referenced table per entry to drop a single pickup.
+var item_spawn_points: Array = []
 
 func has_map() -> bool:
 	return heights.size() > 0 and grid_w > 0 and grid_h > 0
@@ -25,6 +33,8 @@ func clear() -> void:
 	grid_h = 0
 	player_spawns.clear()
 	placed_props.clear()
+	item_tables.clear()
+	item_spawn_points.clear()
 
 func random_player_spawn() -> Vector3:
 	if player_spawns.is_empty():
