@@ -84,9 +84,14 @@ var _reload_held: bool = false
 var _reload_press_time: float = 0.0
 var _pie_active: bool = false
 
+const FALL_SAFETY_Y := -40.0   # below this y → fell out of the map; respawn
+
+var _initial_spawn: Vector3 = Vector3.ZERO
+
 func _ready() -> void:
 	_rng.randomize()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_initial_spawn = global_position
 	if menu_path != NodePath():
 		_menu = get_node(menu_path)
 	if inventory_path != NodePath():
@@ -165,6 +170,22 @@ func is_crouched() -> bool:
 func is_ads() -> bool:
 	return _ads
 
+# Picks the best spawn point and teleports there. Order:
+#  1. random authored player_spawn marker (positioned at terrain
+#     height + 1.2m so we don't clip)
+#  2. fallback to the position the player started at this scene
+func _respawn_at_safe_point() -> void:
+	var target: Vector3 = _initial_spawn
+	if MapState != null and not MapState.player_spawns.is_empty():
+		var sp: Vector3 = MapState.random_player_spawn()
+		var ground_h: float = sp.y
+		var terrain := get_node_or_null("../EditorTerrain")
+		if terrain != null and terrain.has_method("sample_height"):
+			ground_h = terrain.sample_height(sp)
+		target = Vector3(sp.x, ground_h + 1.2, sp.z)
+	global_position = target
+	velocity = Vector3.ZERO
+
 func is_menu_open() -> bool:
 	return _menu != null and _menu.has_method("is_open") and _menu.is_open()
 
@@ -242,6 +263,11 @@ func _process(delta: float) -> void:
 			_scope.hide_scope()
 
 func _physics_process(delta: float) -> void:
+	# Fall-out-of-the-world safety net — teleport back to spawn before
+	# the player falls forever.
+	if global_position.y < FALL_SAFETY_Y:
+		_respawn_at_safe_point()
+		return
 	if is_menu_open():
 		# Hold position while menu is up — gravity still applies so we don't
 		# float, but no input-driven movement.
