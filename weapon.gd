@@ -342,6 +342,7 @@ const PROFILES := {
 		"reload_time": 4.2,
 		"scope": true,
 		"ads_fov": 13.0,
+		"bolt_unscope_time": 0.85,
 	},
 	"mgl": {
 		"name": "MGL",
@@ -790,6 +791,15 @@ func has_scope() -> bool:
 # Per-weapon ADS FOV override (sniper scopes are much narrower than 55°).
 func get_ads_fov(default_fov: float) -> float:
 	return float(_profile.get("ads_fov", default_fov))
+
+# Bolt-action rifles force the player out of ADS for the cycle duration so
+# they have to re-shoulder between shots. Returns true while that lock is
+# active.
+func is_ads_locked() -> bool:
+	var lock_time: float = float(_profile.get("bolt_unscope_time", 0.0))
+	if lock_time <= 0.0:
+		return false
+	return (Time.get_ticks_msec() / 1000.0) - _last_fire_time < lock_time
 
 func get_weapon_name() -> String:
 	return _profile.get("name", "?")

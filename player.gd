@@ -211,7 +211,10 @@ func _process(delta: float) -> void:
 	# Reloading kicks the player out of ADS — can't aim down sights with the
 	# weapon torn open. Holding the ADS button is also ignored mid-reload.
 	var weapon_reloading: bool = _weapon != null and _weapon.has_method("is_reloading") and _weapon.is_reloading()
-	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not is_pie_open() and not weapon_reloading
+	# Bolt-action rifles force the player out of ADS for the cycle window so
+	# the scope kicks off the screen between shots.
+	var ads_locked: bool = _weapon != null and _weapon.has_method("is_ads_locked") and _weapon.is_ads_locked()
+	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not is_pie_open() and not weapon_reloading and not ads_locked
 
 	# Smooth camera height between stand/crouch.
 	var target_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
