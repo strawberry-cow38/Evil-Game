@@ -26,12 +26,14 @@ const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to 
 @onready var _camera: Camera3D = $EditorCamera
 @onready var _terrain: Node3D = $Terrain
 @onready var _brush_ring: Node3D = $BrushRing
+@onready var _flatten_ring: Node3D = $FlattenRing
 @onready var _top_bar: Control = $UI/TopBar
 @onready var _sub_bar: Control = $UI/SubBar
 @onready var _radius_widget: Control = $UI/RadiusWidget
 
 var _active_tool: String = TOOL_NONE
 var _brush_radius: float = 4.0
+var _brush_strength: float = 1.0
 var _flatten_target: float = 0.0
 var _ramp_start: Vector3 = Vector3.INF
 var _was_painting: bool = false
@@ -50,10 +52,17 @@ func _ready() -> void:
 	_brush_ring.terrain = _terrain
 	_brush_ring.set_radius(_brush_radius)
 	_brush_ring.hide_ring()
+	# Flatten preview ring — magenta so it pops against the surface ring.
+	_flatten_ring.terrain = _terrain
+	_flatten_ring.set_color(Color(1.0, 0.35, 0.85, 1.0))
+	_flatten_ring.set_radius(_brush_radius)
+	_flatten_ring.hide_ring()
 	_top_bar.category_picked.connect(_on_category_picked)
 	_sub_bar.tool_picked.connect(_on_tool_picked)
 	_radius_widget.radius_changed.connect(_on_radius_changed)
+	_radius_widget.strength_changed.connect(_on_strength_changed)
 	_radius_widget.set_radius(_brush_radius)
+	_radius_widget.set_strength(_brush_strength)
 	# Default to Terrain → Heights view so the user lands on a useful page.
 	_top_bar.select_category("terrain")
 	# Restore spawn markers from MapState (if any).
@@ -84,6 +93,7 @@ func _enter_play_mode() -> void:
 func _process(delta: float) -> void:
 	# Hide all hover visuals by default; per-tool branches re-enable them.
 	_spawn_ghost.visible = false
+	_flatten_ring.hide_ring()
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
 	if _camera.is_looking() or _active_tool == TOOL_NONE:
@@ -112,6 +122,10 @@ func _process(delta: float) -> void:
 		return
 	_brush_ring.set_radius(_brush_radius)
 	_brush_ring.place(hit.position)
+	# Flatten target preview ring at the sampled height.
+	if _active_tool == TOOL_T_FLATTEN:
+		_flatten_ring.set_radius(_brush_radius)
+		_flatten_ring.place_flat(hit.position, _flatten_target)
 	if _is_over_ui():
 		return
 	# Shift-LMB on flatten = "sample target height" gesture, not a paint
@@ -170,15 +184,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		_delete_nearest_spawn(hit3.position)
 
 func _apply_tool(world_pos: Vector3, delta: float) -> void:
+	var s: float = _brush_strength
 	match _active_tool:
 		TOOL_T_RAISE:
-			_terrain.raise_brush(world_pos, _brush_radius, BRUSH_STRENGTH, delta)
+			_terrain.raise_brush(world_pos, _brush_radius, BRUSH_STRENGTH * s, delta)
 		TOOL_T_LOWER:
-			_terrain.lower_brush(world_pos, _brush_radius, BRUSH_STRENGTH, delta)
+			_terrain.lower_brush(world_pos, _brush_radius, BRUSH_STRENGTH * s, delta)
 		TOOL_T_FLATTEN:
-			_terrain.flatten_brush(world_pos, _brush_radius, _flatten_target, 4.0, delta)
+			_terrain.flatten_brush(world_pos, _brush_radius, _flatten_target, 4.0 * s, delta)
 		TOOL_T_SMOOTH:
-			_terrain.smooth_brush(world_pos, _brush_radius, 6.0, delta)
+			_terrain.smooth_brush(world_pos, _brush_radius, 6.0 * s, delta)
 
 func _raycast_cursor() -> Dictionary:
 	var vp := get_viewport()
@@ -209,6 +224,10 @@ func _on_tool_picked(tool_id: String) -> void:
 func _on_radius_changed(r: float) -> void:
 	_brush_radius = r
 	_brush_ring.set_radius(r)
+	_flatten_ring.set_radius(r)
+
+func _on_strength_changed(s: float) -> void:
+	_brush_strength = s
 
 # Spawn-marker visual: vertical pillar with a flag on top, tinted
 # cyan. Used both for committed markers and the placement ghost

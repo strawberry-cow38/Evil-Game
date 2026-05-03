@@ -44,6 +44,9 @@ script = ExtResource("3_terrain")
 [node name="BrushRing" type="Node3D" parent="."]
 script = ExtResource("4_ring")
 
+[node name="FlattenRing" type="Node3D" parent="."]
+script = ExtResource("4_ring")
+
 [node name="UI" type="CanvasLayer" parent="."]
 
 [node name="TopBar" type="PanelContainer" parent="UI"]
@@ -61,8 +64,8 @@ script = ExtResource("6_sub")
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = 12.0
-offset_top = -64.0
-offset_right = 260.0
+offset_top = -130.0
+offset_right = 280.0
 offset_bottom = -12.0
 script = ExtResource("7_radius")
 
