@@ -24,6 +24,7 @@ const DEFS := {
 	"ammo_762x39":  {"name": "7.62×39mm",       "weight": 0.016, "value":  1, "color": Color(0.85, 0.65, 0.20), "kind": "ammo", "desc": "Soviet intermediate cartridge. Feeds the AKM."},
 	"ammo_556nato": {"name": "5.56×45mm NATO",  "weight": 0.012, "value":  1, "color": Color(0.90, 0.78, 0.40), "kind": "ammo", "desc": "NATO standard. Feeds the M16A2 and M249."},
 	"ammo_9mm":     {"name": "9×19mm",          "weight": 0.012, "value":  1, "color": Color(0.78, 0.72, 0.55), "kind": "ammo", "desc": "Pistol cartridge. Feeds the Bizon and MP5SD."},
+	"ammo_9x18":    {"name": "9×18mm Makarov",  "weight": 0.010, "value":  1, "color": Color(0.72, 0.66, 0.50), "kind": "ammo", "desc": "Soviet pistol round. No weapon uses it yet."},
 	"ammo_762nato": {"name": "7.62×51mm NATO",  "weight": 0.025, "value":  2, "color": Color(0.80, 0.55, 0.18), "kind": "ammo", "desc": "Full-power NATO rifle round. Feeds the M60."},
 	"ammo_40mm":    {"name": "40mm Grenade",    "weight": 0.230, "value": 15, "color": Color(0.30, 0.55, 0.30), "kind": "ammo", "desc": "Low-velocity 40mm HE grenade. Feeds the MGL."},
 }
