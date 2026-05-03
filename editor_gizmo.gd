@@ -47,8 +47,12 @@ const COLOR_HOVER := Color(1.0, 0.95, 0.35, 1.0)
 
 const ARROW_LEN := 1.6
 const ARROW_HEAD := 0.22
-const PLANE_OFFSET := 0.45  # along each axis from origin
-const PLANE_SIZE := 0.45    # square edge length
+const PLANE_SIZE := 0.5     # square edge length — extends from origin out
+                            # along each axis so two edges sit ON the
+                            # corresponding axis arrows.
+const PLANE_PICK_INSET := 0.08  # shrink pick area slightly so clicks ON
+                                # an axis line still register as axis hits
+                                # rather than getting eaten by the plane.
 const HIT_RADIUS := 0.18    # axis pick distance threshold
 
 var mode: int = MODE_NONE
@@ -199,13 +203,15 @@ func _scale_handle(im: ImmediateMesh, dir: Vector3, color: Color, handle_id: Str
 	im.surface_end()
 
 func _plane_quad(im: ImmediateMesh, a: Vector3, b: Vector3, color: Color, handle_id: String) -> void:
+	# Quad with corner at origin, extending PLANE_SIZE along each of (a, b).
+	# This puts two edges of the quad directly on the corresponding axis
+	# arrows so the plane handle visually touches them.
 	var c: Color = COLOR_HOVER if handle_id == hover_handle else color
 	c.a = 0.85
-	var off: Vector3 = a * PLANE_OFFSET + b * PLANE_OFFSET
-	var v0: Vector3 = off
-	var v1: Vector3 = off + a * PLANE_SIZE
-	var v2: Vector3 = off + a * PLANE_SIZE + b * PLANE_SIZE
-	var v3: Vector3 = off + b * PLANE_SIZE
+	var v0: Vector3 = Vector3.ZERO
+	var v1: Vector3 = a * PLANE_SIZE
+	var v2: Vector3 = a * PLANE_SIZE + b * PLANE_SIZE
+	var v3: Vector3 = b * PLANE_SIZE
 	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, _mat)
 	im.surface_set_color(c)
 	im.surface_add_vertex(v0)
@@ -277,8 +283,11 @@ func pick_handle(from: Vector3, dir: Vector3) -> Dictionary:
 			var local: Vector3 = pt - origin
 			var du: float = local.dot(u)
 			var dv: float = local.dot(v)
-			if du >= PLANE_OFFSET and du <= PLANE_OFFSET + PLANE_SIZE \
-				and dv >= PLANE_OFFSET and dv <= PLANE_OFFSET + PLANE_SIZE:
+			# Inset the pick bounds slightly so a click landing exactly on
+			# an axis line (du or dv ≈ 0) still resolves as the axis pick
+			# rather than being eaten by the plane that sits on top of it.
+			if du >= PLANE_PICK_INSET and du <= PLANE_SIZE - PLANE_PICK_INSET \
+				and dv >= PLANE_PICK_INSET and dv <= PLANE_SIZE - PLANE_PICK_INSET:
 				if hit.t < best_t:
 					best_t = hit.t
 					best_handle = name2
