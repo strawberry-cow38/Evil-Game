@@ -22,6 +22,7 @@ const DEFS := {
 	"m60":    {"name": "M60",          "weight": 10.50,"value": 1100, "color": Color(0.22, 0.22, 0.20), "kind": "weapon", "desc": "7.62 belt-fed LMG. Slow cyclic, devastating.", "slots": ["Optic", "Bipod"]},
 	"mgl":    {"name": "Milkor MGL",   "weight": 5.50, "value":  800, "color": Color(0.18, 0.30, 0.20), "kind": "weapon", "desc": "40mm 6-round revolving grenade launcher. Goes boom.", "slots": ["Optic"]},
 	"makarov":{"name": "PM Makarov",   "weight": 0.66, "value":  120, "color": Color(0.18, 0.18, 0.20), "kind": "weapon", "desc": "Soviet 9×18 service pistol. 8-round mag.", "slots": ["Muzzle"]},
+	"shotgun_combat": {"name": "XM1014",         "weight": 3.30, "value": 380, "color": Color(0.22, 0.18, 0.16), "kind": "weapon", "desc": "Semi-auto 12 gauge combat shotgun. 6-round tube, shell-by-shell reload.", "slots": ["Optic", "Muzzle"]},
 
 	"ammo_762x39":  {"name": "7.62×39mm",       "weight": 0.016, "value":  1, "color": Color(0.85, 0.65, 0.20), "kind": "ammo", "damage": 50, "falloff_start": 100.0, "falloff_end": 300.0, "damage_min": 30, "desc": "Soviet intermediate cartridge. Feeds the AKM."},
 	"ammo_556nato": {"name": "5.56×45mm NATO",  "weight": 0.012, "value":  1, "color": Color(0.90, 0.78, 0.40), "kind": "ammo", "damage": 40, "falloff_start": 120.0, "falloff_end": 350.0, "damage_min": 22, "desc": "NATO standard. Feeds the M16A2 and M249."},
@@ -29,6 +30,7 @@ const DEFS := {
 	"ammo_9x18":    {"name": "9×18mm Makarov",  "weight": 0.010, "value":  1, "color": Color(0.72, 0.66, 0.50), "kind": "ammo", "damage": 28, "falloff_start":  25.0, "falloff_end":  80.0, "damage_min": 10, "desc": "Soviet pistol round. Feeds the Makarov."},
 	"ammo_762nato": {"name": "7.62×51mm NATO",  "weight": 0.025, "value":  2, "color": Color(0.80, 0.55, 0.18), "kind": "ammo", "damage": 55, "falloff_start": 200.0, "falloff_end": 500.0, "damage_min": 38, "desc": "Full-power NATO rifle round. Feeds the M60."},
 	"ammo_40mm":    {"name": "40mm Grenade",    "weight": 0.230, "value": 15, "color": Color(0.30, 0.55, 0.30), "kind": "ammo", "damage":  0, "falloff_start": 9999.0, "falloff_end": 9999.0, "damage_min": 0, "desc": "Low-velocity 40mm HE grenade. Feeds the MGL."},
+	"ammo_12ga":    {"name": "12 Gauge",        "weight": 0.045, "value":  3, "color": Color(0.65, 0.10, 0.10), "kind": "ammo", "damage": 70, "falloff_start":  12.0, "falloff_end":  50.0, "damage_min": 22, "desc": "12 gauge shell. Feeds the Combat Shotgun."},
 }
 
 static func item_def(id: String) -> Dictionary:

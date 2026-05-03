@@ -105,6 +105,16 @@ const RECOIL_PATTERN_BIZON: Array[Vector2] = [
 	Vector2( 1.65, 0.85),
 	Vector2(-1.65, 0.80),
 ]
+# XM1014: heavy semi-auto shotgun. Big single-shot kick, recoil index resets
+# fast in semi so the first few entries do the work.
+const RECOIL_PATTERN_SHOTGUN: Array[Vector2] = [
+	Vector2( 0.10, 2.20),
+	Vector2(-0.15, 2.30),
+	Vector2( 0.20, 2.40),
+	Vector2(-0.25, 2.45),
+	Vector2( 0.30, 2.45),
+	Vector2(-0.35, 2.40),
+]
 # MP5: between AK and M16 vertically, but very horizontal — wide left/right swings.
 const RECOIL_PATTERN_MP5: Array[Vector2] = [
 	Vector2( 0.40, 0.55),
@@ -228,7 +238,7 @@ const PROFILES := {
 		"name": "M249",
 		"mag_size": 100,
 		"rpm": 800.0,
-		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"modes": [FireMode.AUTO],
 		"fire_sounds": ["res://assets/audio/Shot_GTEK556mm_BeltA.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
@@ -263,6 +273,20 @@ const PROFILES := {
 		"ammo_id": "ammo_9x18",
 		"reload_time": 2.9,
 	},
+	"shotgun_combat": {
+		"name": "XM1014",
+		"mag_size": 6,
+		"rpm": 240.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK12GaA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_SHOTGUN,
+		"bloom_mult": 1.2,
+		"ammo_id": "ammo_12ga",
+		"per_round_reload": true,
+		"reload_time_per_round": 0.85,
+	},
 	"mgl": {
 		"name": "MGL",
 		"mag_size": 6,
@@ -280,7 +304,7 @@ const PROFILES := {
 		"reload_time_per_round": 1.0,
 	},
 }
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
@@ -293,10 +317,14 @@ var _player: Node    # CharacterBody3D w/ _yaw/_pitch
 var _inventory: Node
 var _last_fire_time := -1000.0
 var _recoil_index := 0
-# Per-weapon last-used fire mode so swapping back restores it.
+# Per-instance last-used fire mode so swapping back restores it. Keyed by
+# inventory uid so two of the same weapon track independently.
 var _saved_fire_modes: Dictionary = {}
-# Per-weapon current magazine count so swapping doesn't dupe ammo or refill mid-fight.
+# Per-instance current magazine count so swapping doesn't dupe ammo or refill
+# mid-fight. Also keyed by uid.
 var _saved_ammo: Dictionary = {}
+# uid of the currently equipped instance (0 = unknown / direct-key equip).
+var _current_uid: int = 0
 var _rng := RandomNumberGenerator.new()
 # Smoothed recoil: shots add to *target*; _process exp-approaches it and applies the per-frame delta to the player view.
 var _target_yaw := 0.0
@@ -339,19 +367,23 @@ func _ready() -> void:
 	_setup_audio()
 	_apply_weapon(_current_weapon)
 
-func _apply_weapon(key: String) -> void:
+func _apply_weapon(key: String, uid: int = 0) -> void:
 	if not PROFILES.has(key):
 		return
-	# Stash outgoing weapon's mode + ammo so swapping back restores both.
+	# Stash outgoing instance's mode + ammo so swapping back restores both.
+	# Falls back to the weapon key when there's no uid (direct equip).
+	var out_key: Variant = _current_uid if _current_uid != 0 else _current_weapon
 	if PROFILES.has(_current_weapon):
-		_saved_fire_modes[_current_weapon] = _fire_mode
-		_saved_ammo[_current_weapon] = _ammo
+		_saved_fire_modes[out_key] = _fire_mode
+		_saved_ammo[out_key] = _ammo
 	_current_weapon = key
+	_current_uid = uid
 	_profile = PROFILES[key]
-	_ammo = int(_saved_ammo.get(key, _profile.mag_size))
+	var in_key: Variant = uid if uid != 0 else key
+	_ammo = int(_saved_ammo.get(in_key, _profile.mag_size))
 	# Restore last-used mode if we have one (and it's still legal for this weapon).
 	var modes: Array = _profile.modes
-	var saved_mode = _saved_fire_modes.get(key, null)
+	var saved_mode = _saved_fire_modes.get(in_key, null)
 	if saved_mode != null and modes.has(saved_mode):
 		_fire_mode = saved_mode
 	else:
@@ -367,11 +399,11 @@ func _apply_weapon(key: String) -> void:
 		v.stop()
 		v.stream = _fire_stream_list[0] if not _fire_stream_list.is_empty() else null
 
-func equip(key: String) -> void:
+func equip(key: String, uid: int = 0) -> void:
 	if not PROFILES.has(key):
 		return
-	# Same weapon: just re-arm the empty hands. Different weapon: swap.
-	if key == _current_weapon and _equipped:
+	# Same instance already armed: nothing to do.
+	if key == _current_weapon and uid == _current_uid and _equipped:
 		return
 	# Cancel any in-flight reload — swapping aborts it (no ammo was consumed
 	# yet; _finish_reload only fires on completion). Otherwise the new weapon
@@ -382,8 +414,8 @@ func equip(key: String) -> void:
 		_reload_amount = 0
 		if _reload_player != null:
 			_reload_player.stop()
-	if key != _current_weapon:
-		_apply_weapon(key)
+	if key != _current_weapon or uid != _current_uid:
+		_apply_weapon(key, uid)
 	_equipped = true
 
 func unequip() -> void:

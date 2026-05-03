@@ -27,7 +27,7 @@ const DROP_SPREAD := 0.45            # m random radius around drop anchor
 const DROP_HEIGHT := 0.35            # m above floor
 const DROP_WALL_BUFFER := 0.30       # m back-off from wall hit point
 
-const STARTING_WEAPONS: Array[String] = ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl"]
+const STARTING_WEAPONS: Array[String] = ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl", "shotgun_combat"]
 # Quality + condition demo seed — varied so every tier color shows up in the
 # inventory list right at game start.
 const STARTING_WEAPON_INSTANCES: Array = [
@@ -40,6 +40,7 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "m249",    "condition": 0.78, "quality": 3},  # Good Worn
 	{"id": "m60",     "condition": 0.20, "quality": 0},  # Awful Ruined
 	{"id": "mgl",     "condition": 1.00, "quality": 6},  # Legendary Pristine
+	{"id": "shotgun_combat", "condition": 0.95, "quality": 4},  # Excellent Pristine
 ]
 const STARTING_AMMO: Dictionary = {
 	"ammo_762x39":  200,
@@ -48,6 +49,7 @@ const STARTING_AMMO: Dictionary = {
 	"ammo_9x18":    200,
 	"ammo_762nato": 200,
 	"ammo_40mm":    200,
+	"ammo_12ga":    100,
 }
 
 @export var menu_path: NodePath
@@ -117,7 +119,7 @@ func _on_equipped_changed(uid: int) -> void:
 	if inst.is_empty():
 		return
 	if _weapon.has_method("equip"):
-		_weapon.equip(String(inst.item_id))
+		_weapon.equip(String(inst.item_id), uid)
 
 func _build_prompt() -> void:
 	# Tiny center-bottom hint label, lives on its own CanvasLayer so the HUD
