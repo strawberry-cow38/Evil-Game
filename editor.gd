@@ -46,11 +46,19 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("editor_play"):
-		get_tree().change_scene_to_file(PLAY_SCENE)
+		_enter_play_mode()
 		get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_F9:
 		# Fallback if input map missing — same effect.
-		get_tree().change_scene_to_file(PLAY_SCENE)
+		_enter_play_mode()
+
+func _enter_play_mode() -> void:
+	# Snapshot the current map into the autoload so the play scene can
+	# rebuild the same terrain on the other side of the scene swap.
+	MapState.heights = _terrain.heights.duplicate()
+	MapState.grid_w = _terrain.GRID_W
+	MapState.grid_h = _terrain.GRID_H
+	get_tree().change_scene_to_file(PLAY_SCENE)
 
 func _process(delta: float) -> void:
 	# Brush preview + LMB-stroke logic only runs when the cursor is free

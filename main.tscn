@@ -1,5 +1,6 @@
-[gd_scene load_steps=26 format=3 uid="uid://b8fpsbase00001"]
+[gd_scene load_steps=27 format=3 uid="uid://b8fpsbase00001"]
 
+[ext_resource type="Script" path="res://main_bootstrap.gd" id="0_boot"]
 [ext_resource type="Script" path="res://player.gd" id="1_player"]
 [ext_resource type="Script" path="res://hud.gd" id="2_hud"]
 [ext_resource type="Script" path="res://weapon.gd" id="3_weapon"]
@@ -84,6 +85,7 @@ albedo_color = Color(0.95, 0.78, 0.45, 1)
 roughness = 0.7
 
 [node name="Main" type="Node3D"]
+script = ExtResource("0_boot")
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Env_1")
