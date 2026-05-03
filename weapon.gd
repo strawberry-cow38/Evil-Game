@@ -69,7 +69,7 @@ const AIR_BLOOM_DEG := 2.5         # extra bloom while airborne
 const MOVE_SPEED_THRESHOLD := 0.5  # m/s of horizontal velocity to count as "moving"
 
 const BURST_COUNT := 3
-const BURST_COOLDOWN := 0.18           # gap after a burst completes before next burst can start
+const BURST_COOLDOWN := 0.22           # gap after a burst completes before next burst can start
 const BURST_RPM_MULT := 1.10           # 10% faster intra-burst cyclic
 const BURST_RECOIL_MULT := 0.90        # 10% less recoil per burst shot
 const BURST_BLOOM_MULT := 0.90         # 10% less bloom while burst-firing
