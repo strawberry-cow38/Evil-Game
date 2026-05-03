@@ -379,7 +379,7 @@ const BULLET_HOLE_FADE := 2.5
 const BULLET_HOLE_SIZE := 0.08
 
 func _apply_impact(world_pos: Vector3, normal: Vector3, material: String) -> void:
-	_play_impact_sound(world_pos, material)
+	# Impact sounds disabled — broken clips, regenerating.
 	_spawn_impact_particles(world_pos, normal, material)
 	_spawn_bullet_hole(world_pos, normal, material)
 
