@@ -390,9 +390,10 @@ func _delete_nearest_spawn(world_pos: Vector3) -> void:
 func _spawn_effect_at(effect_id: String, world_pos: Vector3) -> void:
 	var box: Node3D = Node3D.new()
 	box.set_script(EFFECT_BOX_SCRIPT)
-	box.global_position = world_pos
 	box.effect_id = effect_id
 	add_child(box)
+	# global_position needs the node in the tree, so set after add_child.
+	box.global_position = world_pos
 	_placed_effects.append(box)
 	_select_effect(box)
 
