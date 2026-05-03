@@ -571,10 +571,10 @@ func _on_list_gui_input(event: InputEvent) -> void:
 		var btn: int = (event as InputEventMouseButton).button_index
 		if btn == MOUSE_BUTTON_WHEEL_UP:
 			_move_selection(-1)
-			accept_event()
+			_list.accept_event()
 		elif btn == MOUSE_BUTTON_WHEEL_DOWN:
 			_move_selection(1)
-			accept_event()
+			_list.accept_event()
 
 func _open_inspect() -> void:
 	var row: Dictionary = _selected_row()
