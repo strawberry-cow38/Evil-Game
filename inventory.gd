@@ -2,7 +2,7 @@ extends Node
 
 const Items = preload("res://items.gd")
 
-const MAX_WEIGHT := 50.0      # encumbrance ceiling, kg
+const MAX_WEIGHT := 200.0     # encumbrance ceiling, kg (room for full ammo loadout)
 const FAVORITE_SLOTS := 9     # bind to digit keys 1..9
 
 signal changed

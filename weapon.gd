@@ -158,6 +158,7 @@ const PROFILES := {
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_AKM,
 		"bloom_mult": 1.0,
+		"ammo_id": "ammo_762x39",
 	},
 	"m16a2": {
 		"name": "M16A2",
@@ -169,6 +170,7 @@ const PROFILES := {
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_M16,
 		"bloom_mult": 1.0,
+		"ammo_id": "ammo_556nato",
 	},
 	"bizon": {
 		"name": "PP-19 Bizon",
@@ -180,6 +182,7 @@ const PROFILES := {
 		"fire_fade": 0.26,
 		"recoil_pattern": RECOIL_PATTERN_BIZON,
 		"bloom_mult": 1.4,
+		"ammo_id": "ammo_9mm",
 	},
 	"mp5sd": {
 		"name": "MP5SD",
@@ -191,6 +194,7 @@ const PROFILES := {
 		"fire_fade": 0.18,
 		"recoil_pattern": RECOIL_PATTERN_MP5,
 		"bloom_mult": 2.2,
+		"ammo_id": "ammo_9mm",
 	},
 	"m249": {
 		"name": "M249",
@@ -202,6 +206,7 @@ const PROFILES := {
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_M249,
 		"bloom_mult": 1.6,
+		"ammo_id": "ammo_556nato",
 	},
 	"m60": {
 		"name": "M60",
@@ -213,6 +218,7 @@ const PROFILES := {
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_M60,
 		"bloom_mult": 1.7,
+		"ammo_id": "ammo_762nato",
 	},
 	"mgl": {
 		"name": "MGL",
@@ -226,6 +232,7 @@ const PROFILES := {
 		"bloom_mult": 1.0,
 		"projectile": true,
 		"projectile_velocity": 75.0,
+		"ammo_id": "ammo_40mm",
 	},
 }
 const WEAPON_ORDER := ["akm", "m16a2", "bizon", "mp5sd", "m249", "m60", "mgl"]
@@ -233,11 +240,17 @@ const GRENADE_SCRIPT := preload("res://grenade.gd")
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
+@export var inventory_path: NodePath
 
 var _camera: Camera3D
 var _player: Node    # CharacterBody3D w/ _yaw/_pitch
+var _inventory: Node
 var _last_fire_time := -1000.0
 var _recoil_index := 0
+# Per-weapon last-used fire mode so swapping back restores it.
+var _saved_fire_modes: Dictionary = {}
+# Per-weapon current magazine count so swapping doesn't dupe ammo or refill mid-fight.
+var _saved_ammo: Dictionary = {}
 var _rng := RandomNumberGenerator.new()
 # Smoothed recoil: shots add to *target*; _process exp-approaches it and applies the per-frame delta to the player view.
 var _target_yaw := 0.0
@@ -254,6 +267,7 @@ var _burst_remaining := 0
 var _burst_cooldown_until := -1000.0
 var _reloading := false
 var _reload_remaining := 0.0
+var _reload_amount := 0   # rounds queued for transfer when reload finishes
 var _audio_voices: Array[AudioStreamPlayer3D] = []
 var _audio_tweens: Array[Tween] = []
 var _audio_idx := 0
@@ -273,16 +287,28 @@ func _ready() -> void:
 		_camera = get_node(camera_path)
 	if player_path != NodePath():
 		_player = get_node(player_path)
+	if inventory_path != NodePath():
+		_inventory = get_node(inventory_path)
 	_setup_audio()
 	_apply_weapon(_current_weapon)
 
 func _apply_weapon(key: String) -> void:
 	if not PROFILES.has(key):
 		return
+	# Stash outgoing weapon's mode + ammo so swapping back restores both.
+	if PROFILES.has(_current_weapon):
+		_saved_fire_modes[_current_weapon] = _fire_mode
+		_saved_ammo[_current_weapon] = _ammo
 	_current_weapon = key
 	_profile = PROFILES[key]
-	_ammo = _profile.mag_size
-	_fire_mode = _profile.modes[0]
+	_ammo = int(_saved_ammo.get(key, _profile.mag_size))
+	# Restore last-used mode if we have one (and it's still legal for this weapon).
+	var modes: Array = _profile.modes
+	var saved_mode = _saved_fire_modes.get(key, null)
+	if saved_mode != null and modes.has(saved_mode):
+		_fire_mode = saved_mode
+	else:
+		_fire_mode = modes[0]
 	_burst_remaining = 0
 	_recoil_index = 0
 	_target_yaw = _applied_yaw
@@ -385,13 +411,39 @@ func _load_wav(res_path: String) -> AudioStream:
 		return null
 	return AudioStreamOggVorbis.load_from_file(abs_path)
 
+func get_reserve_ammo() -> int:
+	if _inventory == null:
+		return 0
+	var ammo_id = _profile.get("ammo_id", "")
+	if ammo_id == "":
+		return 0
+	return int(_inventory.counts.get(ammo_id, 0))
+
 func _start_reload() -> void:
+	if _reloading or _ammo >= get_mag_size():
+		return
+	var need: int = get_mag_size() - _ammo
+	var avail: int = get_reserve_ammo()
+	var take: int = min(need, avail)
+	if take <= 0:
+		return
+	_reload_amount = take
 	_reloading = true
 	_reload_remaining = RELOAD_TIME
 	_burst_remaining = 0
 	if _reload_player != null and _reload_stream != null:
 		_reload_player.stop()
 		_reload_player.play()
+
+func _finish_reload() -> void:
+	var ammo_id = _profile.get("ammo_id", "")
+	if _inventory != null and ammo_id != "" and _reload_amount > 0:
+		# Re-clamp against reserve at finish time in case inventory changed mid-reload.
+		var actual: int = min(_reload_amount, int(_inventory.counts.get(ammo_id, 0)))
+		if actual > 0:
+			_inventory.remove(ammo_id, actual)
+			_ammo += actual
+	_reload_amount = 0
 
 func _schedule_casing() -> void:
 	if _casing_stream == null or _casing_voices.is_empty():
@@ -514,7 +566,7 @@ func _process(delta: float) -> void:
 		if _reload_remaining <= 0.0:
 			_reload_remaining = 0.0
 			_reloading = false
-			_ammo = get_mag_size()
+			_finish_reload()
 
 	# Decide whether to fire this frame based on mode.
 	var want_fire := false

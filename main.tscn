@@ -141,6 +141,7 @@ fov = 80.0
 script = ExtResource("3_weapon")
 camera_path = NodePath("../Camera3D")
 player_path = NodePath("..")
+inventory_path = NodePath("../Inventory")
 
 [node name="HUD" type="CanvasLayer" parent="."]
 script = ExtResource("2_hud")

@@ -34,6 +34,7 @@ func _process(delta: float) -> void:
 		var mode: String = _weapon.get_fire_mode_name() if _weapon.has_method("get_fire_mode_name") else ""
 		var ammo: int = _weapon.get_ammo() if _weapon.has_method("get_ammo") else 0
 		var mag: int = _weapon.get_mag_size() if _weapon.has_method("get_mag_size") else 0
+		var reserve: int = _weapon.get_reserve_ammo() if _weapon.has_method("get_reserve_ammo") else 0
 		var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
 		var prog: float = _weapon.get_reload_progress() if _weapon.has_method("get_reload_progress") else 0.0
 		if reloading:
@@ -42,7 +43,7 @@ func _process(delta: float) -> void:
 			var bar := "[" + "=".repeat(filled) + " ".repeat(bar_len - filled) + "]"
 			_ammo_label.text = "%s  [%s]\nRELOADING %s" % [name, mode, bar]
 		else:
-			_ammo_label.text = "%s  [%s]\n%d / %d" % [name, mode, ammo, mag]
+			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)" % [name, mode, ammo, mag, reserve]
 		_update_low_ammo_flash(delta, ammo, mag, reloading)
 
 func _update_low_ammo_flash(delta: float, ammo: int, mag: int, reloading: bool) -> void:
