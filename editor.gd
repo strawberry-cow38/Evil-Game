@@ -109,7 +109,9 @@ func _process(delta: float) -> void:
 			return
 		var ghost_hit := _raycast_cursor()
 		if not ghost_hit.is_empty():
-			_spawn_ghost.global_position = ghost_hit.position
+			var gp: Vector3 = ghost_hit.position
+			gp.y = _terrain.sample_height(gp)
+			_spawn_ghost.global_position = gp
 			_spawn_ghost.visible = true
 		return
 	# Brush ring only makes sense for terrain brushes; spawn tools use
@@ -175,15 +177,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		var hit2 := _raycast_cursor()
 		if hit2.is_empty():
 			return
-		MapState.player_spawns.append(hit2.position)
-		_add_spawn_visual(hit2.position)
+		var p2: Vector3 = hit2.position
+		p2.y = _terrain.sample_height(p2)
+		MapState.player_spawns.append(p2)
+		_add_spawn_visual(p2)
 		return
 	# Spawn delete: each press removes the closest marker within radius.
 	if _active_tool == TOOL_S_DELETE_SPAWN and event.pressed:
 		var hit3 := _raycast_cursor()
 		if hit3.is_empty():
 			return
-		_delete_nearest_spawn(hit3.position)
+		# Bump the cursor y to terrain height so the 3D distance check
+		# matches the markers (which sit on the surface).
+		var p3: Vector3 = hit3.position
+		p3.y = _terrain.sample_height(p3)
+		_delete_nearest_spawn(p3)
 
 func _apply_tool(world_pos: Vector3, delta: float) -> void:
 	var s: float = _brush_strength
