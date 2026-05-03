@@ -245,6 +245,7 @@ var _target_pitch := 0.0
 var _applied_yaw := 0.0
 var _applied_pitch := 0.0
 var _current_weapon: String = "akm"
+var _equipped: bool = true   # false = empty hands; gates fire/reload/recoil decay
 var _profile: Dictionary = {}
 var _fire_streams: Dictionary = {}     # weapon key -> Array[AudioStream]
 var _ammo := 0
@@ -298,9 +299,25 @@ func equip(key: String) -> void:
 		return
 	if not PROFILES.has(key):
 		return
+	# Same weapon: just re-arm the empty hands. Different weapon: swap.
 	if key == _current_weapon:
+		_equipped = true
 		return
 	_apply_weapon(key)
+	_equipped = true
+
+func unequip() -> void:
+	_equipped = false
+	_burst_remaining = 0
+	# Stop any in-flight fire-sound voices so the gun doesn't keep ringing.
+	for v in _audio_voices:
+		v.stop()
+	if _reload_player != null:
+		_reload_player.stop()
+	_reloading = false
+
+func is_equipped() -> bool:
+	return _equipped
 
 func get_current_weapon() -> String:
 	return _current_weapon
@@ -472,6 +489,10 @@ func get_current_bloom_deg() -> float:
 func _process(delta: float) -> void:
 	# Freeze all weapon input + recoil decay while the inventory menu is up.
 	if _player != null and _player.has_method("is_menu_open") and _player.is_menu_open():
+		return
+	# Empty hands — no fire, no reload, no recoil decay (decay would still
+	# run, but there's nothing meaningful to decay since no shots add to it).
+	if not _equipped:
 		return
 
 	var now := Time.get_ticks_msec() / 1000.0

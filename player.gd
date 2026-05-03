@@ -64,7 +64,11 @@ func _seed_starting_inventory() -> void:
 		_inventory.set_favorite(slot, STARTING_WEAPONS[i])
 
 func _on_equipped_changed(id: String) -> void:
-	if _weapon != null and _weapon.has_method("equip") and id != "":
+	if _weapon == null:
+		return
+	if id == "" and _weapon.has_method("unequip"):
+		_weapon.unequip()
+	elif id != "" and _weapon.has_method("equip"):
 		_weapon.equip(id)
 
 func _build_prompt() -> void:

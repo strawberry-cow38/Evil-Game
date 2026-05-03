@@ -25,6 +25,11 @@ func _process(delta: float) -> void:
 	_label.text = "FPS: %d\nSpeed: %.2f m/s" % [fps, speed]
 
 	if _weapon and _ammo_label:
+		var equipped: bool = not _weapon.has_method("is_equipped") or _weapon.is_equipped()
+		if not equipped:
+			_ammo_label.text = "Unarmed\n— / —"
+			_update_low_ammo_flash(delta, 1, 1, false)
+			return
 		var name: String = _weapon.get_weapon_name() if _weapon.has_method("get_weapon_name") else ""
 		var mode: String = _weapon.get_fire_mode_name() if _weapon.has_method("get_fire_mode_name") else ""
 		var ammo: int = _weapon.get_ammo() if _weapon.has_method("get_ammo") else 0

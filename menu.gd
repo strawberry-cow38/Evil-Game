@@ -443,7 +443,11 @@ func _equip_selected() -> void:
 		return
 	if Items.item_kind(id) != "weapon":
 		return
-	_inventory.set_equipped(id)
+	# Toggle: clicking the already-equipped weapon unequips it.
+	if String(_inventory.get("equipped")) == id:
+		_inventory.set_equipped("")
+	else:
+		_inventory.set_equipped(id)
 
 func _on_item_clicked(_idx: int, _pos: Vector2, btn: int) -> void:
 	_refresh_preview()
