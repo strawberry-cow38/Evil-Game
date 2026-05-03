@@ -38,6 +38,10 @@ var _delete_btn: Button
 var _entries_box: VBoxContainer
 var _add_item_btn: Button
 var _picker: Node = null  # editor_item_picker_panel — wired via set_picker()
+# Per-row "X%" labels keyed by entry index. Refreshed every time any
+# weight slider moves (or entries are added/removed) so the displayed
+# percentages always sum to 100% relative to the table's current weights.
+var _pct_labels: Dictionary = {}
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -270,6 +274,7 @@ func _on_name_changed(t: String) -> void:
 func _refresh_entries() -> void:
 	for c in _entries_box.get_children():
 		c.queue_free()
+	_pct_labels.clear()
 	if _active_index < 0:
 		return
 	var entries: Array = tables[_active_index].get("entries", [])
@@ -293,12 +298,11 @@ func _refresh_entries() -> void:
 		var entry_idx: int = i
 		slider.value_changed.connect(func(v: float): _on_weight_changed(entry_idx, v))
 		row.add_child(slider)
-		var weight_lbl := Label.new()
-		weight_lbl.text = "%d" % int(w)
-		weight_lbl.custom_minimum_size = Vector2(30, 0)
-		row.add_child(weight_lbl)
-		# Live-update label as slider moves.
-		slider.value_changed.connect(func(v: float): weight_lbl.text = "%d" % int(v))
+		var pct_lbl := Label.new()
+		pct_lbl.custom_minimum_size = Vector2(40, 0)
+		pct_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(pct_lbl)
+		_pct_labels[entry_idx] = pct_lbl
 		# "Nothing" can't be removed — every table always has it.
 		if id != REGISTRY.NOTHING_ID:
 			var rm := Button.new()
@@ -307,6 +311,28 @@ func _refresh_entries() -> void:
 			rm.pressed.connect(func(): _on_entry_remove(entry_idx))
 			row.add_child(rm)
 		_entries_box.add_child(row)
+	_refresh_pcts()
+
+func _refresh_pcts() -> void:
+	if _active_index < 0:
+		return
+	var entries: Array = tables[_active_index].get("entries", [])
+	var total: float = 0.0
+	for e in entries:
+		var w: float = float(e.get("weight", 1.0))
+		if w < 0.0:
+			w = 0.0
+		total += w
+	for i in range(entries.size()):
+		var lbl: Label = _pct_labels.get(i, null)
+		if lbl == null:
+			continue
+		if total <= 0.0:
+			lbl.text = "0%"
+		else:
+			var w2: float = maxf(float(entries[i].get("weight", 1.0)), 0.0)
+			var pct: float = (w2 / total) * 100.0
+			lbl.text = "%d%%" % int(round(pct))
 
 func _on_weight_changed(entry_idx: int, v: float) -> void:
 	if _active_index < 0:
@@ -315,6 +341,7 @@ func _on_weight_changed(entry_idx: int, v: float) -> void:
 	if entry_idx < 0 or entry_idx >= entries.size():
 		return
 	entries[entry_idx]["weight"] = v
+	_refresh_pcts()
 
 func _on_entry_remove(entry_idx: int) -> void:
 	if _active_index < 0:
