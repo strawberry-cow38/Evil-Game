@@ -24,6 +24,11 @@ func _ready() -> void:
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
 	_rebuild()
+	# If the catalog knows this effect id, drop its content (the actual
+	# visual) inside the box. Box stays as bounds indicator on top.
+	var content: Node3D = EditorEffectCatalog.build(effect_id)
+	if content != null:
+		add_child(content)
 
 func set_selected(v: bool) -> void:
 	_selected = v

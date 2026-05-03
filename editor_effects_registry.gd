@@ -6,6 +6,7 @@ class_name EditorEffectsRegistry
 # wired in once the gizmo system lands. Each entry is {id, label}.
 
 const EFFECTS: Array = [
+	{"id": "demo_cube",       "label": "Demo: Cube"},
 	{"id": "fx_fire_small",   "label": "Fire (Small)"},
 	{"id": "fx_fire_large",   "label": "Fire (Large)"},
 	{"id": "fx_smoke_column", "label": "Smoke Column"},
