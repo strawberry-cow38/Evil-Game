@@ -320,7 +320,7 @@ func _fire(now: float) -> void:
 	_recoil_index += 1
 
 	_play_fire_sound()
-	_schedule_casing()
+	# Casing clink disabled — too harsh when stacked under full-auto fire.
 
 	# Sim trajectory from camera origin in camera-forward direction.
 	var origin: Vector3 = _camera.global_transform.origin
