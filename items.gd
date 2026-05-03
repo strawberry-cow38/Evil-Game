@@ -14,17 +14,17 @@ const DEFS := {
 	"watermelon": {"name": "Watermelon", "weight": 4.00, "value": 30, "color": Color(0.20, 0.55, 0.25)},
 }
 
-static func get_def(id: String) -> Dictionary:
+static func item_def(id: String) -> Dictionary:
 	return DEFS.get(id, {})
 
-static func get_name(id: String) -> String:
+static func item_name(id: String) -> String:
 	return DEFS.get(id, {}).get("name", id)
 
-static func get_weight(id: String) -> float:
+static func item_weight(id: String) -> float:
 	return float(DEFS.get(id, {}).get("weight", 0.0))
 
-static func get_value(id: String) -> int:
+static func item_value(id: String) -> int:
 	return int(DEFS.get(id, {}).get("value", 0))
 
-static func get_color(id: String) -> Color:
+static func item_color(id: String) -> Color:
 	return DEFS.get(id, {}).get("color", Color(1, 1, 1))

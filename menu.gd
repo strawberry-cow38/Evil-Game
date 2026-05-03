@@ -210,8 +210,7 @@ func _refresh_list() -> void:
 		push_warning("menu: _inventory null")
 		return
 	var entries: Array = _inventory.entries()
-	print("menu: refresh_list entries=", entries.size())
-	entries.sort_custom(Callable(self, "_compare_entries"))
+	entries.sort_custom(_compare_entries)
 
 	# Try to keep the current selection on the same item id.
 	var selected_id: String = ""
@@ -228,7 +227,7 @@ func _refresh_list() -> void:
 			e.name, e.count, e.weight_total, e.value_each,
 		]
 		_list.add_item(label)
-		_list.set_item_icon(i, _swatch_icon(Items.get_color(e.id)))
+		_list.set_item_icon(i, _swatch_icon(Items.item_color(e.id)))
 		_row_ids.append(e.id)
 		if e.id == selected_id:
 			new_select = i
@@ -261,12 +260,12 @@ func _refresh_preview() -> void:
 	if idx < 0 or idx >= _row_ids.size():
 		return
 	var id: String = _row_ids[idx]
-	_preview_color.color = Items.get_color(id)
-	_preview_name.text = Items.get_name(id)
-	_preview_per_weight.text = "Weight: %.2f kg each" % Items.get_weight(id)
-	_preview_value.text = "Value:  ¢%d each" % Items.get_value(id)
+	_preview_color.color = Items.item_color(id)
+	_preview_name.text = Items.item_name(id)
+	_preview_per_weight.text = "Weight: %.2f kg each" % Items.item_weight(id)
+	_preview_value.text = "Value:  ¢%d each" % Items.item_value(id)
 	var c: int = _inventory.counts.get(id, 0)
-	_preview_count.text = "Held:    x%d  (%.2f kg total)" % [c, Items.get_weight(id) * c]
+	_preview_count.text = "Held:    x%d  (%.2f kg total)" % [c, Items.item_weight(id) * c]
 
 func _refresh_sort_label() -> void:
 	var arrow := "↑" if _sort_asc else "↓"

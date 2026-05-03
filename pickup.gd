@@ -12,7 +12,7 @@ func _ready() -> void:
 	monitorable = true
 	monitoring = false
 
-	var def: Dictionary = Items.get_def(item_id)
+	var def: Dictionary = Items.item_def(item_id)
 	var color: Color = def.get("color", Color(0.8, 0.8, 0.8))
 	# Visual radius scales gently with weight so a watermelon looks chunkier
 	# than a grape, but still capped to readable sizes.
@@ -49,7 +49,7 @@ func _ready() -> void:
 	add_child(body)
 
 func get_label() -> String:
-	var n: String = Items.get_name(item_id)
+	var n: String = Items.item_name(item_id)
 	if count > 1:
 		return "%s x%d" % [n, count]
 	return n

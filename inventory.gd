@@ -12,7 +12,7 @@ var counts: Dictionary = {}
 func can_add(id: String, n: int = 1) -> bool:
 	if not Items.DEFS.has(id):
 		return false
-	return total_weight() + Items.get_weight(id) * n <= MAX_WEIGHT + 0.0001
+	return total_weight() + Items.item_weight(id) * n <= MAX_WEIGHT + 0.0001
 
 func add(id: String, n: int = 1) -> bool:
 	if n <= 0 or not can_add(id, n):
@@ -36,7 +36,7 @@ func remove(id: String, n: int = 1) -> bool:
 func total_weight() -> float:
 	var w := 0.0
 	for id in counts:
-		w += Items.get_weight(id) * float(counts[id])
+		w += Items.item_weight(id) * float(counts[id])
 	return w
 
 func encumbrance_ratio() -> float:
@@ -52,8 +52,8 @@ func entries() -> Array:
 		out.append({
 			"id": id,
 			"count": c,
-			"name": Items.get_name(id),
-			"weight_total": Items.get_weight(id) * float(c),
-			"value_each": Items.get_value(id),
+			"name": Items.item_name(id),
+			"weight_total": Items.item_weight(id) * float(c),
+			"value_each": Items.item_value(id),
 		})
 	return out
