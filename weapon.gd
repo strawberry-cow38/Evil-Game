@@ -69,6 +69,10 @@ const AIR_BLOOM_DEG := 2.5         # extra bloom while airborne
 const MOVE_SPEED_THRESHOLD := 0.5  # m/s of horizontal velocity to count as "moving"
 
 const BURST_COUNT := 3
+const BURST_COOLDOWN := 0.18           # gap after a burst completes before next burst can start
+const BURST_RPM_MULT := 1.10           # 10% faster intra-burst cyclic
+const BURST_RECOIL_MULT := 0.90        # 10% less recoil per burst shot
+const BURST_BLOOM_MULT := 0.90         # 10% less bloom while burst-firing
 const RELOAD_TIME := 2.0
 const FIRE_PITCH_MIN := 0.94
 const FIRE_PITCH_MAX := 1.06
@@ -122,10 +126,7 @@ const PROFILES := {
 		"mag_size": 30,
 		"rpm": 800.0,
 		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
-		"fire_sounds": [
-			"res://assets/audio/Shot_MP5SD_A.ogg",
-			"res://assets/audio/Shot_MP5SD_B.ogg",
-		],
+		"fire_sounds": ["res://assets/audio/Shot_MP5SD_A.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
 		"recoil_pattern": RECOIL_PATTERN_MP5,
@@ -153,6 +154,7 @@ var _fire_streams: Dictionary = {}     # weapon key -> Array[AudioStream]
 var _ammo := 0
 var _fire_mode: FireMode = FireMode.AUTO
 var _burst_remaining := 0
+var _burst_cooldown_until := -1000.0
 var _reloading := false
 var _reload_remaining := 0.0
 var _audio_voices: Array[AudioStreamPlayer3D] = []
@@ -364,6 +366,8 @@ func get_current_bloom_deg() -> float:
 	if airborne:
 		bloom_deg += AIR_BLOOM_DEG
 	bloom_deg *= float(_profile.get("bloom_mult", 1.0))
+	if _fire_mode == FireMode.BURST:
+		bloom_deg *= BURST_BLOOM_MULT
 	return bloom_deg
 
 func _process(delta: float) -> void:
@@ -402,15 +406,20 @@ func _process(delta: float) -> void:
 			FireMode.AUTO:
 				want_fire = Input.is_action_pressed("fire")
 			FireMode.BURST:
-				if Input.is_action_just_pressed("fire") and _burst_remaining == 0:
+				if Input.is_action_just_pressed("fire") and _burst_remaining == 0 and now >= _burst_cooldown_until:
 					_burst_remaining = BURST_COUNT
 				want_fire = _burst_remaining > 0
 
-	if want_fire and _ammo > 0 and now - _last_fire_time >= _fire_interval():
+	var interval: float = _fire_interval()
+	if _fire_mode == FireMode.BURST:
+		interval /= BURST_RPM_MULT
+	if want_fire and _ammo > 0 and now - _last_fire_time >= interval:
 		_fire(now)
 		_ammo -= 1
 		if _fire_mode == FireMode.BURST:
 			_burst_remaining = max(_burst_remaining - 1, 0)
+			if _burst_remaining == 0:
+				_burst_cooldown_until = now + BURST_COOLDOWN
 		if _ammo == 0:
 			# Auto-reload when mag empties.
 			_start_reload()
@@ -456,6 +465,8 @@ func _fire(now: float) -> void:
 		mult *= CROUCH_RECOIL_MULT
 	if not ads:
 		mult *= HIP_RECOIL_MULT
+	if _fire_mode == FireMode.BURST:
+		mult *= BURST_RECOIL_MULT
 	_target_yaw += deg_to_rad(pat.x + jitter_yaw) * mult
 	_target_pitch += deg_to_rad(pat.y + jitter_pitch) * mult
 	_recoil_index += 1
