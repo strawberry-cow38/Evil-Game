@@ -38,6 +38,8 @@ var _was_painting: bool = false
 # Player spawn markers — list of (Vector3 world_pos, Node3D visual).
 var _spawn_visuals: Array[Node3D] = []
 var _spawn_marker_mat: StandardMaterial3D = null
+var _spawn_ghost_mat: StandardMaterial3D = null
+var _spawn_ghost: Node3D = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -57,13 +59,18 @@ func _ready() -> void:
 	# Restore spawn markers from MapState (if any).
 	for pos in MapState.player_spawns:
 		_add_spawn_visual(pos)
+	# Pre-build the ghost marker — kept hidden until the place tool is active.
+	_spawn_ghost = _build_marker_node(_get_ghost_material())
+	_spawn_ghost.visible = false
+	add_child(_spawn_ghost)
 
 func _input(event: InputEvent) -> void:
-	if event.is_action_pressed("editor_play"):
-		_enter_play_mode()
-		get_viewport().set_input_as_handled()
-	elif event is InputEventKey and event.pressed and event.keycode == KEY_F9:
-		# Fallback if input map missing — same effect.
+	# F9 → play mode. Either the input action OR the raw key fires it,
+	# but not both (after _enter_play_mode the scene is freed so we
+	# must not touch self afterwards).
+	var is_f9: bool = event.is_action_pressed("editor_play") \
+		or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F9)
+	if is_f9:
 		_enter_play_mode()
 
 func _enter_play_mode() -> void:
@@ -75,10 +82,23 @@ func _enter_play_mode() -> void:
 	get_tree().change_scene_to_file(PLAY_SCENE)
 
 func _process(delta: float) -> void:
+	# Hide all hover visuals by default; per-tool branches re-enable them.
+	_spawn_ghost.visible = false
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
 	if _camera.is_looking() or _active_tool == TOOL_NONE:
 		_brush_ring.hide_ring()
+		return
+	# Spawn-place ghost: cyan translucent marker that follows the cursor
+	# on the terrain so the user previews exactly where the click lands.
+	if _active_tool == TOOL_S_PLACE_SPAWN:
+		_brush_ring.hide_ring()
+		if _is_over_ui():
+			return
+		var ghost_hit := _raycast_cursor()
+		if not ghost_hit.is_empty():
+			_spawn_ghost.global_position = ghost_hit.position
+			_spawn_ghost.visible = true
 		return
 	# Brush ring only makes sense for terrain brushes; spawn tools use
 	# pinpoint clicks.
@@ -183,36 +203,48 @@ func _on_radius_changed(r: float) -> void:
 	_brush_radius = r
 	_brush_ring.set_radius(r)
 
-# A spawn-marker visual: a 0.4m-radius vertical capsule above ground
-# tinted bright cyan. Stored in _spawn_visuals parallel to
-# MapState.player_spawns so deleting a marker can find both.
-func _add_spawn_visual(world_pos: Vector3) -> void:
-	if _spawn_marker_mat == null:
-		_spawn_marker_mat = StandardMaterial3D.new()
-		_spawn_marker_mat.albedo_color = Color(0.25, 0.95, 1.0, 1.0)
-		_spawn_marker_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_spawn_marker_mat.no_depth_test = false
+# Spawn-marker visual: vertical pillar with a flag on top, tinted
+# cyan. Used both for committed markers and the placement ghost
+# (different material, same geometry).
+func _build_marker_node(material: StandardMaterial3D) -> Node3D:
 	var holder := Node3D.new()
-	holder.position = world_pos
-	add_child(holder)
-	# Vertical pillar so it's visible from anywhere.
 	var pillar := MeshInstance3D.new()
 	var pm := CylinderMesh.new()
 	pm.top_radius = 0.10
 	pm.bottom_radius = 0.10
 	pm.height = 1.8
 	pillar.mesh = pm
-	pillar.material_override = _spawn_marker_mat
+	pillar.material_override = material
 	pillar.position = Vector3(0, 0.9, 0)
 	holder.add_child(pillar)
-	# Flag on top so it reads as a "spawn here" affordance.
 	var flag := MeshInstance3D.new()
 	var fm := BoxMesh.new()
 	fm.size = Vector3(0.6, 0.35, 0.04)
 	flag.mesh = fm
-	flag.material_override = _spawn_marker_mat
+	flag.material_override = material
 	flag.position = Vector3(0.30, 1.65, 0)
 	holder.add_child(flag)
+	return holder
+
+func _get_marker_material() -> StandardMaterial3D:
+	if _spawn_marker_mat == null:
+		_spawn_marker_mat = StandardMaterial3D.new()
+		_spawn_marker_mat.albedo_color = Color(0.25, 0.95, 1.0, 1.0)
+		_spawn_marker_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return _spawn_marker_mat
+
+func _get_ghost_material() -> StandardMaterial3D:
+	if _spawn_ghost_mat == null:
+		_spawn_ghost_mat = StandardMaterial3D.new()
+		_spawn_ghost_mat.albedo_color = Color(0.25, 0.95, 1.0, 0.45)
+		_spawn_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_spawn_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	return _spawn_ghost_mat
+
+func _add_spawn_visual(world_pos: Vector3) -> void:
+	var holder := _build_marker_node(_get_marker_material())
+	holder.position = world_pos
+	add_child(holder)
 	_spawn_visuals.append(holder)
 
 func _delete_nearest_spawn(world_pos: Vector3) -> void:

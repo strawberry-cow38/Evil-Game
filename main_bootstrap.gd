@@ -37,5 +37,8 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	# F9 toggles back to the editor with the current map intact.
-	if event.is_action_pressed("editor_play") or (event is InputEventKey and event.pressed and event.keycode == KEY_F9):
+	# Action OR raw-key, but not both — change_scene_to_file frees self.
+	var is_f9: bool = event.is_action_pressed("editor_play") \
+		or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F9)
+	if is_f9:
 		get_tree().change_scene_to_file("res://editor.tscn")
