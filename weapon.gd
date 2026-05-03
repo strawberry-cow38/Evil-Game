@@ -45,6 +45,10 @@ const RECOIL_PATTERN_M16: Array[Vector2] = [
 	Vector2(-0.75, 0.65),
 	Vector2( 0.85, 0.55),
 ]
+# Milkor MGL: single launcher thump per pull.
+const RECOIL_PATTERN_MGL: Array[Vector2] = [
+	Vector2(-0.40, 2.80),
+]
 # M249 SAW: heavy LMG climb, big sustained pitch + wide drift.
 const RECOIL_PATTERN_M249: Array[Vector2] = [
 	Vector2(-0.20, 1.20),
@@ -158,8 +162,22 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_M249,
 		"bloom_mult": 1.6,
 	},
+	"mgl": {
+		"name": "MGL",
+		"mag_size": 6,
+		"rpm": 180.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": [],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_MGL,
+		"bloom_mult": 1.0,
+		"projectile": true,
+		"projectile_velocity": 75.0,
+	},
 }
-const WEAPON_ORDER := ["akm", "m16a2", "mp5sd", "m249"]
+const WEAPON_ORDER := ["akm", "m16a2", "mp5sd", "m249", "mgl"]
+const GRENADE_SCRIPT := preload("res://grenade.gd")
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
@@ -472,6 +490,17 @@ func _apply_smoothed_recoil(delta: float) -> void:
 	_applied_yaw = new_yaw
 	_applied_pitch = new_pitch
 
+func _spawn_projectile(origin: Vector3, dir: Vector3) -> void:
+	var g: Node3D = Node3D.new()
+	g.set_script(GRENADE_SCRIPT)
+	get_tree().current_scene.add_child(g)
+	var ex: Array[RID] = []
+	if _player is CollisionObject3D:
+		ex.append((_player as CollisionObject3D).get_rid())
+	var muzzle_vel: float = float(_profile.get("projectile_velocity", 75.0))
+	# Spawn slightly out from camera so the round doesn't immediately raycast into the player.
+	g.call("setup", origin + dir * 0.4, dir * muzzle_vel, ex)
+
 func _fire(now: float) -> void:
 	_last_fire_time = now
 	if _camera == null or _player == null:
@@ -505,6 +534,12 @@ func _fire(now: float) -> void:
 	var cam_basis: Basis = _camera.global_transform.basis
 	var dir: Vector3 = -cam_basis.z
 	dir = dir.normalized()
+
+	# Projectile weapons (grenade launcher etc) spawn a physical round and bail.
+	if bool(_profile.get("projectile", false)):
+		_spawn_projectile(origin, dir)
+		return
+
 	# Bloom matches the on-screen crosshair (hip + movement + airborne).
 	var bloom_deg: float = get_current_bloom_deg()
 	if bloom_deg > 0.0:
