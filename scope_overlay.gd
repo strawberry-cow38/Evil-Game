@@ -8,7 +8,7 @@ extends ColorRect
 const SHADER_CODE := """
 shader_type canvas_item;
 
-uniform float scope_radius : hint_range(50.0, 800.0) = 320.0;
+uniform float scope_radius : hint_range(50.0, 1200.0) = 520.0;
 uniform float ring_thickness : hint_range(0.5, 10.0) = 4.0;
 uniform float crosshair_thickness : hint_range(0.5, 4.0) = 1.0;
 uniform vec4 mask_color : source_color = vec4(0.0, 0.0, 0.0, 1.0);

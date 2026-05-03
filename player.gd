@@ -176,8 +176,14 @@ func has_interact_target() -> bool:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not is_pie_open():
-		_yaw -= event.relative.x * MOUSE_SENSITIVITY
-		_pitch -= event.relative.y * MOUSE_SENSITIVITY
+		# Scale sensitivity with current FOV so ADS (and especially scoped ADS)
+		# slows mouselook proportionally to the zoom level. tan(fov/2) keeps
+		# pixels-per-degree consistent at any zoom.
+		var sens: float = MOUSE_SENSITIVITY
+		if _camera != null:
+			sens *= tan(deg_to_rad(_camera.fov) * 0.5) / tan(deg_to_rad(FOV_HIP) * 0.5)
+		_yaw -= event.relative.x * sens
+		_pitch -= event.relative.y * sens
 		_pitch = clamp(_pitch, -1.4, 1.4)
 		rotation.y = _yaw
 		_camera.rotation.x = _pitch
