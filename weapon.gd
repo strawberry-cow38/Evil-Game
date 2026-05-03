@@ -152,6 +152,11 @@ func _process(delta: float) -> void:
 		_ammo -= 1
 		if _fire_mode == FireMode.BURST:
 			_burst_remaining = max(_burst_remaining - 1, 0)
+		if _ammo == 0:
+			# Auto-reload when mag empties.
+			_reloading = true
+			_reload_remaining = RELOAD_TIME
+			_burst_remaining = 0
 
 	if now - _last_fire_time > RECOIL_RESET_DELAY:
 		_recoil_index = 0
