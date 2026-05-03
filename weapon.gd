@@ -238,11 +238,11 @@ const PROFILES := {
 		"reload_time": 4.4,
 	},
 	"mp5sd": {
-		"name": "MP5SD",
+		"name": "MP5",
 		"mag_size": 30,
 		"rpm": 800.0,
 		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
-		"fire_sounds": ["res://assets/audio/Shot_MP5SD_A.ogg"],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_MP5Type.ogg"],
 		"fire_hold": 0.08,
 		"fire_fade": 0.18,
 		"recoil_pattern": RECOIL_PATTERN_MP5,

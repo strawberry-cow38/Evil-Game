@@ -17,7 +17,7 @@ const DEFS := {
 	"sks":    {"name": "SKS",          "weight": 3.85, "value":  260, "color": Color(0.50, 0.35, 0.20), "kind": "weapon", "desc": "Soviet 7.62×39 carbine. Semi-auto only, 10-round internal mag.", "slots": ["Optic", "Muzzle"]},
 	"m16a2":  {"name": "M16A2",        "weight": 3.40, "value":  420, "color": Color(0.20, 0.20, 0.22), "kind": "weapon", "desc": "5.56 NATO. Burst-capable. Cleaner than the AK.", "slots": ["Optic", "Muzzle", "Mag", "Grip"]},
 	"bizon":  {"name": "PP-19 Bizon",  "weight": 2.50, "value":  280, "color": Color(0.30, 0.32, 0.30), "kind": "weapon", "desc": "9mm SMG with helical 64-round mag. Compact.", "slots": ["Optic", "Muzzle"]},
-	"mp5sd":  {"name": "MP5SD",        "weight": 3.00, "value":  520, "color": Color(0.15, 0.15, 0.17), "kind": "weapon", "desc": "Integrally suppressed 9mm SMG. Very quiet, sloppy bloom.", "slots": ["Optic", "Mag"]},
+	"mp5sd":  {"name": "MP5",          "weight": 3.00, "value":  520, "color": Color(0.15, 0.15, 0.17), "kind": "weapon", "desc": "9mm roller-delayed SMG. Tight grouping, classic chatter.", "slots": ["Optic", "Mag"]},
 	"m249":   {"name": "M249 SAW",     "weight": 7.50, "value":  900, "color": Color(0.28, 0.28, 0.25), "kind": "weapon", "desc": "5.56 belt-fed LMG. 100-round box. Heavy.", "slots": ["Optic", "Bipod"]},
 	"m60":    {"name": "M60",          "weight": 10.50,"value": 1100, "color": Color(0.22, 0.22, 0.20), "kind": "weapon", "desc": "7.62 belt-fed LMG. Slow cyclic, devastating.", "slots": ["Optic", "Bipod"]},
 	"mgl":    {"name": "Milkor MGL",   "weight": 5.50, "value":  800, "color": Color(0.18, 0.30, 0.20), "kind": "weapon", "desc": "40mm 6-round revolving grenade launcher. Goes boom.", "slots": ["Optic"]},
