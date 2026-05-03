@@ -114,7 +114,12 @@ func _process(delta: float) -> void:
 	_brush_ring.place(hit.position)
 	if _is_over_ui():
 		return
-	var painting: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) and _active_tool != TOOL_T_RAMP
+	# Shift-LMB on flatten = "sample target height" gesture, not a paint
+	# stroke. Detected via _unhandled_input below; suppressed here.
+	var shift_sample: bool = _active_tool == TOOL_T_FLATTEN and Input.is_key_pressed(KEY_SHIFT)
+	var painting: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) \
+		and _active_tool != TOOL_T_RAMP \
+		and not shift_sample
 	if painting:
 		_apply_tool(hit.position, delta)
 	# Stroke just ended: snapshot collision so play mode walks the new shape.
@@ -128,6 +133,13 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.button_index != MOUSE_BUTTON_LEFT:
 		return
 	if _is_over_ui() or _camera.is_looking():
+		return
+	# Flatten tool: shift+click samples target height from terrain
+	# under the cursor. Subsequent un-shifted strokes flatten toward it.
+	if _active_tool == TOOL_T_FLATTEN and event.pressed and Input.is_key_pressed(KEY_SHIFT):
+		var fh := _raycast_cursor()
+		if not fh.is_empty():
+			_flatten_target = fh.position.y
 		return
 	# Ramp tool: click-down picks start, click-up commits with end point.
 	if _active_tool == TOOL_T_RAMP:
@@ -193,11 +205,6 @@ func _on_category_picked(category: String) -> void:
 
 func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
-	if tool_id == TOOL_T_FLATTEN:
-		# Snap target to whatever the cursor is over right now.
-		var hit := _raycast_cursor()
-		if not hit.is_empty():
-			_flatten_target = hit.position.y
 
 func _on_radius_changed(r: float) -> void:
 	_brush_radius = r
