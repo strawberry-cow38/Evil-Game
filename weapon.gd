@@ -76,7 +76,7 @@ const PROFILES := {
 		"name": "M16A2",
 		"mag_size": 30,
 		"rpm": 800.0,
-		"modes": [FireMode.BURST, FireMode.AUTO],
+		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
 		"fire_sound": "res://assets/audio/Shot_GTEK556mm.ogg",
 	},
 }
