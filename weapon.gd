@@ -15,8 +15,23 @@ const RECOIL_SMOOTH_RATE := 22.0           # higher = snappier (per-shot kick ex
 const TRACER_LIFETIME := 0.06              # s
 
 # Recoil pattern: (yaw_deg, pitch_deg) per shot. Pitch is "kick up" so positive = up.
-# Classic vertical climb with mild horizontal drift, AK-style.
-const RECOIL_PATTERN: Array[Vector2] = [
+# AKM: harsher, climbs hard, drifts right.
+const RECOIL_PATTERN_AKM: Array[Vector2] = [
+	Vector2( 0.10, 0.70),
+	Vector2( 0.20, 0.85),
+	Vector2( 0.05, 1.00),
+	Vector2( 0.30, 1.05),
+	Vector2(-0.05, 1.00),
+	Vector2( 0.40, 0.95),
+	Vector2(-0.10, 0.90),
+	Vector2( 0.55, 0.85),
+	Vector2(-0.15, 0.80),
+	Vector2( 0.65, 0.75),
+	Vector2(-0.20, 0.70),
+	Vector2( 0.75, 0.65),
+]
+# M16A2: classic vertical climb, mild horizontal drift.
+const RECOIL_PATTERN_M16: Array[Vector2] = [
 	Vector2( 0.00, 0.45),
 	Vector2( 0.05, 0.55),
 	Vector2(-0.05, 0.65),
@@ -73,15 +88,17 @@ const PROFILES := {
 		"fire_sound": "res://assets/audio/Shot_GTEK762mmSoviet.ogg",
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_AKM,
 	},
 	"m16a2": {
 		"name": "M16A2",
 		"mag_size": 30,
-		"rpm": 720.0,
+		"rpm": 700.0,
 		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
 		"fire_sound": "res://assets/audio/Shot_GTEK556mm.ogg",
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_M16,
 	},
 }
 const WEAPON_ORDER := ["akm", "m16a2"]
@@ -391,7 +408,8 @@ func _fire(now: float) -> void:
 	# Bullet leaves at the *current* aim. The new kick goes into the smoothed
 	# target — camera will lerp toward it over the next few frames, so the
 	# crosshair drifts up smoothly instead of teleporting per shot.
-	var pat := RECOIL_PATTERN[_recoil_index % RECOIL_PATTERN.size()]
+	var pattern: Array = _profile.get("recoil_pattern", RECOIL_PATTERN_M16)
+	var pat: Vector2 = pattern[_recoil_index % pattern.size()]
 	var jitter_yaw = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
 	var jitter_pitch = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
 	var mult: float = 1.0
