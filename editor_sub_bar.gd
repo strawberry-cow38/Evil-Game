@@ -17,7 +17,10 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 		{"id": "t_ramp",    "label": "Ramp"},
 	],
 	"environment": [],
-	"spawns":      [],
+	"spawns": [
+		{"id": "s_player_place",  "label": "Place Player Spawn"},
+		{"id": "s_player_delete", "label": "Delete Player Spawn"},
+	],
 	"objects":     [],
 	"level":       [],
 }

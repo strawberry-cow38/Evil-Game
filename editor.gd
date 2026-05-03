@@ -17,8 +17,11 @@ const TOOL_T_LOWER := "t_lower"
 const TOOL_T_FLATTEN := "t_flatten"
 const TOOL_T_SMOOTH := "t_smooth"
 const TOOL_T_RAMP := "t_ramp"
+const TOOL_S_PLACE_SPAWN := "s_player_place"
+const TOOL_S_DELETE_SPAWN := "s_player_delete"
 
 const BRUSH_STRENGTH := 12.0    # m/s for raise/lower at full falloff
+const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to remove it
 
 @onready var _camera: Camera3D = $EditorCamera
 @onready var _terrain: Node3D = $Terrain
@@ -32,6 +35,9 @@ var _brush_radius: float = 4.0
 var _flatten_target: float = 0.0
 var _ramp_start: Vector3 = Vector3.INF
 var _was_painting: bool = false
+# Player spawn markers — list of (Vector3 world_pos, Node3D visual).
+var _spawn_visuals: Array[Node3D] = []
+var _spawn_marker_mat: StandardMaterial3D = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -48,6 +54,9 @@ func _ready() -> void:
 	_radius_widget.set_radius(_brush_radius)
 	# Default to Terrain → Heights view so the user lands on a useful page.
 	_top_bar.select_category("terrain")
+	# Restore spawn markers from MapState (if any).
+	for pos in MapState.player_spawns:
+		_add_spawn_visual(pos)
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("editor_play"):
@@ -71,6 +80,12 @@ func _process(delta: float) -> void:
 	if _camera.is_looking() or _active_tool == TOOL_NONE:
 		_brush_ring.hide_ring()
 		return
+	# Brush ring only makes sense for terrain brushes; spawn tools use
+	# pinpoint clicks.
+	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP]
+	if not is_brush_tool:
+		_brush_ring.hide_ring()
+		return
 	var hit := _raycast_cursor()
 	if hit.is_empty():
 		_brush_ring.hide_ring()
@@ -88,12 +103,16 @@ func _process(delta: float) -> void:
 	_was_painting = painting
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Ramp uses click-down for start, click-up for end.
-	if _active_tool != TOOL_T_RAMP:
+	if not (event is InputEventMouseButton):
 		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	if event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if _is_over_ui() or _camera.is_looking():
+		return
+	# Ramp tool: click-down picks start, click-up commits with end point.
+	if _active_tool == TOOL_T_RAMP:
 		var hit := _raycast_cursor()
-		if hit.is_empty() or _is_over_ui() or _camera.is_looking():
+		if hit.is_empty():
 			return
 		if event.pressed:
 			_ramp_start = hit.position
@@ -102,6 +121,21 @@ func _unhandled_input(event: InputEvent) -> void:
 				_terrain.ramp_stroke(_ramp_start, hit.position, _brush_radius)
 				_terrain.end_stroke()
 				_ramp_start = Vector3.INF
+		return
+	# Spawn place: each press drops a marker.
+	if _active_tool == TOOL_S_PLACE_SPAWN and event.pressed:
+		var hit2 := _raycast_cursor()
+		if hit2.is_empty():
+			return
+		MapState.player_spawns.append(hit2.position)
+		_add_spawn_visual(hit2.position)
+		return
+	# Spawn delete: each press removes the closest marker within radius.
+	if _active_tool == TOOL_S_DELETE_SPAWN and event.pressed:
+		var hit3 := _raycast_cursor()
+		if hit3.is_empty():
+			return
+		_delete_nearest_spawn(hit3.position)
 
 func _apply_tool(world_pos: Vector3, delta: float) -> void:
 	match _active_tool:
@@ -148,3 +182,51 @@ func _on_tool_picked(tool_id: String) -> void:
 func _on_radius_changed(r: float) -> void:
 	_brush_radius = r
 	_brush_ring.set_radius(r)
+
+# A spawn-marker visual: a 0.4m-radius vertical capsule above ground
+# tinted bright cyan. Stored in _spawn_visuals parallel to
+# MapState.player_spawns so deleting a marker can find both.
+func _add_spawn_visual(world_pos: Vector3) -> void:
+	if _spawn_marker_mat == null:
+		_spawn_marker_mat = StandardMaterial3D.new()
+		_spawn_marker_mat.albedo_color = Color(0.25, 0.95, 1.0, 1.0)
+		_spawn_marker_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_spawn_marker_mat.no_depth_test = false
+	var holder := Node3D.new()
+	holder.position = world_pos
+	add_child(holder)
+	# Vertical pillar so it's visible from anywhere.
+	var pillar := MeshInstance3D.new()
+	var pm := CylinderMesh.new()
+	pm.top_radius = 0.10
+	pm.bottom_radius = 0.10
+	pm.height = 1.8
+	pillar.mesh = pm
+	pillar.material_override = _spawn_marker_mat
+	pillar.position = Vector3(0, 0.9, 0)
+	holder.add_child(pillar)
+	# Flag on top so it reads as a "spawn here" affordance.
+	var flag := MeshInstance3D.new()
+	var fm := BoxMesh.new()
+	fm.size = Vector3(0.6, 0.35, 0.04)
+	flag.mesh = fm
+	flag.material_override = _spawn_marker_mat
+	flag.position = Vector3(0.30, 1.65, 0)
+	holder.add_child(flag)
+	_spawn_visuals.append(holder)
+
+func _delete_nearest_spawn(world_pos: Vector3) -> void:
+	var best_i: int = -1
+	var best_d: float = SPAWN_DELETE_RADIUS
+	for i in range(MapState.player_spawns.size()):
+		var d: float = MapState.player_spawns[i].distance_to(world_pos)
+		if d < best_d:
+			best_d = d
+			best_i = i
+	if best_i < 0:
+		return
+	MapState.player_spawns.remove_at(best_i)
+	if best_i < _spawn_visuals.size():
+		var v: Node3D = _spawn_visuals[best_i]
+		_spawn_visuals.remove_at(best_i)
+		v.queue_free()

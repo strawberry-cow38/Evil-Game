@@ -9,19 +9,31 @@ extends Node3D
 const EDITOR_TERRAIN := preload("res://editor_terrain.gd")
 
 func _ready() -> void:
-	if not MapState.has_map():
-		return
-	var ground := get_node_or_null("Ground")
-	if ground != null:
-		ground.queue_free()
-	var terrain := Node3D.new()
-	terrain.set_script(EDITOR_TERRAIN)
-	terrain.name = "EditorTerrain"
-	add_child(terrain)
-	# editor_terrain._ready already created the mesh from a zeroed
-	# array; overwrite + rebuild with the real heights.
-	terrain.heights = MapState.heights.duplicate()
-	terrain.rebuild()
+	var terrain_node: Node = null
+	if MapState.has_map():
+		var ground := get_node_or_null("Ground")
+		if ground != null:
+			ground.queue_free()
+		var terrain := Node3D.new()
+		terrain.set_script(EDITOR_TERRAIN)
+		terrain.name = "EditorTerrain"
+		add_child(terrain)
+		# editor_terrain._ready already created the mesh from a zeroed
+		# array; overwrite + rebuild with the real heights.
+		terrain.heights = MapState.heights.duplicate()
+		terrain.rebuild()
+		terrain_node = terrain
+	# Player spawn override: pick a random authored marker and drop the
+	# Player there. Sit them slightly above the terrain so they don't
+	# clip through the new mesh.
+	if not MapState.player_spawns.is_empty():
+		var player := get_node_or_null("Player")
+		if player != null:
+			var sp: Vector3 = MapState.random_player_spawn()
+			var ground_h: float = sp.y
+			if terrain_node != null and terrain_node.has_method("sample_height"):
+				ground_h = terrain_node.sample_height(sp)
+			player.global_position = Vector3(sp.x, ground_h + 1.2, sp.z)
 
 func _input(event: InputEvent) -> void:
 	# F9 toggles back to the editor with the current map intact.
