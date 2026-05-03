@@ -1,5 +1,4 @@
 extends RefCounted
-class_name EditorEffectCatalog
 
 # Maps effect ids → factory functions that build the actual visual /
 # logic content for that effect. The wireframe box (editor_effect_box)

@@ -1,5 +1,4 @@
 extends RefCounted
-class_name EditorEffectsRegistry
 
 # Master list of effects available to drop into the world. Phase-1
 # entries are placeholder names — actual particle/decal scenes get

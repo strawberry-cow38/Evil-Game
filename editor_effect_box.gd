@@ -5,6 +5,8 @@ extends Node3D
 # changes when selected. Stores its source effect id so the editor can
 # tell what's at this slot when finalising the map.
 
+const CATALOG := preload("res://editor_effect_catalog.gd")
+
 const COLOR_NORMAL := Color(0.4, 0.85, 1.0, 1.0)
 const COLOR_SELECTED := Color(1.0, 0.95, 0.35, 1.0)
 
@@ -26,7 +28,7 @@ func _ready() -> void:
 	_rebuild()
 	# If the catalog knows this effect id, drop its content (the actual
 	# visual) inside the box. Box stays as bounds indicator on top.
-	var content: Node3D = EditorEffectCatalog.build(effect_id)
+	var content: Node3D = CATALOG.build(effect_id)
 	if content != null:
 		add_child(content)
 

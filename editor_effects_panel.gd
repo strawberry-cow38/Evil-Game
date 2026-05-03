@@ -6,6 +6,8 @@ extends PanelContainer
 # subsequent E presses drop a wireframe box of that effect into the
 # world.
 
+const REGISTRY := preload("res://editor_effects_registry.gd")
+
 signal effect_picked(id: String)
 
 var _search: LineEdit
@@ -47,7 +49,7 @@ func _rebuild_list(query: String) -> void:
 	for c in _list_box.get_children():
 		c.queue_free()
 	_buttons.clear()
-	for e in EditorEffectsRegistry.filtered(query):
+	for e in REGISTRY.filtered(query):
 		var b := Button.new()
 		b.text = String(e.label)
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
