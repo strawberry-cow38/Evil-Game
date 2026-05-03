@@ -309,6 +309,7 @@ const PROFILES := {
 		"ammo_id": "ammo_40mm",
 		"per_round_reload": true,
 		"reload_time_per_round": 1.0,
+		"no_shell_impact": true,
 	},
 }
 const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "makarov", "m249", "m60", "mgl", "shotgun_combat"]
@@ -364,12 +365,27 @@ var _impact_idx := 0
 var _casing_stream: AudioStream
 var _casing_voices: Array[AudioStreamPlayer3D] = []
 var _casing_idx := 0
-# Per-weapon "spent shell hits the floor" stream (currently only the XM1014).
-# Keyed by weapon profile key; null entries mean no impact sound.
+# Per-weapon "spent shell hits the floor" stream pool. Keyed by weapon profile
+# key, value is Array[AudioStream] (one variant picked at random per shot).
+# Empty/missing entry means the weapon plays no shell-impact sound.
 var _shell_impact_streams: Dictionary = {}
 var _shell_impact_voices: Array[AudioStreamPlayer3D] = []
 var _shell_impact_idx := 0
-const SHELL_IMPACT_VOICES := 3
+const SHELL_IMPACT_VOICES := 4
+# Default brass-casing impact set used by every weapon that doesn't override
+# (XM1014 ships its own shellimpact.wav; MGL opts out via no_shell_impact).
+const DEFAULT_BRASS_PATHS: Array = [
+	"res://assets/audio/brassimpact_1a.wav",
+	"res://assets/audio/brassimpact_1b.wav",
+	"res://assets/audio/brassimpact_1c.wav",
+	"res://assets/audio/brassimpact_1d.wav",
+	"res://assets/audio/brassimpact_1e.wav",
+]
+const DEFAULT_BRASS_DELAY_MIN := 0.30
+const DEFAULT_BRASS_DELAY_MAX := 0.55
+const DEFAULT_BRASS_PITCH_MIN := 0.90
+const DEFAULT_BRASS_PITCH_MAX := 1.12
+const DEFAULT_BRASS_VOL_DB := -18.0
 var _reload_player: AudioStreamPlayer3D
 var _reload_stream: AudioStream
 
@@ -507,11 +523,30 @@ func _setup_audio() -> void:
 		cp.max_distance = 18.0
 		add_child(cp)
 		_casing_voices.append(cp)
-	# Spent-shell impact streams (only weapons with shell_impact_path in profile).
+	# Spent-shell impact streams. Each weapon gets a list of variants; one is
+	# picked at random per shot. Profile order: explicit shell_impact_paths >
+	# single shell_impact_path > default brass set. no_shell_impact opts out
+	# entirely (e.g. MGL — 40mm grenades don't drop brass).
 	for key in WEAPON_ORDER:
-		var sip: String = String(PROFILES[key].get("shell_impact_path", ""))
-		if sip != "":
-			_shell_impact_streams[key] = _load_wav(sip)
+		var prof: Dictionary = PROFILES[key]
+		if bool(prof.get("no_shell_impact", false)):
+			continue
+		var paths: Array = []
+		var multi: Array = prof.get("shell_impact_paths", [])
+		var single: String = String(prof.get("shell_impact_path", ""))
+		if not multi.is_empty():
+			paths = multi
+		elif single != "":
+			paths = [single]
+		else:
+			paths = DEFAULT_BRASS_PATHS
+		var streams: Array = []
+		for p in paths:
+			var s: AudioStream = _load_wav(String(p))
+			if s != null:
+				streams.append(s)
+		if not streams.is_empty():
+			_shell_impact_streams[key] = streams
 	# Voice pool lives on the player (gun) so the clatter follows them.
 	for i in range(SHELL_IMPACT_VOICES):
 		var sp := AudioStreamPlayer3D.new()
@@ -631,18 +666,19 @@ func _load_one_round() -> void:
 # Spent shotgun shell hitting the floor — fires after a randomized delay so it
 # lands cleanly in the post-shot quiet, with pitch + delay variation per shot.
 func _schedule_shell_impact() -> void:
-	var stream: AudioStream = _shell_impact_streams.get(_current_weapon, null)
-	if stream == null or _shell_impact_voices.is_empty():
+	var streams: Array = _shell_impact_streams.get(_current_weapon, [])
+	if streams.is_empty() or _shell_impact_voices.is_empty():
 		return
+	var stream: AudioStream = streams[_rng.randi() % streams.size()]
 	var delay: float = _rng.randf_range(
-		float(_profile.get("shell_impact_delay_min", 0.5)),
-		float(_profile.get("shell_impact_delay_max", 0.9)),
+		float(_profile.get("shell_impact_delay_min", DEFAULT_BRASS_DELAY_MIN)),
+		float(_profile.get("shell_impact_delay_max", DEFAULT_BRASS_DELAY_MAX)),
 	)
 	var pitch: float = _rng.randf_range(
-		float(_profile.get("shell_impact_pitch_min", 0.92)),
-		float(_profile.get("shell_impact_pitch_max", 1.10)),
+		float(_profile.get("shell_impact_pitch_min", DEFAULT_BRASS_PITCH_MIN)),
+		float(_profile.get("shell_impact_pitch_max", DEFAULT_BRASS_PITCH_MAX)),
 	)
-	var vol: float = float(_profile.get("shell_impact_vol_db", -10.0))
+	var vol: float = float(_profile.get("shell_impact_vol_db", DEFAULT_BRASS_VOL_DB))
 	var idx: int = _shell_impact_idx
 	_shell_impact_idx = (_shell_impact_idx + 1) % _shell_impact_voices.size()
 	var voice: AudioStreamPlayer3D = _shell_impact_voices[idx]
@@ -886,8 +922,10 @@ func _fire(now: float) -> void:
 
 	_play_fire_sound()
 	# Casing clink disabled — too harsh when stacked under full-auto fire.
-	# Shotgun-style spent-shell impact (per-profile, currently XM1014 only).
-	if _shell_impact_streams.get(_current_weapon, null) != null:
+	# Spent shell/brass impact — every weapon that registered streams in
+	# _setup_audio (XM1014 = unique shellimpact, everything else = default
+	# brass set; MGL opted out via no_shell_impact).
+	if _shell_impact_streams.has(_current_weapon):
 		_schedule_shell_impact()
 
 	# Sim trajectory from camera origin in camera-forward direction.
