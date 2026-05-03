@@ -48,8 +48,8 @@ const FIRE_SOUND_PATH := "res://assets/audio/Shot_GTEK762mmSoviet.ogg"
 const FIRE_PITCH_MIN := 0.94
 const FIRE_PITCH_MAX := 1.06
 const FIRE_VOL_DB := -4.0
-const FIRE_HOLD_TIME := 0.08    # full-volume window before fade kicks in
-const FIRE_FADE_TIME := 0.12    # fade-out length, kills the tail echo
+const FIRE_HOLD_TIME := 0.14    # full-volume window before fade kicks in
+const FIRE_FADE_TIME := 0.20    # fade-out length, kills the tail echo
 const FIRE_FADE_DB := -50.0
 const FIRE_VOICES := 4
 enum FireMode { SEMI, BURST, AUTO }
