@@ -80,6 +80,10 @@ var _drag_start_dist: float = 1.0
 var _drag_axis_u: Vector3 = Vector3.ZERO  # ring plane basis u
 var _drag_axis_v: Vector3 = Vector3.ZERO  # ring plane basis v
 var _drag_scale_index: int = 0            # 0=x, 1=y, 2=z (local scale)
+# Scale-drag pivot in the box's pre-Node3D-scale local space. Sits at
+# the OPPOSITE side of the grabbed handle on its axis, so scaling moves
+# only the grabbed face outward — the opposite face stays in place.
+var _drag_pivot_local: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -539,14 +543,22 @@ func _try_start_gizmo_drag() -> bool:
 		var local_r: Vector3 = hit_r.point - _drag_anchor
 		_drag_start_angle = atan2(local_r.dot(v), local_r.dot(u))
 	elif handle in ["sx", "sy", "sz", "-sx", "-sy", "-sz"]:
-		# Scale axis drag — capture start scale + signed projection along
-		# the axis. Motion ratio (current / start) drives the scale axis.
-		# Negative-side handle uses the same scale index; the captured axis
-		# vector points toward the handle, so dragging outward (away from
-		# origin in either +X or -X) yields a positive ratio either way.
+		# Scale axis drag — captures start scale + signed projection along
+		# the axis, plus a pivot point at the OPPOSITE face of the box so
+		# only the grabbed face moves (one-direction scale, not centered).
 		_drag_axis = pick.get("axis", Vector3.RIGHT).normalized()
 		_drag_start_scale = _selected_prop.scale
+		_drag_start_basis = _selected_prop.global_transform.basis
 		_drag_scale_index = "xyz".find(handle.right(1))
+		var positive: bool = not handle.begins_with("-")
+		var aabb: AABB = AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2))
+		if _selected_prop.has_method("get_aabb_local"):
+			aabb = _selected_prop.get_aabb_local()
+		var pivot_axis_value: float = aabb.position[_drag_scale_index]
+		if not positive:
+			pivot_axis_value = aabb.position[_drag_scale_index] + aabb.size[_drag_scale_index]
+		_drag_pivot_local = Vector3.ZERO
+		_drag_pivot_local[_drag_scale_index] = pivot_axis_value
 		var ap_s: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
 		var dist_s: float = (ap_s - _drag_anchor).dot(_drag_axis)
 		if absf(dist_s) < 0.05:
@@ -591,9 +603,19 @@ func _continue_gizmo_drag() -> void:
 		# or invert (negative scale silently flips winding everywhere).
 		if ratio < 0.05:
 			ratio = 0.05
+		var idx: int = _drag_scale_index
+		var new_axis_scale: float = _drag_start_scale[idx] * ratio
 		var new_scale: Vector3 = _drag_start_scale
-		new_scale[_drag_scale_index] = _drag_start_scale[_drag_scale_index] * ratio
+		new_scale[idx] = new_axis_scale
+		# Pivot world position is fixed during the drag — recompute the
+		# box origin so the opposite face stays put. start_basis already
+		# bakes in start_scale; rescale just its idx column to derive the
+		# new offset from origin to pivot.
+		var pivot_world: Vector3 = _drag_anchor + _drag_start_basis * _drag_pivot_local
+		var col_i: Vector3 = _drag_start_basis.get_column(idx) * (new_axis_scale / _drag_start_scale[idx])
+		var new_offset: Vector3 = col_i * _drag_pivot_local[idx]
 		_selected_prop.scale = new_scale
+		_selected_prop.global_position = pivot_world - new_offset
 	elif _drag_handle.begins_with("p"):
 		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
 		if hit_p.is_empty():
