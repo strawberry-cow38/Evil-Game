@@ -45,6 +45,21 @@ const RECOIL_PATTERN_M16: Array[Vector2] = [
 	Vector2(-0.75, 0.65),
 	Vector2( 0.85, 0.55),
 ]
+# M249 SAW: heavy LMG climb, big sustained pitch + wide drift.
+const RECOIL_PATTERN_M249: Array[Vector2] = [
+	Vector2(-0.20, 1.20),
+	Vector2(-0.40, 1.40),
+	Vector2(-0.10, 1.55),
+	Vector2(-0.55, 1.65),
+	Vector2( 0.10, 1.65),
+	Vector2(-0.70, 1.60),
+	Vector2( 0.20, 1.55),
+	Vector2(-0.85, 1.50),
+	Vector2( 0.30, 1.45),
+	Vector2(-1.00, 1.40),
+	Vector2( 0.40, 1.35),
+	Vector2(-1.15, 1.30),
+]
 # MP5: between AK and M16 vertically, but very horizontal — wide left/right swings.
 const RECOIL_PATTERN_MP5: Array[Vector2] = [
 	Vector2( 0.40, 0.55),
@@ -132,8 +147,19 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_MP5,
 		"bloom_mult": 2.2,
 	},
+	"m249": {
+		"name": "M249",
+		"mag_size": 100,
+		"rpm": 800.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK556mm_BeltA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_M249,
+		"bloom_mult": 1.6,
+	},
 }
-const WEAPON_ORDER := ["akm", "m16a2", "mp5sd"]
+const WEAPON_ORDER := ["akm", "m16a2", "mp5sd", "m249"]
 
 @export var camera_path: NodePath
 @export var player_path: NodePath
