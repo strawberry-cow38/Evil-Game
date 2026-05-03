@@ -83,7 +83,10 @@ var _drag_scale_index: int = 0            # 0=x, 1=y, 2=z (local scale)
 # Scale-drag pivot in the box's pre-Node3D-scale local space. Sits at
 # the OPPOSITE side of the grabbed handle on its axis, so scaling moves
 # only the grabbed face outward — the opposite face stays in place.
+# Only used when _drag_scale_pivot is true (6-handle mode); 3-axis mode
+# keeps the legacy symmetric stretch around origin.
 var _drag_pivot_local: Vector3 = Vector3.ZERO
+var _drag_scale_pivot: bool = false
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -550,6 +553,10 @@ func _try_start_gizmo_drag() -> bool:
 		_drag_start_scale = _selected_prop.scale
 		_drag_start_basis = _selected_prop.global_transform.basis
 		_drag_scale_index = "xyz".find(handle.right(1))
+		# 1st tier (3-axis MODE_SCALE) = legacy symmetric stretch around
+		# origin. 2nd tier (MODE_SCALE_6) = pivot at opposite face so only
+		# the grabbed face moves.
+		_drag_scale_pivot = (_gizmo.mode == _gizmo.MODE_SCALE_6)
 		var positive: bool = not handle.begins_with("-")
 		var aabb: AABB = AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2))
 		if _selected_prop.has_method("get_aabb_local"):
@@ -607,16 +614,16 @@ func _continue_gizmo_drag() -> void:
 		var new_axis_scale: float = _drag_start_scale[idx] * ratio
 		var new_scale: Vector3 = _drag_start_scale
 		new_scale[idx] = new_axis_scale
-		# Pivot world position is fixed during the drag — recompute the
-		# box origin so the opposite face stays put. start_basis already
-		# bakes in start_scale; rescale just its idx column to derive the
-		# new offset from origin to pivot.
-		var pivot_world: Vector3 = _drag_anchor + _drag_start_basis * _drag_pivot_local
-		var basis_cols: Array = [_drag_start_basis.x, _drag_start_basis.y, _drag_start_basis.z]
-		var col_i: Vector3 = basis_cols[idx] * (new_axis_scale / _drag_start_scale[idx])
-		var new_offset: Vector3 = col_i * _drag_pivot_local[idx]
 		_selected_prop.scale = new_scale
-		_selected_prop.global_position = pivot_world - new_offset
+		# 6-handle mode also re-anchors the origin so the OPPOSITE face
+		# stays put (one-direction sizing). 3-axis mode skips this and
+		# stretches symmetrically around origin.
+		if _drag_scale_pivot:
+			var pivot_world: Vector3 = _drag_anchor + _drag_start_basis * _drag_pivot_local
+			var basis_cols: Array = [_drag_start_basis.x, _drag_start_basis.y, _drag_start_basis.z]
+			var col_i: Vector3 = basis_cols[idx] * (new_axis_scale / _drag_start_scale[idx])
+			var new_offset: Vector3 = col_i * _drag_pivot_local[idx]
+			_selected_prop.global_position = pivot_world - new_offset
 	elif _drag_handle.begins_with("p"):
 		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
 		if hit_p.is_empty():
