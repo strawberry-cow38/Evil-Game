@@ -6,6 +6,7 @@ extends StaticBody3D
 const MAX_HP := 500
 const REGEN_DELAY := 3.0
 const REGEN_RATE := 250.0       # hp/sec once regen starts
+const HEADSHOT_MULT := 1.5
 const POPUP_LIFETIME := 1.0
 const POPUP_RISE := 1.4         # m it floats up over its lifetime
 const POPUP_DRIFT := 0.6        # m random horiz drift
@@ -36,13 +37,16 @@ func _process(delta: float) -> void:
 		_hp = min(int(regenned), MAX_HP)
 		_refresh_hp_label()
 
-func take_damage(amount: int) -> void:
+func take_damage(amount: int, headshot: bool = false) -> void:
 	if amount <= 0:
 		return
-	_hp = max(_hp - amount, 0)
+	var dealt: int = amount
+	if headshot:
+		dealt = int(round(float(amount) * HEADSHOT_MULT))
+	_hp = max(_hp - dealt, 0)
 	_last_hit_time = Time.get_ticks_msec() / 1000.0
 	_refresh_hp_label()
-	_spawn_popup(amount)
+	_spawn_popup(dealt, headshot)
 
 func _refresh_hp_label() -> void:
 	if _hp_label == null:
@@ -51,19 +55,19 @@ func _refresh_hp_label() -> void:
 	var ratio: float = float(_hp) / float(MAX_HP)
 	_hp_label.modulate = Color(1.0, 0.4 + 0.6 * ratio, 0.4 + 0.6 * ratio)
 
-func _spawn_popup(amount: int) -> void:
+func _spawn_popup(amount: int, headshot: bool = false) -> void:
 	var lbl := Label3D.new()
-	lbl.text = str(amount)
+	lbl.text = ("HS! " + str(amount)) if headshot else str(amount)
 	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	lbl.no_depth_test = true
 	lbl.fixed_size = false
-	lbl.font_size = 72
-	lbl.outline_size = 10
-	lbl.modulate = _damage_color(amount)
+	lbl.font_size = 96 if headshot else 72
+	lbl.outline_size = 12 if headshot else 10
+	lbl.modulate = Color(1.0, 0.95, 0.20) if headshot else _damage_color(amount)
 	lbl.outline_modulate = Color(0, 0, 0)
 	# Spawn near hit zone with a little jitter so multi-shot pops don't overlap.
 	var jx: float = _rng.randf_range(-0.35, 0.35)
-	var jy: float = _rng.randf_range(0.6, 1.6)
+	var jy: float = _rng.randf_range(1.4, 1.9) if headshot else _rng.randf_range(0.6, 1.6)
 	var jz: float = _rng.randf_range(-0.35, 0.35)
 	lbl.position = Vector3(jx, jy, jz)
 	add_child(lbl)

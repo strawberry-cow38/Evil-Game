@@ -755,12 +755,12 @@ func _fire(now: float) -> void:
 	if has_hit:
 		var material := _classify_material(hit_collider)
 		_schedule_impact(hit_pos, hit_normal, material, impact_delay)
-		_schedule_damage(hit_collider, impact_delay)
+		_schedule_damage(hit_collider, impact_delay, distance)
 
-func _schedule_damage(collider: Object, delay: float) -> void:
+func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
 	if collider == null or not collider.has_method("take_damage"):
 		return
-	var dmg: int = Items.ammo_damage(String(_profile.get("ammo_id", "")))
+	var dmg: int = Items.ammo_damage_at(String(_profile.get("ammo_id", "")), distance)
 	if dmg <= 0:
 		return
 	if delay <= 0.0:
