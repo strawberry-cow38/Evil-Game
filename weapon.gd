@@ -374,9 +374,45 @@ func _schedule_impact(world_pos: Vector3, normal: Vector3, material: String, del
 	var timer := get_tree().create_timer(delay)
 	timer.timeout.connect(func(): _apply_impact(world_pos, normal, material))
 
+const BULLET_HOLE_HOLD := 4.0
+const BULLET_HOLE_FADE := 2.5
+const BULLET_HOLE_SIZE := 0.08
+
 func _apply_impact(world_pos: Vector3, normal: Vector3, material: String) -> void:
 	_play_impact_sound(world_pos, material)
 	_spawn_impact_particles(world_pos, normal, material)
+	_spawn_bullet_hole(world_pos, normal, material)
+
+func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String) -> void:
+	var n: Vector3 = normal.normalized()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(BULLET_HOLE_SIZE, BULLET_HOLE_SIZE)
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	match material:
+		"dirt":
+			mat.albedo_color = Color(0.08, 0.05, 0.03, 0.95)
+		"concrete":
+			mat.albedo_color = Color(0.10, 0.10, 0.10, 0.95)
+		_:
+			mat.albedo_color = Color(0.05, 0.05, 0.05, 0.95)
+	quad.material = mat
+
+	var mi := MeshInstance3D.new()
+	mi.mesh = quad
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	get_tree().current_scene.add_child(mi)
+	# Orient quad so its +Z faces along the surface normal, then nudge it
+	# slightly off the surface to avoid z-fighting.
+	var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
+	mi.global_transform = Transform3D(Basis.looking_at(-n, up), world_pos + n * 0.005)
+
+	var tween := create_tween()
+	tween.tween_interval(BULLET_HOLE_HOLD)
+	tween.tween_property(mat, "albedo_color:a", 0.0, BULLET_HOLE_FADE)
+	tween.tween_callback(func(): if is_instance_valid(mi): mi.queue_free())
 
 func _play_impact_sound(world_pos: Vector3, material: String) -> void:
 	if not _impact_streams.has(material):
