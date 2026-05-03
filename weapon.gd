@@ -265,7 +265,7 @@ const PROFILES := {
 		"mag_size": 8,
 		"rpm": 240.0,
 		"modes": [FireMode.SEMI],
-		"fire_sounds": ["res://assets/audio/Shot_PPBizon.ogg"],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK9mm_Modern.ogg"],
 		"fire_hold": 0.10,
 		"fire_fade": 0.18,
 		"recoil_pattern": RECOIL_PATTERN_MAKAROV,
