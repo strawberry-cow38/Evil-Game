@@ -19,20 +19,25 @@ const ENGINE_FORCE := 2400.0
 const REVERSE_FORCE := 1200.0
 const BRAKE_FORCE := 14.0
 const PASSIVE_BRAKE := 0.6   # mild drag when no input so the car coasts to a stop
-const STEER_MAX := 0.55
-const STEER_SPEED := 4.0     # how fast steering eases toward target
+const STEER_MAX := 0.55         # max wheel steer angle (radians) at low speed
+const STEER_MAX_HIGH := 0.18    # max steer angle once cruising fast — prevents tip-overs
+const STEER_SPEED_REF := 22.0   # m/s where steering authority bottoms out at STEER_MAX_HIGH
+const STEER_SPEED := 4.0        # how fast steering eases toward target
 const HANDBRAKE_FORCE := 32.0
 const HANDBRAKE_TAP_S := 0.18  # space held shorter than this = toggle latched
 
 # 90s-econobox manual. Final drive picked so each gear caps at a clearly
 # different top speed: ~7, 11, 16, 22, 29 m/s (≈25 / 40 / 58 / 80 / 105 km/h).
 const GEAR_RATIOS: Array[float] = [3.6, 2.4, 1.7, 1.25, 0.95]
+const REVERSE_RATIO := 3.6
 const FINAL_DRIVE := 7.8
 const WHEEL_RADIUS := 0.34
 const IDLE_RPM := 700.0
 const REDLINE_RPM := 6200.0
 const REV_LIMITER_CUT := 6300.0   # engine_force gates above this until RPM drops back
+const RPM_HARD_CAP := 6500.0      # absolute ceiling on displayed RPM, even from downshifts
 const RPM_FOLLOW_RATE := 9.0      # how fast displayed RPM eases toward target each second
+const NEUTRAL_REV_RATE := 14.0    # how fast RPM tracks throttle in neutral
 # Shift "bump": clutch-disengaged window after every shift where engine_force
 # drops to zero and a small drag pulses through, so the driver feels the gear
 # change as a momentum hiccup rather than a silent torque tweak.
@@ -69,7 +74,7 @@ var _steer: float = 0.0
 var _enter_locked_until: float = 0.0  # debounce E so it doesn't enter+exit same press
 var _space_press_time: float = -1.0   # -1 = not pressed; otherwise wall-clock seconds
 var _handbrake_latched: bool = false  # toggled by tap-release; held independently while space down
-var _gear: int = 1                    # 1..GEAR_RATIOS.size(); reverse handled via S input
+var _gear: int = 0                    # -1 = R, 0 = N, 1..GEAR_RATIOS.size() = forward gears
 var _rpm: float = IDLE_RPM            # displayed RPM, eased toward _target_rpm each frame
 var _rev_limited: bool = false        # true while the limiter is currently cutting fuel
 var _shift_cooldown: float = 0.0      # seconds remaining in clutch-disengaged window
@@ -157,11 +162,11 @@ func _ready() -> void:
 		w.use_as_steering = spec["steer"]
 		w.use_as_traction = spec["drive"]
 		w.wheel_radius = 0.34
-		w.wheel_friction_slip = 4.0
-		w.suspension_stiffness = 35.0
-		w.suspension_max_force = 6500.0
-		w.damping_compression = 0.6
-		w.damping_relaxation = 0.5
+		w.wheel_friction_slip = 5.5
+		w.suspension_stiffness = 60.0
+		w.suspension_max_force = 9000.0
+		w.damping_compression = 0.85
+		w.damping_relaxation = 0.85
 		var wm := MeshInstance3D.new()
 		var wmesh := CylinderMesh.new()
 		wmesh.top_radius = 0.34
@@ -198,7 +203,10 @@ func _ready() -> void:
 	# Mass on the body itself drags the centre of mass too high if the
 	# default sits on the cabin. Bias it down so the car doesn't tip.
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	center_of_mass = Vector3(0, 0.2, 0)
+	center_of_mass = Vector3(0, -0.05, 0)
+	# Damp body roll/yaw oscillations so the car settles after sharp turns
+	# instead of fishtailing forever.
+	angular_damp = 4.0
 	# Procedural audio — engine loop + one-shot shift noise. Both use
 	# AudioStreamGenerator so they pan + attenuate naturally in 3D.
 	_setup_audio()
@@ -243,46 +251,57 @@ func _physics_process(delta: float) -> void:
 		_throttle = clampf(fwd, 0.0, 1.0)
 		var target_engine: float = 0.0
 		var target_brake: float = PASSIVE_BRAKE
-		# Compute current RPM from wheel speed projected onto the local -Z axis,
-		# the gear ratio, and the final drive. Below idle we clamp up so the
-		# engine doesn't stall visually.
+		# Compute current RPM. Two paths:
+		#  - in gear (incl. reverse): RPM follows wheel speed * ratio * final drive
+		#  - in neutral: engine free-revs to throttle position
 		var local_v: Vector3 = global_transform.basis.transposed() * linear_velocity
-		var fwd_speed: float = local_v.z   # +Z is forward; sign carried for completeness
-		var wheel_rps: float = absf(fwd_speed) / (TAU * WHEEL_RADIUS)   # revs/sec
-		var ratio: float = GEAR_RATIOS[_gear - 1]
-		var target_rpm: float = wheel_rps * 60.0 * ratio * FINAL_DRIVE
-		if target_rpm < IDLE_RPM:
-			target_rpm = IDLE_RPM
-		# Slight bump toward redline when throttle is pinned and the car can't
-		# spin the wheels fast enough (eg starting from a stop) so the gauge
-		# isn't dead-flat at idle.
-		if fwd > 0.0:
-			target_rpm = max(target_rpm, IDLE_RPM + (REDLINE_RPM - IDLE_RPM) * 0.18 * fwd)
-		var alpha_rpm: float = 1.0 - exp(-RPM_FOLLOW_RATE * delta)
-		_rpm = lerpf(_rpm, target_rpm, alpha_rpm)
+		var fwd_speed: float = local_v.z
+		var wheel_rps: float = absf(fwd_speed) / (TAU * WHEEL_RADIUS)
+		var ratio: float = _current_ratio()
+		var target_rpm: float
+		if _gear == 0:
+			# Neutral: throttle directly drives RPM. Faster follow rate so the
+			# engine "barks" when blipped.
+			target_rpm = lerpf(IDLE_RPM, REDLINE_RPM * 0.95, _throttle)
+			var na: float = 1.0 - exp(-NEUTRAL_REV_RATE * delta)
+			_rpm = lerpf(_rpm, target_rpm, na)
+		else:
+			target_rpm = wheel_rps * 60.0 * absf(ratio) * FINAL_DRIVE
+			if target_rpm < IDLE_RPM:
+				target_rpm = IDLE_RPM
+			# Throttle bump so a stationary car under power isn't pegged at idle.
+			if fwd > 0.0:
+				target_rpm = max(target_rpm, IDLE_RPM + (REDLINE_RPM - IDLE_RPM) * 0.18 * fwd)
+			# Hard cap so a downshift from 5th to 1st can't paint 14k on the gauge.
+			target_rpm = min(target_rpm, RPM_HARD_CAP)
+			var alpha_rpm: float = 1.0 - exp(-RPM_FOLLOW_RATE * delta)
+			_rpm = lerpf(_rpm, target_rpm, alpha_rpm)
 		_rev_limited = _rpm >= REV_LIMITER_CUT
-		# Engine force scales by gear ratio relative to first gear (lower gears =
-		# more torque). Rev limiter cuts fuel above the cap.
-		# Engine force signs are inverted from the Godot default so W drives the
-		# car along +local-Z (matches the chase-cam orientation).
-		var torque_mult: float = ratio / GEAR_RATIOS[0]
+		# Torque magnitude scales by ratio relative to first gear. Reverse gets
+		# its own dedicated force constant, sign-flipped vs the +Z forward
+		# convention so it pushes the car -Z.
+		var torque_mult: float = absf(ratio) / GEAR_RATIOS[0]
 		# Shift cooldown: clutch is "in", no power reaches the wheels and a small
 		# drag bleeds momentum so the driver feels the gear change.
 		if _shift_cooldown > 0.0:
 			_shift_cooldown -= delta
 			target_engine = 0.0
 			target_brake = max(target_brake, SHIFT_BUMP_BRAKE)
+		elif _gear == 0:
+			# Neutral: no engine force at the wheels regardless of throttle.
+			target_engine = 0.0
+		elif _gear == -1:
+			# Reverse: W accelerates backward, S brakes (no auto-direction flip).
+			if fwd > 0.0 and not _rev_limited:
+				target_engine = REVERSE_FORCE * fwd
+				target_brake = 0.0
 		elif fwd > 0.0 and not _rev_limited:
 			target_engine = -ENGINE_FORCE * fwd * torque_mult
 			target_brake = 0.0
-		elif fwd < 0.0:
-			# Reverse if nearly stopped, otherwise brake. Forward motion is +Z
-			# now, so "still going forward" means local_v.z is positive.
-			if local_v.z < 0.5:
-				target_engine = REVERSE_FORCE * absf(fwd)
-				target_brake = 0.0
-			else:
-				target_brake = BRAKE_FORCE * absf(fwd)
+		# S is now a brake-only input — no automatic reverse, the player must
+		# shift to R to back up. Brake strength scales with how hard S is held.
+		if fwd < 0.0:
+			target_brake = max(target_brake, BRAKE_FORCE * absf(fwd))
 		# Handbrake: tap space toggles latched on/off, hold space forces it on
 		# while held regardless of latched state.
 		var now_s: float = Time.get_ticks_msec() / 1000.0
@@ -298,9 +317,14 @@ func _physics_process(delta: float) -> void:
 			target_engine = 0.0
 		engine_force = target_engine
 		brake = target_brake
-		# Steering eases toward target so the wheels don't snap.
+		# Steering eases toward target so the wheels don't snap, and the max
+		# wheel angle shrinks with speed so the car can't be flicked into a
+		# barrel-roll on the highway.
+		var speed_mag: float = linear_velocity.length()
+		var speed_t: float = clampf(speed_mag / STEER_SPEED_REF, 0.0, 1.0)
+		var max_steer: float = lerpf(STEER_MAX, STEER_MAX_HIGH, speed_t)
 		var alpha: float = 1.0 - exp(-STEER_SPEED * delta)
-		_steer = lerpf(_steer, steer_in * STEER_MAX, alpha)
+		_steer = lerpf(_steer, steer_in * max_steer, alpha)
 		steering = _steer
 	else:
 		# Passive: no throttle, light drag so the car settles.
@@ -381,6 +405,14 @@ func get_gear() -> int:
 func get_gear_count() -> int:
 	return GEAR_RATIOS.size()
 
+# "R", "N", or "1".."5" for HUD display.
+func get_gear_label() -> String:
+	if _gear == -1:
+		return "R"
+	if _gear == 0:
+		return "N"
+	return str(_gear)
+
 func get_redline() -> float:
 	return REDLINE_RPM
 
@@ -394,10 +426,19 @@ func _shift_up() -> void:
 		_trigger_shift_sound()
 
 func _shift_down() -> void:
-	if _gear > 1:
+	if _gear > -1:
 		_gear -= 1
 		_shift_cooldown = SHIFT_COOLDOWN_S
 		_trigger_shift_sound()
+
+# Active gear ratio — magnitude is what RPM and torque math care about; sign is
+# used by the engine_force branch to point reverse the right way.
+func _current_ratio() -> float:
+	if _gear == 0:
+		return 0.0
+	if _gear == -1:
+		return -REVERSE_RATIO
+	return GEAR_RATIOS[_gear - 1]
 
 func driver_seat_world() -> Vector3:
 	if _seat_markers.is_empty():
@@ -444,7 +485,7 @@ func exit_driver() -> void:
 	steering = 0.0
 	_handbrake_latched = false
 	_space_press_time = -1.0
-	_gear = 1
+	_gear = 0
 	_rpm = IDLE_RPM
 	_rev_limited = false
 	_shift_cooldown = 0.0

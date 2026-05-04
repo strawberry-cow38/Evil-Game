@@ -54,8 +54,7 @@ func _process(delta: float) -> void:
 	var driving := false
 	var rpm := 0.0
 	var redline := 1.0
-	var gear := 0
-	var gear_count := 0
+	var gear_label := "N"
 	var rev_limited := false
 	if _player:
 		# When seated as driver the player's own velocity is forced to zero, so
@@ -70,10 +69,8 @@ func _process(delta: float) -> void:
 					rpm = veh.get_rpm()
 				if veh.has_method("get_redline"):
 					redline = veh.get_redline()
-				if veh.has_method("get_gear"):
-					gear = veh.get_gear()
-				if veh.has_method("get_gear_count"):
-					gear_count = veh.get_gear_count()
+				if veh.has_method("get_gear_label"):
+					gear_label = veh.get_gear_label()
 				if veh.has_method("is_rev_limited"):
 					rev_limited = veh.is_rev_limited()
 		else:
@@ -81,8 +78,8 @@ func _process(delta: float) -> void:
 			speed = Vector2(v.x, v.z).length()
 	if driving:
 		var rl_marker: String = "  REV LIMIT" if rev_limited else ""
-		_label.text = "FPS: %d\nSpeed: %.2f m/s  (driving)\nRPM: %d / %d   Gear: %d/%d%s" % [
-			fps, speed, int(round(rpm)), int(round(redline)), gear, gear_count, rl_marker
+		_label.text = "FPS: %d\nSpeed: %.2f m/s  (driving)\nRPM: %d / %d   Gear: %s%s" % [
+			fps, speed, int(round(rpm)), int(round(redline)), gear_label, rl_marker
 		]
 		_update_rpm_gauge(rpm, redline, rev_limited)
 	else:
