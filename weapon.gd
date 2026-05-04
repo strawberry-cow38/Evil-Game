@@ -14,6 +14,13 @@ const RECOIL_RESET_DELAY := 0.40           # s of no-fire before pattern index r
 const RECOIL_SMOOTH_RATE := 22.0           # higher = snappier (per-shot kick exp-approaches over ~1/RATE s)
 const TRACER_LIFETIME := 0.06              # s
 
+# Weapons that render a red-dot laser sight along the aim ray. Beam +
+# dot are constructed lazily in _ready and updated each frame.
+const LASER_WEAPONS: Array = ["m700"]
+const LASER_RANGE := 800.0
+const LASER_DOT_RADIUS := 0.025
+const LASER_BEAM_OFFSET := Vector3(0.06, -0.06, -0.18)  # camera-local muzzle proxy
+
 # Recoil pattern: (yaw_deg, pitch_deg) per shot. Pitch is "kick up" so positive = up.
 # AKM: harsher, climbs hard, drifts right.
 const RECOIL_PATTERN_AKM: Array[Vector2] = [
@@ -400,6 +407,11 @@ var _applied_yaw := 0.0
 var _applied_pitch := 0.0
 var _current_weapon: String = "akm"
 var _equipped: bool = true   # false = empty hands; gates fire/reload/recoil decay
+# Laser sight nodes (top_level so we can drive them in world space).
+var _laser_dot: MeshInstance3D
+var _laser_beam: MeshInstance3D
+var _laser_beam_im: ImmediateMesh
+var _laser_beam_mat: StandardMaterial3D
 var _profile: Dictionary = {}
 var _fire_streams: Dictionary = {}     # weapon key -> Array[AudioStream]
 var _ammo := 0
@@ -457,6 +469,7 @@ func _ready() -> void:
 	if inventory_path != NodePath():
 		_inventory = get_node(inventory_path)
 	_setup_audio()
+	_setup_laser()
 	_apply_weapon(_current_weapon)
 
 func _apply_weapon(key: String, uid: int = 0) -> void:
@@ -898,6 +911,7 @@ func get_current_bloom_deg() -> float:
 	return bloom_deg
 
 func _process(delta: float) -> void:
+	_update_laser()
 	# Freeze all weapon input + recoil decay while the inventory menu or pie
 	# is up.
 	if _player != null and _player.has_method("is_menu_open") and _player.is_menu_open():
@@ -1314,3 +1328,80 @@ func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: Stri
 
 	var timer := get_tree().create_timer(p.lifetime + 0.4)
 	timer.timeout.connect(func(): if is_instance_valid(p): p.queue_free())
+
+func _setup_laser() -> void:
+	# Dot — small unshaded sphere, no depth test so it stays visible
+	# against bright surfaces.
+	var dot_mesh := SphereMesh.new()
+	dot_mesh.radius = LASER_DOT_RADIUS
+	dot_mesh.height = LASER_DOT_RADIUS * 2.0
+	dot_mesh.radial_segments = 12
+	dot_mesh.rings = 6
+	var dot_mat := StandardMaterial3D.new()
+	dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dot_mat.albedo_color = Color(1.0, 0.05, 0.05, 1.0)
+	dot_mat.emission_enabled = true
+	dot_mat.emission = Color(1.0, 0.0, 0.0, 1.0)
+	dot_mat.emission_energy_multiplier = 4.0
+	dot_mat.no_depth_test = true
+	dot_mat.disable_receive_shadows = true
+	_laser_dot = MeshInstance3D.new()
+	_laser_dot.mesh = dot_mesh
+	_laser_dot.material_override = dot_mat
+	_laser_dot.top_level = true
+	_laser_dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_laser_dot.visible = false
+	add_child(_laser_dot)
+
+	# Beam — ImmediateMesh line from muzzle proxy to hit point. Rebuilt
+	# each frame in _update_laser since endpoints move.
+	_laser_beam_im = ImmediateMesh.new()
+	_laser_beam_mat = StandardMaterial3D.new()
+	_laser_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_laser_beam_mat.albedo_color = Color(1.0, 0.0, 0.0, 0.55)
+	_laser_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_laser_beam_mat.disable_receive_shadows = true
+	_laser_beam = MeshInstance3D.new()
+	_laser_beam.mesh = _laser_beam_im
+	_laser_beam.material_override = _laser_beam_mat
+	_laser_beam.top_level = true
+	_laser_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_laser_beam.visible = false
+	add_child(_laser_beam)
+
+func _update_laser() -> void:
+	if _laser_dot == null or _laser_beam == null:
+		return
+	var active: bool = _equipped and LASER_WEAPONS.has(_current_weapon) and _camera != null
+	if active and _player != null and _player.has_method("is_menu_open") and _player.is_menu_open():
+		active = false
+	if active and _player != null and _player.has_method("is_pie_open") and _player.is_pie_open():
+		active = false
+	if not active:
+		_laser_dot.visible = false
+		_laser_beam.visible = false
+		return
+	var origin: Vector3 = _camera.global_transform.origin
+	var basis: Basis = _camera.global_transform.basis
+	var fwd: Vector3 = -basis.z.normalized()
+	var muzzle: Vector3 = _camera.global_transform * LASER_BEAM_OFFSET
+	var end: Vector3 = origin + fwd * LASER_RANGE
+	var space := get_world_3d().direct_space_state
+	if space != null:
+		var q := PhysicsRayQueryParameters3D.create(origin, end)
+		var ex: Array[RID] = []
+		if _player is CollisionObject3D:
+			ex.append((_player as CollisionObject3D).get_rid())
+		q.exclude = ex
+		var r := space.intersect_ray(q)
+		if r and r.has("position"):
+			end = r.position
+	_laser_dot.global_position = end
+	_laser_dot.visible = true
+	_laser_beam_im.clear_surfaces()
+	_laser_beam_im.surface_begin(Mesh.PRIMITIVE_LINES, _laser_beam_mat)
+	_laser_beam_im.surface_add_vertex(muzzle)
+	_laser_beam_im.surface_add_vertex(end)
+	_laser_beam_im.surface_end()
+	_laser_beam.global_transform = Transform3D.IDENTITY
+	_laser_beam.visible = true
