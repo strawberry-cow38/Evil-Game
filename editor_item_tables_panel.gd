@@ -156,6 +156,24 @@ func set_picker(p: Node) -> void:
 	if _picker != null and _picker.has_signal("items_picked"):
 		_picker.items_picked.connect(_on_items_picked)
 
+func set_tables(new_tables: Array) -> void:
+	# Wholesale replace the table list — used by map load/clear so the
+	# picker UI mirrors whatever's now in MapState. Re-finds the largest
+	# tbl_<N> id so future creates don't collide with loaded ids.
+	tables = []
+	var max_id: int = 0
+	for t in new_tables:
+		tables.append(t.duplicate(true))
+		var sid: String = String(t.get("id", ""))
+		if sid.begins_with("tbl_"):
+			var n: int = int(sid.substr(4))
+			if n > max_id:
+				max_id = n
+	_next_id = max_id + 1
+	_active_index = 0 if tables.size() > 0 else -1
+	_save()
+	_refresh_all()
+
 func get_active_table() -> Dictionary:
 	if _active_index < 0 or _active_index >= tables.size():
 		return {}

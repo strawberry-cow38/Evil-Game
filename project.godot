@@ -20,6 +20,7 @@ boot_splash/bg_color=Color(0, 0, 0, 1)
 [autoload]
 
 MapState="*res://map_state.gd"
+MapIO="*res://map_io.gd"
 
 [display]
 

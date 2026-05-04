@@ -32,6 +32,8 @@ const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 const CONTAINER_PANEL_SCRIPT := preload("res://editor_container_panel.gd")
 const LIGHTING_PANEL_SCRIPT := preload("res://editor_lighting_panel.gd")
 const OBJECT_PROPS_PANEL_SCRIPT := preload("res://editor_object_props_panel.gd")
+const PAUSE_MENU_SCRIPT := preload("res://editor_pause_menu.gd")
+const MAIN_MENU_SCENE := "res://main_menu.tscn"
 const OBJECTS_CATALOG := preload("res://editor_objects_catalog.gd")
 const CRATE := preload("res://crate.gd")
 
@@ -115,6 +117,8 @@ var _lighting_panel: PanelContainer = null
 # Per-placement settings for the selected object_box (no-collide,
 # destructible/HP). Built at runtime, hidden until an object is selected.
 var _object_props_panel: PanelContainer = null
+# Esc-toggled pause overlay (save / load / main menu). Built at runtime.
+var _pause_menu: PanelContainer = null
 # Object clipboard. Empty dict = nothing copied. `paste_at_mouse` true
 # after a cut so V drops the copy where the cursor is; false after a
 # copy so V re-stamps at the original transform (paste-in-place).
@@ -229,8 +233,91 @@ func _ready() -> void:
 	_object_props_panel.no_collide_changed.connect(_on_no_collide_changed)
 	_object_props_panel.destructible_changed.connect(_on_destructible_changed)
 	_object_props_panel.hp_changed.connect(_on_hp_changed)
+	# Pause menu — built last so it overlays everything else. Anchored
+	# centre-screen via a CenterContainer wrapper so it sits in the middle
+	# regardless of viewport size.
+	var pause_wrap := CenterContainer.new()
+	pause_wrap.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_wrap.mouse_filter = Control.MOUSE_FILTER_STOP
+	pause_wrap.visible = false
+	$UI.add_child(pause_wrap)
+	# Dim backdrop so the editor visibly recedes while the menu is up.
+	var pause_dim := ColorRect.new()
+	pause_dim.color = Color(0, 0, 0, 0.55)
+	pause_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pause_wrap.add_child(pause_dim)
+	_pause_menu = PanelContainer.new()
+	_pause_menu.set_script(PAUSE_MENU_SCRIPT)
+	pause_wrap.add_child(_pause_menu)
+	_pause_menu.resume_pressed.connect(_close_pause_menu)
+	_pause_menu.save_pressed.connect(_on_pause_save)
+	_pause_menu.load_pressed.connect(_on_pause_load)
+	_pause_menu.delete_pressed.connect(_on_pause_delete)
+	_pause_menu.new_pressed.connect(_on_pause_new)
+	_pause_menu.main_menu_pressed.connect(_on_pause_main_menu)
+	# After load, the editor needs to know which container to dim/show, so
+	# stash the wrapper on the panel for visibility flips.
+	_pause_menu.set_meta("wrap", pause_wrap)
+	# Final pass: rehydrate placed props + item tables/spawns from MapState
+	# now that every sub-panel exists. Heights/spawns/lighting were already
+	# applied above, but those are read-only one-shots; placed visuals need
+	# all panels live before they can be added.
+	if MapState.has_map() and MapState.placed_props.size() > 0:
+		for entry in MapState.placed_props:
+			var kind: String = String(entry.get("kind", ""))
+			var id: String = String(entry.get("id", ""))
+			var xform: Transform3D = entry.get("xform", Transform3D.IDENTITY)
+			if id == "":
+				continue
+			var box: Node3D = Node3D.new()
+			if kind == "effect":
+				box.set_script(EFFECT_BOX_SCRIPT)
+				box.effect_id = id
+			elif kind == "object":
+				box.set_script(OBJECT_BOX_SCRIPT)
+				box.object_id = id
+			else:
+				continue
+			add_child(box)
+			box.global_transform = xform
+			if kind == "object":
+				if entry.has("loot_table_id"):
+					box.loot_table_id = String(entry["loot_table_id"])
+				if entry.has("roll_count_override"):
+					box.roll_count_override = int(entry["roll_count_override"])
+				if entry.has("no_collide"):
+					box.no_collide = bool(entry["no_collide"])
+				if entry.has("destructible"):
+					box.destructible = bool(entry["destructible"])
+				if entry.has("hp_max"):
+					box.hp_max = int(entry["hp_max"])
+			_placed_props.append(box)
+	if MapState.item_tables.size() > 0:
+		_item_tables_panel.set_tables(MapState.item_tables)
+	if MapState.item_spawn_points.size() > 0:
+		var color_by_id: Dictionary = {}
+		for t in MapState.item_tables:
+			color_by_id[String(t.get("id", ""))] = t.get("color", Color.WHITE)
+		for sp in MapState.item_spawn_points:
+			_spawn_item_box(
+				String(sp.get("table_id", "")),
+				color_by_id.get(String(sp.get("table_id", "")), Color.WHITE),
+				sp.get("pos", Vector3.ZERO),
+			)
 
 func _input(event: InputEvent) -> void:
+	# Esc toggles the pause menu. While it's open we swallow other shortcuts
+	# so typing into the save-name field doesn't trigger F9 / Q / etc.
+	if event.is_action_pressed("ui_cancel"):
+		if _is_pause_menu_open():
+			_close_pause_menu()
+		else:
+			_open_pause_menu()
+		get_viewport().set_input_as_handled()
+		return
+	if _is_pause_menu_open():
+		return
 	# F9 → play mode. Either the input action OR the raw key fires it,
 	# but not both (after _enter_play_mode the scene is freed so we
 	# must not touch self afterwards).
@@ -285,12 +372,16 @@ func _input(event: InputEvent) -> void:
 			_xform_apply()
 
 func _enter_play_mode() -> void:
-	# Snapshot the current map into the autoload so the play scene can
-	# rebuild the same terrain on the other side of the scene swap.
+	_snapshot_to_mapstate()
+	get_tree().change_scene_to_file(PLAY_SCENE)
+
+func _snapshot_to_mapstate() -> void:
+	# Roll up everything the editor has authored into the MapState autoload
+	# so it survives a scene swap (F9 → play, or Main Menu return) and so
+	# MapIO can serialize it to disk for save-to-file.
 	MapState.heights = _terrain.heights.duplicate()
 	MapState.grid_w = _terrain.GRID_W
 	MapState.grid_h = _terrain.GRID_H
-	# Snapshot placed effects + objects so the play scene can rebuild them.
 	MapState.placed_props.clear()
 	for box in _placed_props:
 		if not is_instance_valid(box):
@@ -349,7 +440,134 @@ func _enter_play_mode() -> void:
 			"table_id": String(box.table_id),
 			"pos": box.global_position,
 		})
-	get_tree().change_scene_to_file(PLAY_SCENE)
+
+func _restore_from_mapstate() -> void:
+	# Inverse of _snapshot_to_mapstate. Wipes whatever's currently in the
+	# editor and rebuilds it from MapState. Called after MapIO.load_map and
+	# from _ready when MapState already carries data (F9 round-trip).
+	# Heights — adopt only when the source grid matches; size mismatch
+	# means a foreign map and we'd rather skip than crash.
+	if MapState.has_map() and MapState.heights.size() == _terrain.heights.size():
+		_terrain.heights = MapState.heights.duplicate()
+		_terrain.rebuild()
+	# Clear placed visuals.
+	for box in _placed_props:
+		if is_instance_valid(box):
+			box.queue_free()
+	_placed_props.clear()
+	for box in _placed_item_spawns:
+		if is_instance_valid(box):
+			box.queue_free()
+	_placed_item_spawns.clear()
+	for s in _spawn_visuals:
+		if is_instance_valid(s):
+			s.queue_free()
+	_spawn_visuals.clear()
+	_selected_prop = null
+	if _gizmo != null:
+		_gizmo.set_target(null)
+	# Rehydrate spawns + props.
+	for pos in MapState.player_spawns:
+		_add_spawn_visual(pos)
+	for entry in MapState.placed_props:
+		var kind: String = String(entry.get("kind", ""))
+		var id: String = String(entry.get("id", ""))
+		var xform: Transform3D = entry.get("xform", Transform3D.IDENTITY)
+		if id == "":
+			continue
+		var box: Node3D = Node3D.new()
+		if kind == "effect":
+			box.set_script(EFFECT_BOX_SCRIPT)
+			box.effect_id = id
+		elif kind == "object":
+			box.set_script(OBJECT_BOX_SCRIPT)
+			box.object_id = id
+		else:
+			continue
+		add_child(box)
+		box.global_transform = xform
+		if kind == "object":
+			if entry.has("loot_table_id"):
+				box.loot_table_id = String(entry["loot_table_id"])
+			if entry.has("roll_count_override"):
+				box.roll_count_override = int(entry["roll_count_override"])
+			if entry.has("no_collide"):
+				box.no_collide = bool(entry["no_collide"])
+			if entry.has("destructible"):
+				box.destructible = bool(entry["destructible"])
+			if entry.has("hp_max"):
+				box.hp_max = int(entry["hp_max"])
+		_placed_props.append(box)
+	# Item-spawn cubes — colour comes from the matching table.
+	var color_by_id: Dictionary = {}
+	for t in MapState.item_tables:
+		color_by_id[String(t.get("id", ""))] = t.get("color", Color.WHITE)
+	for sp in MapState.item_spawn_points:
+		var tid: String = String(sp.get("table_id", ""))
+		var pos: Vector3 = sp.get("pos", Vector3.ZERO)
+		var col: Color = color_by_id.get(tid, Color.WHITE)
+		_spawn_item_box(tid, col, pos)
+	# Tables -> picker panel + lighting -> sky/sun.
+	if _item_tables_panel != null:
+		_item_tables_panel.set_tables(MapState.item_tables)
+	if not MapState.lighting.is_empty():
+		_lighting_panel.set_state(MapState.lighting)
+		_apply_lighting(MapState.lighting)
+
+func _open_pause_menu() -> void:
+	if _pause_menu == null:
+		return
+	var wrap: Node = _pause_menu.get_meta("wrap")
+	if wrap is Control:
+		(wrap as Control).visible = true
+	_pause_menu.open()
+
+func _close_pause_menu() -> void:
+	if _pause_menu == null:
+		return
+	var wrap: Node = _pause_menu.get_meta("wrap")
+	if wrap is Control:
+		(wrap as Control).visible = false
+	_pause_menu.close()
+
+func _is_pause_menu_open() -> bool:
+	return _pause_menu != null and _pause_menu.is_open()
+
+func _on_pause_save(save_name: String) -> void:
+	_snapshot_to_mapstate()
+	if MapIO.save_map(save_name):
+		_pause_menu.set_status("Saved: %s" % save_name)
+		_pause_menu.refresh()
+	else:
+		_pause_menu.set_status("Save failed.")
+
+func _on_pause_load(save_name: String) -> void:
+	if MapIO.load_map(save_name):
+		_restore_from_mapstate()
+		_pause_menu.set_status("Loaded: %s" % save_name)
+		_close_pause_menu()
+	else:
+		_pause_menu.set_status("Load failed.")
+
+func _on_pause_delete(save_name: String) -> void:
+	if MapIO.delete_save(save_name):
+		_pause_menu.set_status("Deleted: %s" % save_name)
+		_pause_menu.refresh()
+	else:
+		_pause_menu.set_status("Delete failed.")
+
+func _on_pause_new() -> void:
+	# Wipe MapState + editor — gives the user a blank canvas without
+	# kicking them back to the main menu.
+	MapState.clear()
+	_restore_from_mapstate()
+	_pause_menu.set_status("New empty map.")
+
+func _on_pause_main_menu() -> void:
+	# Snapshot first so the autoload still has the working map if the user
+	# wants to come back via the main menu's editor button.
+	_snapshot_to_mapstate()
+	get_tree().change_scene_to_file(MAIN_MENU_SCENE)
 
 func _process(delta: float) -> void:
 	_fps_label.text = "FPS: %d" % Engine.get_frames_per_second()
