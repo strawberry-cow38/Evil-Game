@@ -19,7 +19,8 @@ const TRACER_LIFETIME := 0.06              # s
 const LASER_WEAPONS: Array = ["m700"]
 const LASER_RANGE := 800.0
 const LASER_DOT_RADIUS := 0.025
-const LASER_BEAM_OFFSET := Vector3(0.06, -0.06, -0.18)  # camera-local muzzle proxy
+const LASER_BEAM_OFFSET_HIP := Vector3(0.06, -0.06, -0.18)   # camera-local muzzle proxy, hipfire
+const LASER_BEAM_OFFSET_ADS := Vector3(0.0, -0.04, -0.18)    # centered horizontally while ADS
 
 # Recoil pattern: (yaw_deg, pitch_deg) per shot. Pitch is "kick up" so positive = up.
 # AKM: harsher, climbs hard, drifts right.
@@ -1350,6 +1351,9 @@ func _setup_laser() -> void:
 	_laser_dot.material_override = dot_mat
 	_laser_dot.top_level = true
 	_laser_dot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# We move the dot every render frame — physics interpolation would
+	# smear it behind the actual aim point.
+	_laser_dot.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	_laser_dot.visible = false
 	add_child(_laser_dot)
 
@@ -1366,6 +1370,7 @@ func _setup_laser() -> void:
 	_laser_beam.material_override = _laser_beam_mat
 	_laser_beam.top_level = true
 	_laser_beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_laser_beam.physics_interpolation_mode = Node.PHYSICS_INTERPOLATION_MODE_OFF
 	_laser_beam.visible = false
 	add_child(_laser_beam)
 
@@ -1387,7 +1392,9 @@ func _update_laser() -> void:
 	var origin: Vector3 = cam_xf.origin
 	var basis: Basis = cam_xf.basis
 	var fwd: Vector3 = -basis.z.normalized()
-	var muzzle: Vector3 = cam_xf * LASER_BEAM_OFFSET
+	var ads: bool = _player != null and _player.has_method("is_ads") and _player.is_ads()
+	var offset: Vector3 = LASER_BEAM_OFFSET_ADS if ads else LASER_BEAM_OFFSET_HIP
+	var muzzle: Vector3 = cam_xf * offset
 	var end: Vector3 = origin + fwd * LASER_RANGE
 	var space := get_world_3d().direct_space_state
 	if space != null:
