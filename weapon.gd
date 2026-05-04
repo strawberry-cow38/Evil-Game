@@ -1381,10 +1381,13 @@ func _update_laser() -> void:
 		_laser_dot.visible = false
 		_laser_beam.visible = false
 		return
-	var origin: Vector3 = _camera.global_transform.origin
-	var basis: Basis = _camera.global_transform.basis
+	# Use interpolated transform — camera has physics_interpolation on, so
+	# global_transform lags the rendered view by up to one physics tick.
+	var cam_xf: Transform3D = _camera.get_global_transform_interpolated()
+	var origin: Vector3 = cam_xf.origin
+	var basis: Basis = cam_xf.basis
 	var fwd: Vector3 = -basis.z.normalized()
-	var muzzle: Vector3 = _camera.global_transform * LASER_BEAM_OFFSET
+	var muzzle: Vector3 = cam_xf * LASER_BEAM_OFFSET
 	var end: Vector3 = origin + fwd * LASER_RANGE
 	var space := get_world_3d().direct_space_state
 	if space != null:
