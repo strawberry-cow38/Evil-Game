@@ -320,9 +320,9 @@ func _physics_process(delta: float) -> void:
 			_rpm = lerpf(_rpm, target_rpm, na)
 		else:
 			target_rpm = wheel_rps * 60.0 * absf(ratio) * FINAL_DRIVE
-			if target_rpm < IDLE_RPM:
-				target_rpm = IDLE_RPM
-			# Throttle bump so a stationary car under power isn't pegged at idle.
+			# Idle controller only props RPM up to idle while the throttle is
+			# touched. Off-throttle the engine is allowed to bog below idle
+			# (and stall) instead of pretending it can hold 700 with no fuel.
 			if fwd > 0.0:
 				target_rpm = max(target_rpm, IDLE_RPM + (REDLINE_RPM - IDLE_RPM) * 0.18 * fwd)
 			# Hard cap so a downshift from 5th to 1st can't paint 14k on the gauge.
