@@ -1,7 +1,6 @@
 extends CanvasLayer
 
 const Items = preload("res://items.gd")
-const InventoryTable = preload("res://inventory_table.gd")
 
 const TAB_INVENTORY := "Inventory"
 const TABS: Array = [TAB_INVENTORY]   # extensible — add stats/map/etc here later
@@ -42,9 +41,6 @@ var _category_idx := 0
 var _sort_mode: SortMode = SortMode.NAME
 var _sort_asc := true
 
-# Cached row metadata keyed to current ItemList rows. Each entry mirrors the
-# inventory entry dict (id, uid, is_instance, condition, quality, ...).
-var _rows: Array[Dictionary] = []
 
 # Favorite-binding mode: when true, next 1..9 press binds the selected item.
 var _binding_mode := false
@@ -55,8 +51,8 @@ var _tab_box: HBoxContainer
 var _tab_buttons: Array[Button] = []
 var _category_box: HBoxContainer
 var _category_buttons: Array[Button] = []
-var _list_header: Label
-var _list: ItemList
+var _list: Tree
+var _list_root: TreeItem
 var _preview_color: ColorRect
 var _preview_name: Label
 var _preview_per_weight: Label
@@ -114,10 +110,10 @@ func _set_open(v: bool) -> void:
 	if v:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		_refresh()
-		if _list.item_count > 0:
-			var sel: PackedInt32Array = _list.get_selected_items()
-			var idx: int = sel[0] if sel.size() > 0 else 0
-			_list.select(min(idx, _list.item_count - 1))
+		if _list_root != null and _list.get_selected() == null:
+			var first: TreeItem = _list_root.get_first_child()
+			if first != null:
+				first.select(0)
 		_list.grab_focus()
 	else:
 		_close_inspect()
@@ -185,44 +181,48 @@ func _build_ui() -> void:
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_child(content)
 
-	# Tabular list column. Header sits above the ItemList, both share the
-	# same monospace font so the columns line up cell-for-cell.
-	var mono := InventoryTable.make_mono_font()
-	var list_col := VBoxContainer.new()
-	list_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	list_col.add_theme_constant_override("separation", 4)
-	content.add_child(list_col)
-
-	_list_header = Label.new()
-	_list_header.text = InventoryTable.header_text()
-	_list_header.add_theme_font_override("font", mono)
-	_list_header.add_theme_font_size_override("font_size", 16)
-	_list_header.add_theme_color_override("font_color", Color(1, 0.95, 0.6))
-	# Indent matches the ItemList icon margin so column heads line up over
-	# the text portion of each row, not the leading swatch icon.
-	_list_header.add_theme_constant_override("margin_left", 60)
-	list_col.add_child(_list_header)
-
-	_list = ItemList.new()
+	# Tabular list — Tree gives us real fixed-width columns instead of
+	# trying to pad text into alignment with a monospace font (which broke
+	# the moment any non-mono glyph like ¢ slipped in).
+	_list = Tree.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list.custom_minimum_size = Vector2(620, 360)
-	_list.fixed_icon_size = Vector2i(28, 28)
-	_list.icon_mode = ItemList.ICON_MODE_LEFT
-	_list.max_columns = 1
-	_list.same_column_width = true
-	_list.auto_height = false
+	_list.custom_minimum_size = Vector2(720, 360)
+	_list.columns = 6
+	_list.column_titles_visible = true
+	_list.hide_root = true
+	_list.select_mode = Tree.SELECT_ROW
 	_list.allow_reselect = true
-	_list.add_theme_font_override("font", mono)
 	_list.add_theme_font_size_override("font_size", 16)
-	_list.add_theme_constant_override("v_separation", 6)
-	_list.add_theme_constant_override("icon_margin", 8)
-	_list.item_selected.connect(func(_i): _refresh_preview())
-	_list.item_clicked.connect(_on_item_clicked)
-	_list.item_activated.connect(_on_item_activated)
+	# Column setup: NAME flexes, the rest are fixed-width readouts. Set
+	# alignments so numeric cells right-align and labels stay left.
+	_list.set_column_title(0, "Name")
+	_list.set_column_expand(0, true)
+	_list.set_column_clip_content(0, true)
+	_list.set_column_custom_minimum_width(0, 220)
+	_list.set_column_title(1, "Qty")
+	_list.set_column_expand(1, false)
+	_list.set_column_custom_minimum_width(1, 60)
+	_list.set_column_title_alignment(1, HORIZONTAL_ALIGNMENT_RIGHT)
+	_list.set_column_title(2, "Quality")
+	_list.set_column_expand(2, false)
+	_list.set_column_custom_minimum_width(2, 110)
+	_list.set_column_title(3, "Cond")
+	_list.set_column_expand(3, false)
+	_list.set_column_custom_minimum_width(3, 70)
+	_list.set_column_title_alignment(3, HORIZONTAL_ALIGNMENT_RIGHT)
+	_list.set_column_title(4, "Weight")
+	_list.set_column_expand(4, false)
+	_list.set_column_custom_minimum_width(4, 90)
+	_list.set_column_title_alignment(4, HORIZONTAL_ALIGNMENT_RIGHT)
+	_list.set_column_title(5, "Value")
+	_list.set_column_expand(5, false)
+	_list.set_column_custom_minimum_width(5, 80)
+	_list.set_column_title_alignment(5, HORIZONTAL_ALIGNMENT_RIGHT)
+	_list.cell_selected.connect(_refresh_preview)
+	_list.item_activated.connect(_equip_selected)
 	_list.gui_input.connect(_on_list_gui_input)
-	list_col.add_child(_list)
+	content.add_child(_list)
 
 	var preview_panel := PanelContainer.new()
 	preview_panel.custom_minimum_size = Vector2(320, 0)
@@ -427,7 +427,6 @@ func _refresh_list() -> void:
 	if _inventory == null:
 		return
 	var entries: Array = _inventory.entries()
-	# Filter by current category before sort.
 	var filtered: Array = []
 	for e in entries:
 		if _category_matches(String(e.kind)):
@@ -435,50 +434,73 @@ func _refresh_list() -> void:
 	entries = filtered
 	entries.sort_custom(_compare_entries)
 
-	# Try to keep the current selection across refresh by matching uid first
-	# (instances are unique) then id (stackables). If the prior selection is
-	# gone (drop, full stack consumed), fall back to the row that was *below*
-	# it — same index in the new list, clamped — so the user's scroll position
-	# stays put. If they were on the last row, that clamp puts them on the
-	# new last row, which is the row that was previously above.
+	# Preserve selection across refresh — match uid first (instance), then
+	# id (stackable). If the prior selection vanished (full stack looted /
+	# weapon dropped), fall back to the same row index so scroll stays put.
 	var prev: Dictionary = _selected_row()
 	var prev_idx: int = -1
-	var sel: PackedInt32Array = _list.get_selected_items()
-	if sel.size() > 0:
-		prev_idx = sel[0]
+	var cur_item: TreeItem = _list.get_selected()
+	if cur_item != null and _list_root != null:
+		prev_idx = cur_item.get_index()
 	_list.clear()
-	_rows.clear()
-	var new_select := -1
+	_list_root = _list.create_item()
+	var to_select: TreeItem = null
+	var fallback_idx_target: TreeItem = null
 	var equipped_uid: int = int(_inventory.get("equipped_uid"))
 	for i in range(entries.size()):
 		var e: Dictionary = entries[i]
-		var label: String = _row_label(e, equipped_uid)
-		_list.add_item(label)
-		var icon_color: Color = Items.item_color(String(e.id))
-		if bool(e.is_instance):
-			# Tint the swatch toward quality color so legendary stuff pops.
-			var qc: Color = Items.quality_color(int(e.quality))
-			icon_color = icon_color.lerp(qc, 0.45)
-		_list.set_item_icon(i, _swatch_icon(icon_color))
-		_rows.append(e)
-		if not prev.is_empty():
+		var item: TreeItem = _list.create_item(_list_root)
+		_fill_row(item, e, equipped_uid)
+		# Stash the row dict on cell 0 so selection callbacks can fetch it
+		# without juggling a parallel array.
+		item.set_metadata(0, e)
+		if not prev.is_empty() and to_select == null:
 			if bool(e.is_instance) and bool(prev.get("is_instance", false)):
 				if int(e.uid) == int(prev.get("uid", 0)):
-					new_select = i
+					to_select = item
 			elif not bool(e.is_instance) and not bool(prev.get("is_instance", false)):
 				if String(e.id) == String(prev.get("id", "")):
-					new_select = i
-	if _list.item_count > 0:
-		if new_select < 0:
-			new_select = clampi(prev_idx, 0, _list.item_count - 1) if prev_idx >= 0 else 0
-		_list.select(new_select)
-		_list.ensure_current_is_visible()
+					to_select = item
+		if i == prev_idx:
+			fallback_idx_target = item
+	if to_select == null:
+		to_select = fallback_idx_target
+	if to_select == null and entries.size() > 0:
+		to_select = _list_root.get_first_child()
+	if to_select != null:
+		to_select.select(0)
+		_list.scroll_to_item(to_select)
 
-func _row_label(e: Dictionary, equipped_uid: int) -> String:
-	var suffix: String = ""
-	if bool(e.is_instance) and int(e.uid) == equipped_uid:
-		suffix = " [E]"
-	return InventoryTable.row_text(e, suffix)
+func _fill_row(item: TreeItem, e: Dictionary, equipped_uid: int) -> void:
+	var id: String = String(e.id)
+	var is_inst: bool = bool(e.is_instance)
+	var name: String = String(e.get("name", ""))
+	if is_inst and int(e.uid) == equipped_uid:
+		name += " [E]"
+	# Icon + name swatch tinted by quality on instances.
+	var icon_color: Color = Items.item_color(id)
+	if is_inst:
+		icon_color = icon_color.lerp(Items.quality_color(int(e.quality)), 0.45)
+	item.set_icon(0, _swatch_icon(icon_color))
+	item.set_icon_max_width(0, 22)
+	item.set_text(0, name)
+	# Qty / quality / cond only meaningful on the right side of the split.
+	if is_inst:
+		item.set_text(1, "")
+		var qual: int = int(e.get("quality", 0))
+		item.set_text(2, Items.quality_name(qual))
+		item.set_custom_color(2, Items.quality_color(qual))
+		item.set_text(3, "%d%%" % int(round(float(e.get("condition", 1.0)) * 100.0)))
+	else:
+		item.set_text(1, "x%d" % int(e.get("count", 1)))
+		item.set_text(2, "")
+		item.set_text(3, "")
+	item.set_text(4, "%.2f kg" % float(e.get("weight_total", 0.0)))
+	item.set_text(5, "¢%d" % int(e.get("value_each", 0)))
+	# Right-align numeric columns cell-by-cell — the column-title alignment
+	# we set above only paints the header.
+	for col in [1, 3, 4, 5]:
+		item.set_text_alignment(col, HORIZONTAL_ALIGNMENT_RIGHT)
 
 func _compare_entries(a: Dictionary, b: Dictionary) -> bool:
 	var lt := false
@@ -492,13 +514,11 @@ func _compare_entries(a: Dictionary, b: Dictionary) -> bool:
 	return lt if _sort_asc else not lt
 
 func _selected_row() -> Dictionary:
-	var sel: PackedInt32Array = _list.get_selected_items()
-	if sel.is_empty():
+	var item: TreeItem = _list.get_selected() if _list != null else null
+	if item == null:
 		return {}
-	var idx: int = sel[0]
-	if idx < 0 or idx >= _rows.size():
-		return {}
-	return _rows[idx]
+	var meta = item.get_metadata(0)
+	return meta if meta is Dictionary else {}
 
 func _selected_id() -> String:
 	var r: Dictionary = _selected_row()
@@ -591,19 +611,9 @@ func _equip_selected() -> void:
 	else:
 		_inventory.set_equipped(uid)
 
-func _on_item_clicked(_idx: int, _pos: Vector2, _btn: int) -> void:
-	# Single click only selects + previews. Double-click (or Enter) equips so
-	# the inspect/preview flow doesn't accidentally swap your weapon.
-	_refresh_preview()
-
-func _on_item_activated(_idx: int) -> void:
-	# Enter / double-click on row → equip.
-	_equip_selected()
-
 func _on_list_gui_input(event: InputEvent) -> void:
-	# Mouse wheel cycles row selection instead of scrolling the ItemList — the
-	# list almost never overflows and selection-by-wheel matches how the rest
-	# of the menu (W/S, ↑/↓) navigates.
+	# Mouse wheel cycles row selection — the Tree's own scroll is nice
+	# but selection-by-wheel matches how the rest of the menu navigates.
 	if event is InputEventMouseButton and event.pressed:
 		var btn: int = (event as InputEventMouseButton).button_index
 		if btn == MOUSE_BUTTON_WHEEL_UP:
@@ -933,12 +943,19 @@ func _drop_selected(shift: bool = false) -> void:
 	player.drop_item(String(row.id), 1)
 
 func _move_selection(direction: int) -> void:
-	if _list.item_count == 0:
+	if _list_root == null:
 		return
-	var sel: PackedInt32Array = _list.get_selected_items()
-	var cur: int = sel[0] if sel.size() > 0 else 0
-	var nxt: int = clampi(cur + direction, 0, _list.item_count - 1)
-	if nxt != cur:
-		_list.select(nxt)
-		_list.ensure_current_is_visible()
+	var cur: TreeItem = _list.get_selected()
+	if cur == null:
+		cur = _list_root.get_first_child()
+		if cur == null:
+			return
+		cur.select(0)
+		_list.scroll_to_item(cur)
+		_refresh_preview()
+		return
+	var nxt: TreeItem = cur.get_next() if direction > 0 else cur.get_prev()
+	if nxt != null:
+		nxt.select(0)
+		_list.scroll_to_item(nxt)
 		_refresh_preview()
