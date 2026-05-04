@@ -307,13 +307,6 @@ func _process(delta: float) -> void:
 	var ads_locked: bool = _weapon != null and _weapon.has_method("is_ads_locked") and _weapon.is_ads_locked()
 	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not is_pie_open() and not weapon_reloading and not ads_locked
 
-	# Smooth camera height between stand/crouch.
-	var target_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
-	var alpha: float = 1.0 - exp(-CROUCH_LERP_RATE * delta)
-	var pos := _camera.position
-	pos.y = lerpf(pos.y, target_y, alpha)
-	_camera.position = pos
-
 	# ADS FOV zoom. Sniper scopes override the default ADS FOV via profile.
 	var ads_fov: float = FOV_ADS
 	if _weapon != null and _weapon.has_method("get_ads_fov"):
@@ -346,6 +339,13 @@ func _physics_process(delta: float) -> void:
 		_camera.rotation.x = _pitch
 		_yaw_delta = 0.0
 		_pitch_delta = 0.0
+	# Crouch height lerp lives in physics so the interpolated camera doesn't
+	# warn about transform changes outside the physics tick.
+	var target_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
+	var crouch_alpha: float = 1.0 - exp(-CROUCH_LERP_RATE * delta)
+	var cam_pos := _camera.position
+	cam_pos.y = lerpf(cam_pos.y, target_y, crouch_alpha)
+	_camera.position = cam_pos
 	# Driving: vehicle parks us at the seat marker each frame (effectively),
 	# but we still run zero physics so we don't fall away or eat collisions.
 	if _vehicle != null:

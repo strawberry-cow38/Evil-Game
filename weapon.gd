@@ -1108,7 +1108,7 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 	_spawn_tracer(origin, hit_pos)
 	if has_hit:
 		var material := _classify_material(hit_collider)
-		_schedule_impact(hit_pos, hit_normal, material, impact_delay)
+		_schedule_impact(hit_pos, hit_normal, material, impact_delay, hit_collider)
 		_schedule_damage(hit_collider, impact_delay, distance)
 
 func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
@@ -1194,26 +1194,26 @@ func _classify_material(collider: Object) -> String:
 		return "concrete"
 	return "concrete"
 
-func _schedule_impact(world_pos: Vector3, normal: Vector3, material: String, delay: float) -> void:
+func _schedule_impact(world_pos: Vector3, normal: Vector3, material: String, delay: float, collider: Object = null) -> void:
 	if delay <= 0.0:
-		_apply_impact(world_pos, normal, material)
+		_apply_impact(world_pos, normal, material, collider)
 		return
 	var timer := get_tree().create_timer(delay)
-	timer.timeout.connect(func(): _apply_impact(world_pos, normal, material))
+	timer.timeout.connect(func(): _apply_impact(world_pos, normal, material, collider))
 
 const BULLET_HOLE_HOLD := 4.0
 const BULLET_HOLE_FADE := 2.5
 const BULLET_HOLE_SIZE := 0.08
 
-func _apply_impact(world_pos: Vector3, normal: Vector3, material: String) -> void:
+func _apply_impact(world_pos: Vector3, normal: Vector3, material: String, collider: Object = null) -> void:
 	# Impact sounds disabled — broken clips, regenerating.
 	_spawn_impact_particles(world_pos, normal, material)
 	# Skip bullet-hole decals on flesh — they'd just float in the air once
 	# the target moves, and look weird stuck to a body anyway.
 	if material != "flesh":
-		_spawn_bullet_hole(world_pos, normal, material)
+		_spawn_bullet_hole(world_pos, normal, material, collider)
 
-func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String) -> void:
+func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, collider: Object = null) -> void:
 	var n: Vector3 = normal.normalized()
 	var quad := QuadMesh.new()
 	quad.size = Vector2(BULLET_HOLE_SIZE, BULLET_HOLE_SIZE)
@@ -1233,7 +1233,12 @@ func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String) -
 	var mi := MeshInstance3D.new()
 	mi.mesh = quad
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	get_tree().current_scene.add_child(mi)
+	# Parent the decal to the destructible (if any) so when it queue_frees the
+	# bullet holes go with it. Otherwise stick it on the scene root as before.
+	var parent: Node = _find_damageable(collider)
+	if parent == null or not (parent is Node3D):
+		parent = get_tree().current_scene
+	parent.add_child(mi)
 	# Orient quad so its +Z faces along the surface normal, then nudge it
 	# slightly off the surface to avoid z-fighting.
 	var up := Vector3.UP if absf(n.dot(Vector3.UP)) < 0.95 else Vector3.RIGHT
