@@ -5,32 +5,40 @@ extends RefCounted
 # stays as the editor handle; whatever this catalog returns is added
 # *inside* the box so the box still acts as the bounds indicator.
 #
-# Phase-1 only ships the demo crate. Real props (furniture, debris,
-# terminals, vehicles) wire in over time — each new id just needs an
-# entry here.
+# Container variants come back as crate.gd nodes pre-configured with the
+# right footprint, capacity, and roll-count. main_bootstrap reads those
+# values to seed loot from whichever table the editor assigned.
 
 const CRATE := preload("res://crate.gd")
+
+# Set of object ids whose build() returns a crate.gd node. Editor uses
+# this to decide when to show the loot-table picker on the selected
+# wireframe box.
+const CONTAINER_IDS := ["obj_crate_small", "obj_crate_large"]
+
+static func is_container(object_id: String) -> bool:
+	return CONTAINER_IDS.has(object_id)
 
 static func build(object_id: String) -> Node3D:
 	match object_id:
 		"demo_crate":
 			return _build_demo_crate()
 		"obj_crate_small":
-			return _build_lootable_crate()
+			return _build_lootable_crate("Crate (Small)", Vector3(1.1, 1.0, 0.8), 60.0, 6)
+		"obj_crate_large":
+			return _build_lootable_crate("Crate (Large)", Vector3(1.7, 1.4, 1.2), 180.0, 14)
 		_:
 			return null
 
-# Real lootable crate — script attached so it carries inventory state and
-# tags itself for the player's interact raycast. Seeded with a tiny stash
-# of starter items so a freshly-placed crate isn't empty on first probe.
-static func _build_lootable_crate() -> Node3D:
+# Lootable crate factory. No placeholder seeding — bootstrap fills the
+# crate by rolling whichever loot table the editor assigned to this slot.
+static func _build_lootable_crate(label: String, size: Vector3, max_w: float, rolls: int) -> Node3D:
 	var holder := Node3D.new()
 	holder.set_script(CRATE)
-	holder.set("label_name", "Crate (Small)")
-	# Defer seeding to after _ready so the inventory dicts exist.
-	holder.call_deferred("add", "ammo_9mm", 24)
-	holder.call_deferred("add", "ammo_556nato", 12)
-	holder.call_deferred("add", "apple", 2)
+	holder.set("label_name", label)
+	holder.set("size", size)
+	holder.set("max_weight", max_w)
+	holder.set("roll_count", rolls)
 	return holder
 
 static func _build_demo_crate() -> Node3D:

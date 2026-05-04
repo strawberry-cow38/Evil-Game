@@ -49,6 +49,11 @@ func _ready() -> void:
 		props_root = Node3D.new()
 		props_root.name = "PlacedProps"
 		add_child(props_root)
+		# Build a quick id→table lookup so container objects can find their
+		# assigned loot table without scanning the array per crate.
+		var tables_for_props: Dictionary = {}
+		for t in MapState.item_tables:
+			tables_for_props[String(t.get("id", ""))] = t
 		for entry in MapState.placed_props:
 			var kind: String = String(entry.get("kind", ""))
 			var id: String = String(entry.get("id", ""))
@@ -62,6 +67,14 @@ func _ready() -> void:
 				continue
 			props_root.add_child(content)
 			content.global_transform = xform
+			# Container loot fill — roll the assigned table N times where N
+			# is the crate variant's roll_count. Each successful roll is
+			# fed through crate.add(), which weight-checks against the
+			# crate's max_weight; once it refuses, we stop early.
+			if kind == "object" and OBJECT_CATALOG.is_container(id):
+				var tid: String = String(entry.get("loot_table_id", ""))
+				if tid != "" and tables_for_props.has(tid):
+					_seed_container(content, tables_for_props[tid])
 	# Item-spawn rolls. For each placed cube, look up its table, roll the
 	# weighted entries (including the implicit "nothing" entry), and drop
 	# a pickup if the result isn't nothing.
@@ -101,6 +114,24 @@ func _ready() -> void:
 		ground_y = terrain_node.sample_height(spawn_xz)
 	v.position = Vector3(spawn_xz.x, ground_y + 1.0, spawn_xz.z)
 	add_child(v)
+
+func _seed_container(crate: Node3D, table: Dictionary) -> void:
+	var rolls: int = int(crate.get("roll_count"))
+	if rolls <= 0:
+		return
+	# Roll up to roll_count entries; if a roll comes back as nothing/empty
+	# we still consume the budget (matches how a real loot table feels —
+	# unlucky crates exist). add() weight-checks; first refusal ends seeding.
+	for i in range(rolls):
+		var result: Dictionary = _roll_table(table)
+		var rid: String = String(result.get("id", ""))
+		if rid == "" or rid == NOTHING_ITEM_ID:
+			continue
+		var n: int = int(result.get("count", 1))
+		if not crate.has_method("add"):
+			break
+		if not crate.add(rid, n):
+			break
 
 func _roll_table(table: Dictionary) -> Dictionary:
 	if table.is_empty():

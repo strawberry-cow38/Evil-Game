@@ -220,7 +220,12 @@ func _refresh() -> void:
 	if "label_name" in _container:
 		label_name = String(_container.label_name).to_upper()
 	var total: int = _container.total_count() if _container.has_method("total_count") else _container_rows.size()
-	_container_title.text = "%s — %d item%s" % [label_name, total, "" if total == 1 else "s"]
+	# Show fill / capacity so the player can see when the crate is nearly
+	# full before they try to dump more into it.
+	var w_str: String = ""
+	if _container.has_method("total_weight") and "max_weight" in _container:
+		w_str = "  (%.1f / %.1f kg)" % [_container.total_weight(), float(_container.max_weight)]
+	_container_title.text = "%s — %d item%s%s" % [label_name, total, "" if total == 1 else "s", w_str]
 
 func _format_row(e: Dictionary) -> String:
 	var name: String = String(e.get("name", ""))
@@ -289,8 +294,10 @@ func _transfer_focused() -> void:
 			return
 		_take(_container_rows[j])
 
-# Player → container. No weight cap on the container side, so this always
-# succeeds for valid entries.
+# Player → container. Weight-checked: containers now have a finite cap,
+# so peel back the count until it fits (or bail) the same way _take does
+# for the inventory side. Never remove from the source until we know the
+# destination will accept the same quantity.
 func _store(entry: Dictionary) -> void:
 	if bool(entry.get("is_instance", false)):
 		var uid: int = int(entry.get("uid", 0))
@@ -299,14 +306,26 @@ func _store(entry: Dictionary) -> void:
 		var inst: Dictionary = _inventory.remove_instance(uid)
 		if inst.is_empty():
 			return
-		_container.add_instance(inst)
+		if not _container.add_instance(inst):
+			# Crate refused — restore so the player isn't punished for trying.
+			_inventory.add_instance(inst)
+			_status_label.text = "Crate full: %s" % String(entry.get("name", ""))
+		else:
+			_status_label.text = ""
 	else:
 		var id: String = String(entry.get("id", ""))
-		var n: int = int(entry.get("count", 1))
-		if id == "" or n <= 0:
+		var want: int = int(entry.get("count", 1))
+		if id == "" or want <= 0:
 			return
-		if _inventory.remove(id, n):
-			_container.add(id, n)
+		var fits: int = want
+		while fits > 0 and not _container.can_add(id, fits):
+			fits -= 1
+		if fits <= 0:
+			_status_label.text = "Crate full: %s" % String(entry.get("name", ""))
+			return
+		if _inventory.remove(id, fits):
+			_container.add(id, fits)
+			_status_label.text = "" if fits == want else "Partial: %d / %d" % [fits, want]
 
 # Container → player. Weight-checked: peel back the count until it fits, or
 # bail with a status if even one unit can't be carried.

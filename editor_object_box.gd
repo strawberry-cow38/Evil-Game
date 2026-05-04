@@ -14,6 +14,9 @@ const PAD := 0.0  # strict fit — wireframe sits exactly on the content's AABB
 const FALLBACK_SIZE := Vector3(2.0, 2.0, 2.0)
 
 var object_id: String = ""
+# Container objects (crates) read this at play-mode bootstrap to roll
+# their starting loot. Empty string = no table = empty crate.
+var loot_table_id: String = ""
 var _local_aabb: AABB = AABB(-FALLBACK_SIZE * 0.5, FALLBACK_SIZE)
 
 var _mesh_instance: MeshInstance3D

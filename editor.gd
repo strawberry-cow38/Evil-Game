@@ -28,6 +28,9 @@ const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
 const ITEM_SPAWN_BOX_SCRIPT := preload("res://editor_item_spawn_box.gd")
 const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
+const CONTAINER_PANEL_SCRIPT := preload("res://editor_container_panel.gd")
+const OBJECTS_CATALOG := preload("res://editor_objects_catalog.gd")
+const CRATE := preload("res://crate.gd")
 
 const BRUSH_STRENGTH := 12.0    # m/s for raise/lower at full falloff
 const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to remove it
@@ -101,6 +104,9 @@ var _drag_scale_index: int = 0            # 0=x, 1=y, 2=z (local scale)
 # keeps the legacy symmetric stretch around origin.
 var _drag_pivot_local: Vector3 = Vector3.ZERO
 var _drag_scale_pivot: bool = false
+# Loot-table picker shown only when the selected prop is a crate. Built
+# at runtime so editor.tscn doesn't need a new node.
+var _container_panel: PanelContainer = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -156,6 +162,19 @@ func _ready() -> void:
 	_gizmo = Node3D.new()
 	_gizmo.set_script(GIZMO_SCRIPT)
 	add_child(_gizmo)
+	# Container loot-table picker. Sits next to the right-side panels so
+	# both can be visible at once when a crate is selected while the user
+	# is on the Objects tool.
+	_container_panel = PanelContainer.new()
+	_container_panel.set_script(CONTAINER_PANEL_SCRIPT)
+	_container_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_container_panel.offset_left = -560
+	_container_panel.offset_right = -292
+	_container_panel.offset_top = 120
+	_container_panel.offset_bottom = 320
+	_container_panel.visible = false
+	$UI.add_child(_container_panel)
+	_container_panel.table_chosen.connect(_on_container_table_chosen)
 
 func _input(event: InputEvent) -> void:
 	# F9 → play mode. Either the input action OR the raw key fires it,
@@ -219,11 +238,16 @@ func _enter_play_mode() -> void:
 			id = String(box.object_id)
 		else:
 			continue
-		MapState.placed_props.append({
+		var entry: Dictionary = {
 			"kind": kind,
 			"id": id,
 			"xform": box.global_transform,
-		})
+		}
+		# Container objects carry their assigned loot table forward so the
+		# play-mode bootstrap can roll loot into the spawned crate.
+		if kind == "object" and "loot_table_id" in box:
+			entry["loot_table_id"] = String(box.loot_table_id)
+		MapState.placed_props.append(entry)
 	# Snapshot item-spawn tables + placed cubes. Tables are deep-duped so
 	# the play scene never aliases editor state (color edits in a future
 	# F9 session won't retro-affect a baked map).
@@ -448,7 +472,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle, _container_panel]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -495,6 +519,9 @@ func _on_active_table_changed(_idx: int) -> void:
 		if t.is_empty():
 			continue
 		box.set_color(t.get("color", Color.WHITE))
+	# Refresh the container panel too so newly-created or renamed tables
+	# show up in its dropdown without needing to reselect the crate.
+	_refresh_container_panel()
 
 func _find_table(table_id: String) -> Dictionary:
 	for t in _item_tables_panel.tables:
@@ -626,6 +653,40 @@ func _select_prop(box: Node3D) -> void:
 		_gizmo.set_target(_selected_prop)
 		if _selected_prop != null and _gizmo.mode == _gizmo.MODE_NONE:
 			_gizmo.set_mode(_gizmo.MODE_TRANSLATE_AXES)
+	_refresh_container_panel()
+
+# Show + bind the loot-table picker iff the current selection is a crate;
+# hide it otherwise. Called from _select_prop and from the table-list
+# changed signal so newly-created tables show up immediately.
+func _refresh_container_panel() -> void:
+	if _container_panel == null:
+		return
+	if _selected_prop == null or not "object_id" in _selected_prop:
+		_container_panel.visible = false
+		return
+	var oid: String = String(_selected_prop.object_id)
+	if not OBJECTS_CATALOG.is_container(oid):
+		_container_panel.visible = false
+		return
+	var current_id: String = String(_selected_prop.get("loot_table_id"))
+	# Pull capacity / roll info from a throwaway built crate so the panel
+	# shows the same numbers main_bootstrap will use at play.
+	var info: String = ""
+	var probe: Node3D = OBJECTS_CATALOG.build(oid)
+	if probe != null:
+		info = "Capacity: %.0f kg   Rolls: %d" % [
+			float(probe.get("max_weight")),
+			int(probe.get("roll_count")),
+		]
+		probe.queue_free()
+	var label: String = "Container: %s" % oid
+	_container_panel.bind(label, current_id, _item_tables_panel.tables, info)
+	_container_panel.visible = true
+
+func _on_container_table_chosen(table_id: String) -> void:
+	if _selected_prop == null or not "loot_table_id" in _selected_prop:
+		return
+	_selected_prop.loot_table_id = table_id
 
 func _pick_prop_under_cursor() -> void:
 	# Ray-vs-AABB pick over every placed effect; closest hit wins.
