@@ -627,6 +627,8 @@ func try_enter_driver(player: Node) -> bool:
 	# Visually park the player at the driver seat marker so anyone
 	# looking from outside sees the body in the car.
 	player.global_transform = (_seat_markers[0] as Node3D).global_transform
+	if player.has_method("reset_physics_interpolation"):
+		player.reset_physics_interpolation()
 	# Switch active camera to the vehicle chase cam.
 	_camera.current = true
 	# Debounce so the same E press that triggered entry doesn't immediately exit.
@@ -642,6 +644,7 @@ func exit_driver() -> void:
 	if player is Node3D:
 		var eject_world: Vector3 = global_transform * EJECT_OFFSET
 		(player as Node3D).global_position = eject_world
+		(player as Node3D).reset_physics_interpolation()
 	if player.has_method("set_in_vehicle"):
 		player.set_in_vehicle(null)
 	# Restore the player camera by walking the player tree for a Camera3D.

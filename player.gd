@@ -73,6 +73,13 @@ const RELOAD_HOLD_THRESHOLD := 0.20
 
 var _yaw := 0.0
 var _pitch := 0.0
+# Mouse motion accumulators applied in _physics_process. With physics
+# interpolation enabled, setting rotation outside the physics tick lets
+# the engine lerp between old and new transforms — feels like yaw lag.
+# Buffering here and applying once per physics step keeps the prev/curr
+# interpolation snapshots aligned with our intent.
+var _yaw_delta := 0.0
+var _pitch_delta := 0.0
 var _crouched := false
 var _ads := false
 var _menu: Node
@@ -195,6 +202,9 @@ func _respawn_at_safe_point() -> void:
 		target = Vector3(sp.x, ground_h + 1.2, sp.z)
 	global_position = target
 	velocity = Vector3.ZERO
+	# Snap interpolation so the camera doesn't lerp from the old spot to
+	# the spawn over a frame.
+	reset_physics_interpolation()
 
 func is_menu_open() -> bool:
 	if _menu != null and _menu.has_method("is_open") and _menu.is_open():
@@ -236,11 +246,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		var sens: float = MOUSE_SENSITIVITY
 		if _camera != null:
 			sens *= tan(deg_to_rad(_camera.fov) * 0.5) / tan(deg_to_rad(FOV_HIP) * 0.5)
-		_yaw -= event.relative.x * sens
-		_pitch -= event.relative.y * sens
-		_pitch = clamp(_pitch, -1.4, 1.4)
-		rotation.y = _yaw
-		_camera.rotation.x = _pitch
+		_yaw_delta -= event.relative.x * sens
+		_pitch_delta -= event.relative.y * sens
 	elif event.is_action_pressed("ui_menu") and not is_menu_open():
 		_menu.toggle()
 		get_viewport().set_input_as_handled()
@@ -326,6 +333,19 @@ func _process(delta: float) -> void:
 			_scope.hide_scope()
 
 func _physics_process(delta: float) -> void:
+	# Drain mouse-look deltas accumulated since the last physics tick.
+	# Applied here so the engine's prev/curr interpolation snapshots
+	# bracket each yaw/pitch change cleanly — setting rotation outside
+	# physics would visibly lerp the rotation across the next render
+	# frames.
+	if _yaw_delta != 0.0 or _pitch_delta != 0.0:
+		_yaw += _yaw_delta
+		_pitch += _pitch_delta
+		_pitch = clamp(_pitch, -1.4, 1.4)
+		rotation.y = _yaw
+		_camera.rotation.x = _pitch
+		_yaw_delta = 0.0
+		_pitch_delta = 0.0
 	# Driving: vehicle parks us at the seat marker each frame (effectively),
 	# but we still run zero physics so we don't fall away or eat collisions.
 	if _vehicle != null:

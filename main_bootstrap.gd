@@ -49,6 +49,7 @@ func _ready() -> void:
 			if terrain_node != null and terrain_node.has_method("sample_height"):
 				ground_h = terrain_node.sample_height(sp)
 			player.global_position = Vector3(sp.x, ground_h + 1.2, sp.z)
+			player.reset_physics_interpolation()
 	# Rebuild placed effects + objects from the catalog. Wireframe boxes
 	# stay in the editor — play mode only spawns the visual content.
 	var props_root: Node3D = null
