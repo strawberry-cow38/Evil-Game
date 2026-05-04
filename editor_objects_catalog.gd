@@ -9,12 +9,29 @@ extends RefCounted
 # terminals, vehicles) wire in over time — each new id just needs an
 # entry here.
 
+const CRATE := preload("res://crate.gd")
+
 static func build(object_id: String) -> Node3D:
 	match object_id:
 		"demo_crate":
 			return _build_demo_crate()
+		"obj_crate_small":
+			return _build_lootable_crate()
 		_:
 			return null
+
+# Real lootable crate — script attached so it carries inventory state and
+# tags itself for the player's interact raycast. Seeded with a tiny stash
+# of starter items so a freshly-placed crate isn't empty on first probe.
+static func _build_lootable_crate() -> Node3D:
+	var holder := Node3D.new()
+	holder.set_script(CRATE)
+	holder.set("label_name", "Crate (Small)")
+	# Defer seeding to after _ready so the inventory dicts exist.
+	holder.call_deferred("add", "ammo_9mm", 24)
+	holder.call_deferred("add", "ammo_556nato", 12)
+	holder.call_deferred("add", "apple", 2)
+	return holder
 
 static func _build_demo_crate() -> Node3D:
 	var holder := Node3D.new()
