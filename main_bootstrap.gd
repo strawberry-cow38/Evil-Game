@@ -14,7 +14,11 @@ const VEHICLE := preload("res://vehicle.gd")
 const EDITOR_SCRIPT := preload("res://editor.gd")
 const DUMMY_SCRIPT := preload("res://dummy.gd")
 const DUMMY_HEAD_SCRIPT := preload("res://dummy_head.gd")
+const CORPSE_SCRIPT := preload("res://corpse.gd")
 const NOTHING_ITEM_ID := "nothing"
+# Loot rolls per actor death — drop_table_id is rolled this many times
+# and each non-nothing result is shoved into the corpse container.
+const CORPSE_LOOT_ROLLS := 4
 
 # Fixed vehicle spawn — sits a few meters off the player spawn so it's findable.
 const VEHICLE_SPAWN_OFFSET := Vector3(6.0, 0.0, 0.0)
@@ -150,22 +154,15 @@ func _ready() -> void:
 			body.global_position = pos
 			# Roll clothing per slot (stub — currently just logs the picks).
 			_roll_clothing_for(body, preset)
-			# Death drop hookup. Bind table by id at death-time so we can
-			# spawn the pickup at the actor's last position.
+			# Death → spawn a lootable corpse at the actor's last position
+			# and seed it with rolls from the preset's drop_table. Empty
+			# drop_table still spawns a corpse so the player gets the
+			# visual feedback even with no loot.
+			var preset_color: Color = preset.get("color", Color(0.6, 0.4, 0.3, 1))
+			var label: String = String(preset.get("name", "Corpse"))
 			if body.has_signal("died"):
 				body.died.connect(func(drop_id: String, _xp: int):
-					if drop_id == "" or not itables_by_id.has(drop_id):
-						return
-					var result: Dictionary = _roll_table(itables_by_id[drop_id])
-					var rid: String = String(result.get("id", ""))
-					if rid == "" or rid == NOTHING_ITEM_ID:
-						return
-					var pickup := Area3D.new()
-					pickup.set_script(PICKUP)
-					pickup.item_id = rid
-					pickup.count = int(result.get("count", 1))
-					pickup.position = body.global_position + Vector3(0, 0.3, 0)
-					actors_root.add_child(pickup)
+					_spawn_corpse(actors_root, body.global_position, preset_color, label, drop_id, itables_by_id)
 				)
 
 	# Always-spawn vehicle. Sit it slightly off the player spawn at terrain
@@ -240,6 +237,29 @@ func _roll_table(table: Dictionary) -> Dictionary:
 			var count: int = randi_range(min_c, max_c)
 			return {"id": id, "count": count}
 	return {"id": NOTHING_ITEM_ID, "count": 1}
+
+func _spawn_corpse(parent: Node, pos: Vector3, color: Color, label: String, drop_id: String, itables_by_id: Dictionary) -> void:
+	var corpse := Node3D.new()
+	corpse.set_script(CORPSE_SCRIPT)
+	corpse.set("corpse_color", color)
+	corpse.set("label_name", label)
+	parent.add_child(corpse)
+	corpse.global_position = pos
+	if drop_id == "" or not itables_by_id.has(drop_id):
+		return
+	var table: Dictionary = itables_by_id[drop_id]
+	# Same shape as the crate seeding loop — roll N times, push each into
+	# the corpse via add(). add() weight-checks; first refusal stops seeding.
+	for i in range(CORPSE_LOOT_ROLLS):
+		var result: Dictionary = _roll_table(table)
+		var rid: String = String(result.get("id", ""))
+		if rid == "" or rid == NOTHING_ITEM_ID:
+			continue
+		var n: int = int(result.get("count", 1))
+		if not corpse.has_method("add"):
+			break
+		if not corpse.add(rid, n):
+			break
 
 func _build_actor(actor_id: String, preset: Dictionary) -> Node3D:
 	# Only "dummy" is wired right now. Constructed in code (not a packed
