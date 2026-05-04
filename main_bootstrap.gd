@@ -12,6 +12,8 @@ const OBJECT_CATALOG := preload("res://editor_objects_catalog.gd")
 const PICKUP := preload("res://pickup.gd")
 const VEHICLE := preload("res://vehicle.gd")
 const EDITOR_SCRIPT := preload("res://editor.gd")
+const DUMMY_SCRIPT := preload("res://dummy.gd")
+const DUMMY_HEAD_SCRIPT := preload("res://dummy_head.gd")
 const NOTHING_ITEM_ID := "nothing"
 
 # Fixed vehicle spawn — sits a few meters off the player spawn so it's findable.
@@ -121,6 +123,51 @@ func _ready() -> void:
 			pickup.position = pos + Vector3(0, 0.3, 0)
 			spawn_root.add_child(pickup)
 
+	# Actor-spawn rolls. Each placed actor cube references an actor table
+	# preset (HP/regen/enemy/drop_table_id/clothing). Build the body, push
+	# the override values, hook death → roll drop_table for a pickup.
+	if not MapState.actor_spawn_points.is_empty():
+		var actors_root := Node3D.new()
+		actors_root.name = "ActorSpawns"
+		add_child(actors_root)
+		var atables_by_id: Dictionary = {}
+		for t in MapState.actor_tables:
+			atables_by_id[String(t.get("id", ""))] = t
+		var itables_by_id: Dictionary = {}
+		for t in MapState.item_tables:
+			itables_by_id[String(t.get("id", ""))] = t
+		for sp in MapState.actor_spawn_points:
+			var atid: String = String(sp.get("table_id", ""))
+			var pos: Vector3 = sp.get("pos", Vector3.ZERO)
+			var preset: Dictionary = atables_by_id.get(atid, {})
+			if preset.is_empty():
+				continue
+			var actor_id: String = String(preset.get("actor_id", "dummy"))
+			var body: Node3D = _build_actor(actor_id, preset)
+			if body == null:
+				continue
+			actors_root.add_child(body)
+			body.global_position = pos
+			# Roll clothing per slot (stub — currently just logs the picks).
+			_roll_clothing_for(body, preset)
+			# Death drop hookup. Bind table by id at death-time so we can
+			# spawn the pickup at the actor's last position.
+			if body.has_signal("died"):
+				body.died.connect(func(drop_id: String, _xp: int):
+					if drop_id == "" or not itables_by_id.has(drop_id):
+						return
+					var result: Dictionary = _roll_table(itables_by_id[drop_id])
+					var rid: String = String(result.get("id", ""))
+					if rid == "" or rid == NOTHING_ITEM_ID:
+						return
+					var pickup := Area3D.new()
+					pickup.set_script(PICKUP)
+					pickup.item_id = rid
+					pickup.count = int(result.get("count", 1))
+					pickup.position = body.global_position + Vector3(0, 0.3, 0)
+					actors_root.add_child(pickup)
+				)
+
 	# Always-spawn vehicle. Sit it slightly off the player spawn at terrain
 	# height + clearance so it lands on the ground rather than clipping in.
 	var v := VehicleBody3D.new()
@@ -193,6 +240,93 @@ func _roll_table(table: Dictionary) -> Dictionary:
 			var count: int = randi_range(min_c, max_c)
 			return {"id": id, "count": count}
 	return {"id": NOTHING_ITEM_ID, "count": 1}
+
+func _build_actor(actor_id: String, preset: Dictionary) -> Node3D:
+	# Only "dummy" is wired right now. Constructed in code (not a packed
+	# scene) so editor-spawned copies can carry per-preset HP/regen/etc.
+	if actor_id != "dummy":
+		return null
+	var body := StaticBody3D.new()
+	body.set_script(DUMMY_SCRIPT)
+	body.hp_max = int(preset.get("hp", 500))
+	body.regen_rate = float(preset.get("regen", 0.0))
+	body.enemy = bool(preset.get("enemy", false))
+	body.xp_reward = int(preset.get("xp", 0))
+	body.drop_table_id = String(preset.get("drop_table_id", ""))
+	# Capsule body matches main.tscn's hand-built dummy dimensions.
+	var cap := CapsuleShape3D.new()
+	cap.radius = 0.45
+	cap.height = 1.7
+	var cs := CollisionShape3D.new()
+	cs.shape = cap
+	cs.position = Vector3(0, 0.85, 0)
+	body.add_child(cs)
+	var cap_mesh := CapsuleMesh.new()
+	cap_mesh.radius = 0.45
+	cap_mesh.height = 1.7
+	var mi := MeshInstance3D.new()
+	mi.mesh = cap_mesh
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = preset.get("color", Color(0.85, 0.55, 0.25, 1))
+	mat.roughness = 0.7
+	mi.material_override = mat
+	mi.position = Vector3(0, 0.85, 0)
+	body.add_child(mi)
+	# Head sphere — own static body w/ head script for the headshot multiplier.
+	var head := StaticBody3D.new()
+	head.set_script(DUMMY_HEAD_SCRIPT)
+	head.position = Vector3(0, 1.95, 0)
+	var head_shape := SphereShape3D.new()
+	head_shape.radius = 0.28
+	var head_cs := CollisionShape3D.new()
+	head_cs.shape = head_shape
+	head.add_child(head_cs)
+	var head_mesh := SphereMesh.new()
+	head_mesh.radius = 0.28
+	head_mesh.height = 0.56
+	var head_mi := MeshInstance3D.new()
+	head_mi.mesh = head_mesh
+	var head_mat := StandardMaterial3D.new()
+	head_mat.albedo_color = Color(0.95, 0.7, 0.4, 1)
+	head_mat.roughness = 0.7
+	head_mi.material_override = head_mat
+	head.add_child(head_mi)
+	body.add_child(head)
+	return body
+
+func _roll_clothing_for(body: Node3D, preset: Dictionary) -> void:
+	# Stub: roll each slot's mini loot table and stash on the actor as
+	# meta. Once clothing renders, this swaps to actually equipping models.
+	var clothing: Dictionary = preset.get("clothing", {})
+	if clothing.is_empty():
+		return
+	var equipped: Dictionary = {}
+	for slot_id in clothing.keys():
+		var entries: Array = clothing[slot_id]
+		if entries.is_empty():
+			continue
+		var total: float = 0.0
+		for e in entries:
+			var w: float = float(e.get("weight", 0.0))
+			if w < 0.0:
+				w = 0.0
+			total += w
+		if total <= 0.0:
+			continue
+		var roll: float = randf() * total
+		var acc: float = 0.0
+		for e in entries:
+			var w2: float = float(e.get("weight", 0.0))
+			if w2 < 0.0:
+				w2 = 0.0
+			acc += w2
+			if roll <= acc:
+				var picked: String = String(e.get("id", ""))
+				if picked != "" and picked != NOTHING_ITEM_ID:
+					equipped[slot_id] = picked
+				break
+	if not equipped.is_empty():
+		body.set_meta("clothing", equipped)
 
 func _disable_collision(root: Node) -> void:
 	# Walk the spawned object subtree and turn off every CollisionShape3D

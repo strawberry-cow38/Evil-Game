@@ -2,22 +2,32 @@ extends StaticBody3D
 
 # Training dummy. Soaks bullets, spits floating damage numbers.
 # Auto-respawns HP after a few seconds with no hits so you can keep shooting.
+# Tunables (hp_max, regen_*, enemy, xp_reward, drop_table_id) are vars so
+# editor-spawned actors can override them per spawn before _ready().
 
-const MAX_HP := 500
-const REGEN_DELAY := 3.0
-const REGEN_RATE := 250.0       # hp/sec once regen starts
+signal died(drop_table_id: String, xp_reward: int)
+
 const HEADSHOT_MULT := 1.5
 const POPUP_LIFETIME := 1.0
-const POPUP_RISE := 1.4         # m it floats up over its lifetime
-const POPUP_DRIFT := 0.6        # m random horiz drift
+const POPUP_RISE := 1.4
+const POPUP_DRIFT := 0.6
 
-var _hp: int = MAX_HP
+var hp_max: int = 500
+var regen_delay: float = 3.0
+var regen_rate: float = 250.0
+var enemy: bool = false
+var xp_reward: int = 0
+var drop_table_id: String = ""
+
+var _hp: int = 0
 var _last_hit_time: float = -1000.0
+var _dead: bool = false
 var _rng := RandomNumberGenerator.new()
 var _hp_label: Label3D
 
 func _ready() -> void:
 	_rng.randomize()
+	_hp = hp_max
 	_hp_label = Label3D.new()
 	_hp_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_hp_label.no_depth_test = true
@@ -31,14 +41,18 @@ func _ready() -> void:
 	_refresh_hp_label()
 
 func _process(delta: float) -> void:
+	if _dead:
+		return
+	if regen_rate <= 0.0:
+		return
 	var now := Time.get_ticks_msec() / 1000.0
-	if _hp < MAX_HP and now - _last_hit_time >= REGEN_DELAY:
-		var regenned: float = float(_hp) + REGEN_RATE * delta
-		_hp = min(int(regenned), MAX_HP)
+	if _hp < hp_max and now - _last_hit_time >= regen_delay:
+		var regenned: float = float(_hp) + regen_rate * delta
+		_hp = min(int(regenned), hp_max)
 		_refresh_hp_label()
 
 func take_damage(amount: int, headshot: bool = false) -> void:
-	if amount <= 0:
+	if amount <= 0 or _dead:
 		return
 	var dealt: int = amount
 	if headshot:
@@ -47,12 +61,19 @@ func take_damage(amount: int, headshot: bool = false) -> void:
 	_last_hit_time = Time.get_ticks_msec() / 1000.0
 	_refresh_hp_label()
 	_spawn_popup(dealt, headshot)
+	if _hp <= 0:
+		_die()
+
+func _die() -> void:
+	_dead = true
+	emit_signal("died", drop_table_id, xp_reward)
+	queue_free()
 
 func _refresh_hp_label() -> void:
 	if _hp_label == null:
 		return
-	_hp_label.text = "%d / %d" % [_hp, MAX_HP]
-	var ratio: float = float(_hp) / float(MAX_HP)
+	_hp_label.text = "%d / %d" % [_hp, hp_max]
+	var ratio: float = float(_hp) / float(hp_max)
 	_hp_label.modulate = Color(1.0, 0.4 + 0.6 * ratio, 0.4 + 0.6 * ratio)
 
 func _spawn_popup(amount: int, headshot: bool = false) -> void:
@@ -65,7 +86,6 @@ func _spawn_popup(amount: int, headshot: bool = false) -> void:
 	lbl.outline_size = 12 if headshot else 10
 	lbl.modulate = Color(1.0, 0.95, 0.20) if headshot else _damage_color(amount)
 	lbl.outline_modulate = Color(0, 0, 0)
-	# Spawn near hit zone with a little jitter so multi-shot pops don't overlap.
 	var jx: float = _rng.randf_range(-0.35, 0.35)
 	var jy: float = _rng.randf_range(1.4, 1.9) if headshot else _rng.randf_range(0.6, 1.6)
 	var jz: float = _rng.randf_range(-0.35, 0.35)
@@ -81,7 +101,6 @@ func _spawn_popup(amount: int, headshot: bool = false) -> void:
 	t.chain().tween_callback(func(): if is_instance_valid(lbl): lbl.queue_free())
 
 func _damage_color(amount: int) -> Color:
-	# Yellow → orange → red as damage gets juicier.
 	if amount >= 50:
 		return Color(1.0, 0.35, 0.25)
 	if amount >= 35:

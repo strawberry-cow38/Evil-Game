@@ -24,6 +24,8 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 		{"id": "s_player_delete", "label": "Delete Player Spawn"},
 		{"id": "s_items",         "label": "Items"},
 		{"id": "s_items_remove",  "label": "Remove Items"},
+		{"id": "s_actors",        "label": "Actors"},
+		{"id": "s_actors_remove", "label": "Remove Actors"},
 	],
 	"objects": [
 		{"id": "o_objects", "label": "Objects"},

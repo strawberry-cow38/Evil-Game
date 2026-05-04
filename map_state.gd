@@ -23,6 +23,15 @@ var item_tables: Array = []
 # Placed item-spawn cubes. Each entry: { "table_id": String, "pos": Vector3 }.
 # Play scene rolls the referenced table per entry to drop a single pickup.
 var item_spawn_points: Array = []
+# Actor presets authored in the editor. Each entry mirrors
+# editor_actor_tables_panel's preset shape (name/color/actor_id/hp/level/
+# weapon/drop_table_id/xp/regen/enemy/clothing). Play scene reads these
+# when bootstrapping an actor spawn.
+var actor_tables: Array = []
+# Placed actor-spawn cubes. Each entry: { "table_id": String, "pos": Vector3 }.
+# Play scene rolls clothing per slot and instantiates the actor of the
+# preset's actor_id at this position.
+var actor_spawn_points: Array = []
 # Sky/sun/ambient state authored via Environment → Lighting. Empty dict
 # = play scene uses main.tscn's hardcoded defaults. See
 # editor_lighting_panel.gd DEFAULTS for key list.
@@ -39,6 +48,8 @@ func clear() -> void:
 	placed_props.clear()
 	item_tables.clear()
 	item_spawn_points.clear()
+	actor_tables.clear()
+	actor_spawn_points.clear()
 	lighting.clear()
 
 func random_player_spawn() -> Vector3:

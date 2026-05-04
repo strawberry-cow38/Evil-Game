@@ -21,6 +21,8 @@ const TOOL_S_PLACE_SPAWN := "s_player_place"
 const TOOL_S_DELETE_SPAWN := "s_player_delete"
 const TOOL_S_ITEMS := "s_items"
 const TOOL_S_ITEMS_REMOVE := "s_items_remove"
+const TOOL_S_ACTORS := "s_actors"
+const TOOL_S_ACTORS_REMOVE := "s_actors_remove"
 const TOOL_L_EFFECTS := "l_effects"
 const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
@@ -28,6 +30,7 @@ const TOOL_E_LIGHTING := "e_lighting"
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
 const ITEM_SPAWN_BOX_SCRIPT := preload("res://editor_item_spawn_box.gd")
+const ACTOR_SPAWN_BOX_SCRIPT := preload("res://editor_actor_spawn_box.gd")
 const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 const CONTAINER_PANEL_SCRIPT := preload("res://editor_container_panel.gd")
 const LIGHTING_PANEL_SCRIPT := preload("res://editor_lighting_panel.gd")
@@ -52,6 +55,8 @@ const SPAWN_DELETE_RADIUS := 2.5  # metres — click within this of a marker to 
 @onready var _objects_panel: PanelContainer = $UI/ObjectsPanel
 @onready var _item_tables_panel: PanelContainer = $UI/ItemTablesPanel
 @onready var _item_picker_panel: PanelContainer = $UI/ItemPickerPanel
+@onready var _actor_tables_panel: PanelContainer = $UI/ActorTablesPanel
+@onready var _clothing_picker_panel: PanelContainer = $UI/ClothingPickerPanel
 @onready var _space_toggle: PanelContainer = $UI/SpaceToggle
 
 var _active_tool: String = TOOL_NONE
@@ -80,6 +85,14 @@ var _selected_prop: Node3D = null
 # colored cubes whose contents come from a roll table at play-mode
 # bootstrap.
 var _placed_item_spawns: Array[Node3D] = []
+# Actor-spawn cubes (Spawns → Actors). Same shape as item spawns but
+# routed through the actor-tables panel + the actor catalog at play
+# bootstrap.
+var _placed_actor_spawns: Array[Node3D] = []
+# Translucent cube preview shown while the Spawns → Actors tool is
+# active, tinted to the active actor table's color.
+var _actor_spawn_ghost: MeshInstance3D = null
+var _actor_spawn_ghost_mat: StandardMaterial3D = null
 var _armed_effect_id: String = ""
 var _armed_object_id: String = ""
 var _gizmo: Node3D = null
@@ -157,6 +170,14 @@ func _ready() -> void:
 	_item_tables_panel.active_table_changed.connect(_on_active_table_changed)
 	_item_tables_panel.visible = false
 	_item_picker_panel.visible = false
+	_actor_tables_panel.set_picker(_clothing_picker_panel)
+	_actor_tables_panel.active_table_changed.connect(_on_active_actor_table_changed)
+	_actor_tables_panel.visible = false
+	_clothing_picker_panel.visible = false
+	# Drop-table dropdown on the actor panel mirrors whatever's in the
+	# item-tables panel, so push the current list now and any time the item
+	# panel changes.
+	_actor_tables_panel.set_item_tables_for_drop(_item_tables_panel.tables)
 	_space_toggle.space_changed.connect(_on_space_changed)
 	_radius_widget.radius_changed.connect(_on_radius_changed)
 	_radius_widget.strength_changed.connect(_on_strength_changed)
@@ -183,6 +204,19 @@ func _ready() -> void:
 	_item_spawn_ghost.material_override = _item_spawn_ghost_mat
 	_item_spawn_ghost.visible = false
 	add_child(_item_spawn_ghost)
+	# Actor-spawn ghost: same idea as the item-spawn ghost but taller so
+	# the user can tell them apart at a glance.
+	_actor_spawn_ghost_mat = StandardMaterial3D.new()
+	_actor_spawn_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_actor_spawn_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_actor_spawn_ghost_mat.albedo_color = Color(1, 1, 1, 0.45)
+	_actor_spawn_ghost = MeshInstance3D.new()
+	var ag_mesh := BoxMesh.new()
+	ag_mesh.size = Vector3(0.7, 1.6, 0.7)
+	_actor_spawn_ghost.mesh = ag_mesh
+	_actor_spawn_ghost.material_override = _actor_spawn_ghost_mat
+	_actor_spawn_ghost.visible = false
+	add_child(_actor_spawn_ghost)
 	# Transform gizmo — follows the selected effect, hidden until Q/W/R.
 	_gizmo = Node3D.new()
 	_gizmo.set_script(GIZMO_SCRIPT)
@@ -303,6 +337,21 @@ func _ready() -> void:
 			_spawn_item_box(
 				String(sp.get("table_id", "")),
 				color_by_id.get(String(sp.get("table_id", "")), Color.WHITE),
+				sp.get("pos", Vector3.ZERO),
+			)
+	if MapState.actor_tables.size() > 0:
+		_actor_tables_panel.set_tables(MapState.actor_tables)
+	# Refresh drop-table dropdown options — item tables may have been
+	# pulled from MapState above.
+	_actor_tables_panel.set_item_tables_for_drop(_item_tables_panel.tables)
+	if MapState.actor_spawn_points.size() > 0:
+		var actor_color_by_id: Dictionary = {}
+		for t in MapState.actor_tables:
+			actor_color_by_id[String(t.get("id", ""))] = t.get("color", Color.WHITE)
+		for sp in MapState.actor_spawn_points:
+			_spawn_actor_box(
+				String(sp.get("table_id", "")),
+				actor_color_by_id.get(String(sp.get("table_id", "")), Color.WHITE),
 				sp.get("pos", Vector3.ZERO),
 			)
 
@@ -440,6 +489,19 @@ func _snapshot_to_mapstate() -> void:
 			"table_id": String(box.table_id),
 			"pos": box.global_position,
 		})
+	# Actor tables + placed actor cubes — same deep-dup pattern as items so
+	# the play scene never aliases editor state.
+	MapState.actor_tables.clear()
+	for t in _actor_tables_panel.tables:
+		MapState.actor_tables.append(t.duplicate(true))
+	MapState.actor_spawn_points.clear()
+	for box in _placed_actor_spawns:
+		if not is_instance_valid(box):
+			continue
+		MapState.actor_spawn_points.append({
+			"table_id": String(box.table_id),
+			"pos": box.global_position,
+		})
 
 func _restore_from_mapstate() -> void:
 	# Inverse of _snapshot_to_mapstate. Wipes whatever's currently in the
@@ -459,6 +521,10 @@ func _restore_from_mapstate() -> void:
 		if is_instance_valid(box):
 			box.queue_free()
 	_placed_item_spawns.clear()
+	for box in _placed_actor_spawns:
+		if is_instance_valid(box):
+			box.queue_free()
+	_placed_actor_spawns.clear()
 	for s in _spawn_visuals:
 		if is_instance_valid(s):
 			s.queue_free()
@@ -510,6 +576,17 @@ func _restore_from_mapstate() -> void:
 	# Tables -> picker panel + lighting -> sky/sun.
 	if _item_tables_panel != null:
 		_item_tables_panel.set_tables(MapState.item_tables)
+	if _actor_tables_panel != null:
+		_actor_tables_panel.set_tables(MapState.actor_tables)
+		_actor_tables_panel.set_item_tables_for_drop(_item_tables_panel.tables)
+	# Actor cubes — colour comes from the matching actor table.
+	var actor_color_by_id: Dictionary = {}
+	for t in MapState.actor_tables:
+		actor_color_by_id[String(t.get("id", ""))] = t.get("color", Color.WHITE)
+	for sp in MapState.actor_spawn_points:
+		var atid: String = String(sp.get("table_id", ""))
+		var apos: Vector3 = sp.get("pos", Vector3.ZERO)
+		_spawn_actor_box(atid, actor_color_by_id.get(atid, Color.WHITE), apos)
 	if not MapState.lighting.is_empty():
 		_lighting_panel.set_state(MapState.lighting)
 		_apply_lighting(MapState.lighting)
@@ -581,6 +658,8 @@ func _process(delta: float) -> void:
 	_spawn_ghost.visible = false
 	if _item_spawn_ghost != null:
 		_item_spawn_ghost.visible = false
+	if _actor_spawn_ghost != null:
+		_actor_spawn_ghost.visible = false
 	_flatten_ring.hide_ring()
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
@@ -621,9 +700,27 @@ func _process(delta: float) -> void:
 		_item_spawn_ghost_mat.albedo_color = Color(col.r, col.g, col.b, 0.45)
 		_item_spawn_ghost.visible = true
 		return
+	# Actor-spawn ghost: tinted to active actor table colour.
+	if _active_tool == TOOL_S_ACTORS:
+		_brush_ring.hide_ring()
+		if _is_over_ui():
+			return
+		var at: Dictionary = _actor_tables_panel.get_active_table()
+		if at.is_empty():
+			return
+		var ag_hit := _raycast_cursor()
+		if ag_hit.is_empty():
+			return
+		var agp: Vector3 = ag_hit.position
+		agp.y = _terrain.sample_height(agp)
+		_actor_spawn_ghost.global_position = agp + Vector3(0, 0.8, 0)
+		var acol: Color = at.get("color", Color.WHITE)
+		_actor_spawn_ghost_mat.albedo_color = Color(acol.r, acol.g, acol.b, 0.45)
+		_actor_spawn_ghost.visible = true
+		return
 	# Brush ring only makes sense for terrain brushes; spawn tools use
 	# pinpoint clicks.
-	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE]
+	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE, TOOL_S_ACTORS_REMOVE]
 	if not is_brush_tool:
 		_brush_ring.hide_ring()
 		return
@@ -710,6 +807,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		p_i.y = _terrain.sample_height(p_i)
 		_spawn_item_box(String(t.get("id", "")), t.get("color", Color.WHITE), p_i)
 		return
+	# Actor-spawn place: drop a colored cube tied to the active actor table.
+	if _active_tool == TOOL_S_ACTORS and event.pressed:
+		var at: Dictionary = _actor_tables_panel.get_active_table()
+		if at.is_empty():
+			return
+		var hit_a := _raycast_cursor()
+		if hit_a.is_empty():
+			return
+		var p_a: Vector3 = hit_a.position
+		p_a.y = _terrain.sample_height(p_a)
+		_spawn_actor_box(String(at.get("id", "")), at.get("color", Color.WHITE), p_a)
+		return
 	# Spawn delete: each press removes the closest marker within radius.
 	if _active_tool == TOOL_S_DELETE_SPAWN and event.pressed:
 		var hit3 := _raycast_cursor()
@@ -745,6 +854,8 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 			_terrain.smooth_brush(world_pos, _brush_radius, 6.0 * s, delta)
 		TOOL_S_ITEMS_REMOVE:
 			_remove_item_spawns_in_radius(world_pos, _brush_radius)
+		TOOL_S_ACTORS_REMOVE:
+			_remove_actor_spawns_in_radius(world_pos, _brush_radius)
 
 func _raycast_cursor() -> Dictionary:
 	# Two cursor modes:
@@ -770,7 +881,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _actor_tables_panel, _clothing_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -793,6 +904,13 @@ func _on_tool_picked(tool_id: String) -> void:
 	_item_tables_panel.visible = (tool_id == TOOL_S_ITEMS)
 	if tool_id != TOOL_S_ITEMS:
 		_item_picker_panel.visible = false
+	# Push fresh item-table list into the actor panel so the Drop dropdown
+	# is current the moment the user opens the Actors tool.
+	if tool_id == TOOL_S_ACTORS:
+		_actor_tables_panel.set_item_tables_for_drop(_item_tables_panel.tables)
+	_actor_tables_panel.visible = (tool_id == TOOL_S_ACTORS)
+	if tool_id != TOOL_S_ACTORS:
+		_clothing_picker_panel.visible = false
 	if _lighting_panel != null:
 		_lighting_panel.visible = (tool_id == TOOL_E_LIGHTING)
 	# Gizmo only matters while a placement tool is active.
@@ -822,6 +940,47 @@ func _on_active_table_changed(_idx: int) -> void:
 	# Refresh the container panel too so newly-created or renamed tables
 	# show up in its dropdown without needing to reselect the crate.
 	_refresh_container_panel()
+	# Same story for the actor panel's drop-table dropdown — it caches the
+	# item-tables list so renames/creates need a fresh push.
+	if _actor_tables_panel != null:
+		_actor_tables_panel.set_item_tables_for_drop(_item_tables_panel.tables)
+
+func _on_active_actor_table_changed(_idx: int) -> void:
+	# Live-recolor every actor cube whose table id matches the active
+	# table's color, mirroring the item-spawn hook.
+	for box in _placed_actor_spawns:
+		if not is_instance_valid(box):
+			continue
+		var t: Dictionary = _find_actor_table(String(box.table_id))
+		if t.is_empty():
+			continue
+		box.set_color(t.get("color", Color.WHITE))
+
+func _find_actor_table(table_id: String) -> Dictionary:
+	for t in _actor_tables_panel.tables:
+		if String(t.get("id", "")) == table_id:
+			return t
+	return {}
+
+func _spawn_actor_box(table_id: String, color: Color, world_pos: Vector3) -> void:
+	var box: Node3D = Node3D.new()
+	box.set_script(ACTOR_SPAWN_BOX_SCRIPT)
+	box.table_id = table_id
+	box.color = color
+	add_child(box)
+	box.global_position = world_pos
+	_placed_actor_spawns.append(box)
+
+func _remove_actor_spawns_in_radius(world_pos: Vector3, radius: float) -> void:
+	var keep: Array[Node3D] = []
+	for box in _placed_actor_spawns:
+		if not is_instance_valid(box):
+			continue
+		if box.global_position.distance_to(world_pos) <= radius:
+			box.queue_free()
+		else:
+			keep.append(box)
+	_placed_actor_spawns = keep
 
 func _find_table(table_id: String) -> Dictionary:
 	for t in _item_tables_panel.tables:

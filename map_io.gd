@@ -118,6 +118,18 @@ func _snapshot_state() -> Dictionary:
 			lighting[k] = _color_to_dict(v)
 		else:
 			lighting[k] = v
+	var atables: Array = []
+	for t in MapState.actor_tables:
+		var atd: Dictionary = t.duplicate(true)
+		if atd.has("color"):
+			atd["color"] = _color_to_dict(atd["color"])
+		atables.append(atd)
+	var aspawn_pts: Array = []
+	for sp in MapState.actor_spawn_points:
+		var aspd: Dictionary = sp.duplicate()
+		if aspd.has("pos"):
+			aspd["pos"] = _v3_to_dict(aspd["pos"])
+		aspawn_pts.append(aspd)
 	return {
 		"schema": SCHEMA_VERSION,
 		"heights": heights_arr,
@@ -127,6 +139,8 @@ func _snapshot_state() -> Dictionary:
 		"placed_props": props,
 		"item_tables": tables,
 		"item_spawn_points": spawn_pts,
+		"actor_tables": atables,
+		"actor_spawn_points": aspawn_pts,
 		"lighting": lighting,
 	}
 
@@ -157,6 +171,16 @@ func _apply_state(data: Dictionary) -> void:
 		if spd.has("pos"):
 			spd["pos"] = _dict_to_v3(spd["pos"])
 		MapState.item_spawn_points.append(spd)
+	for t in data.get("actor_tables", []):
+		var atd: Dictionary = t.duplicate(true)
+		if atd.has("color"):
+			atd["color"] = _dict_to_color(atd["color"])
+		MapState.actor_tables.append(atd)
+	for sp in data.get("actor_spawn_points", []):
+		var aspd: Dictionary = sp.duplicate()
+		if aspd.has("pos"):
+			aspd["pos"] = _dict_to_v3(aspd["pos"])
+		MapState.actor_spawn_points.append(aspd)
 	var lighting: Dictionary = data.get("lighting", {})
 	var out_lighting: Dictionary = {}
 	for k in lighting.keys():
