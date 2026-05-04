@@ -15,12 +15,14 @@ extends VehicleBody3D
 # the vehicle's chase camera. On exit we pop the player out next to
 # the driver door at the vehicle's current world position.
 
-const ENGINE_FORCE := 320.0
-const REVERSE_FORCE := 180.0
-const BRAKE_FORCE := 6.0
-const PASSIVE_BRAKE := 0.4   # mild drag when no input so the car coasts to a stop
+const ENGINE_FORCE := 650.0
+const REVERSE_FORCE := 360.0
+const BRAKE_FORCE := 14.0
+const PASSIVE_BRAKE := 0.6   # mild drag when no input so the car coasts to a stop
 const STEER_MAX := 0.55
 const STEER_SPEED := 4.0     # how fast steering eases toward target
+const HANDBRAKE_FORCE := 32.0
+const HANDBRAKE_TAP_S := 0.18  # space held shorter than this = toggle latched
 
 const ENTER_RANGE := 4.0
 
@@ -42,6 +44,8 @@ var _camera: Camera3D = null
 var _camera_pivot: Node3D = null
 var _steer: float = 0.0
 var _enter_locked_until: float = 0.0  # debounce E so it doesn't enter+exit same press
+var _space_press_time: float = -1.0   # -1 = not pressed; otherwise wall-clock seconds
+var _handbrake_latched: bool = false  # toggled by tap-release; held independently while space down
 
 func _ready() -> void:
 	mass = 900.0
@@ -148,8 +152,10 @@ func _ready() -> void:
 	_camera_pivot.position = Vector3(0, 1.6, -0.2)
 	add_child(_camera_pivot)
 	_camera = Camera3D.new()
-	_camera.position = Vector3(0, 1.4, 5.5)
-	_camera.rotation = Vector3(deg_to_rad(-12.0), PI, 0)
+	# Chase cam sits on the +Z side now (the side W drives away from), so the
+	# driver looks toward -Z motion direction with the car ahead of them.
+	_camera.position = Vector3(0, 1.4, -5.5)
+	_camera.rotation = Vector3(deg_to_rad(-12.0), 0, 0)
 	_camera.fov = 70.0
 	_camera_pivot.add_child(_camera)
 	# Mass on the body itself drags the centre of mass too high if the
@@ -165,17 +171,33 @@ func _physics_process(delta: float) -> void:
 		var steer_in: float = Input.get_action_strength("move_left") - Input.get_action_strength("move_right")
 		var target_engine: float = 0.0
 		var target_brake: float = PASSIVE_BRAKE
+		# Engine force signs are inverted from the Godot default so W drives the
+		# car along +local-Z (matches the chase-cam orientation).
 		if fwd > 0.0:
-			target_engine = ENGINE_FORCE * fwd
+			target_engine = -ENGINE_FORCE * fwd
 			target_brake = 0.0
 		elif fwd < 0.0:
-			# Reverse if nearly stopped, otherwise brake.
+			# Reverse if nearly stopped, otherwise brake. Forward motion is +Z
+			# now, so "still going forward" means local_v.z is positive.
 			var local_v: Vector3 = global_transform.basis.transposed() * linear_velocity
-			if local_v.z > -0.5:
-				target_engine = -REVERSE_FORCE * absf(fwd)
+			if local_v.z < 0.5:
+				target_engine = REVERSE_FORCE * absf(fwd)
 				target_brake = 0.0
 			else:
 				target_brake = BRAKE_FORCE * absf(fwd)
+		# Handbrake: tap space toggles latched on/off, hold space forces it on
+		# while held regardless of latched state.
+		var now_s: float = Time.get_ticks_msec() / 1000.0
+		if Input.is_action_just_pressed("jump"):
+			_space_press_time = now_s
+		if Input.is_action_just_released("jump"):
+			if _space_press_time >= 0.0 and (now_s - _space_press_time) < HANDBRAKE_TAP_S:
+				_handbrake_latched = not _handbrake_latched
+			_space_press_time = -1.0
+		var handbrake_on: bool = _handbrake_latched or Input.is_action_pressed("jump")
+		if handbrake_on:
+			target_brake = max(target_brake, HANDBRAKE_FORCE)
+			target_engine = 0.0
 		engine_force = target_engine
 		brake = target_brake
 		# Steering eases toward target so the wheels don't snap.
@@ -243,6 +265,8 @@ func exit_driver() -> void:
 	brake = BRAKE_FORCE
 	_steer = 0.0
 	steering = 0.0
+	_handbrake_latched = false
+	_space_press_time = -1.0
 	_enter_locked_until = Time.get_ticks_msec() / 1000.0 + 0.3
 
 func _find_camera(n: Node) -> Camera3D:
