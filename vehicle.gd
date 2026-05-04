@@ -15,8 +15,8 @@ extends VehicleBody3D
 # the vehicle's chase camera. On exit we pop the player out next to
 # the driver door at the vehicle's current world position.
 
-const ENGINE_FORCE := 650.0
-const REVERSE_FORCE := 360.0
+const ENGINE_FORCE := 2400.0
+const REVERSE_FORCE := 1200.0
 const BRAKE_FORCE := 14.0
 const PASSIVE_BRAKE := 0.6   # mild drag when no input so the car coasts to a stop
 const STEER_MAX := 0.55
@@ -24,15 +24,20 @@ const STEER_SPEED := 4.0     # how fast steering eases toward target
 const HANDBRAKE_FORCE := 32.0
 const HANDBRAKE_TAP_S := 0.18  # space held shorter than this = toggle latched
 
-# Manual transmission. Higher gear = lower torque multiplier = higher top speed
-# at any given RPM. Reverse uses its own ratio (negative is implicit in REVERSE_FORCE).
+# 90s-econobox manual. Final drive picked so each gear caps at a clearly
+# different top speed: ~7, 11, 16, 22, 29 m/s (≈25 / 40 / 58 / 80 / 105 km/h).
 const GEAR_RATIOS: Array[float] = [3.6, 2.4, 1.7, 1.25, 0.95]
-const FINAL_DRIVE := 3.5
+const FINAL_DRIVE := 7.8
 const WHEEL_RADIUS := 0.34
-const IDLE_RPM := 800.0
-const REDLINE_RPM := 7500.0
-const REV_LIMITER_CUT := 7600.0   # engine_force gates above this until RPM drops back
+const IDLE_RPM := 700.0
+const REDLINE_RPM := 6200.0
+const REV_LIMITER_CUT := 6300.0   # engine_force gates above this until RPM drops back
 const RPM_FOLLOW_RATE := 9.0      # how fast displayed RPM eases toward target each second
+# Shift "bump": clutch-disengaged window after every shift where engine_force
+# drops to zero and a small drag pulses through, so the driver feels the gear
+# change as a momentum hiccup rather than a silent torque tweak.
+const SHIFT_COOLDOWN_S := 0.45
+const SHIFT_BUMP_BRAKE := 3.0
 
 const ENTER_RANGE := 4.0
 
@@ -59,6 +64,7 @@ var _handbrake_latched: bool = false  # toggled by tap-release; held independent
 var _gear: int = 1                    # 1..GEAR_RATIOS.size(); reverse handled via S input
 var _rpm: float = IDLE_RPM            # displayed RPM, eased toward _target_rpm each frame
 var _rev_limited: bool = false        # true while the limiter is currently cutting fuel
+var _shift_cooldown: float = 0.0      # seconds remaining in clutch-disengaged window
 
 func _ready() -> void:
 	mass = 900.0
@@ -214,7 +220,13 @@ func _physics_process(delta: float) -> void:
 		# Engine force signs are inverted from the Godot default so W drives the
 		# car along +local-Z (matches the chase-cam orientation).
 		var torque_mult: float = ratio / GEAR_RATIOS[0]
-		if fwd > 0.0 and not _rev_limited:
+		# Shift cooldown: clutch is "in", no power reaches the wheels and a small
+		# drag bleeds momentum so the driver feels the gear change.
+		if _shift_cooldown > 0.0:
+			_shift_cooldown -= delta
+			target_engine = 0.0
+			target_brake = max(target_brake, SHIFT_BUMP_BRAKE)
+		elif fwd > 0.0 and not _rev_limited:
 			target_engine = -ENGINE_FORCE * fwd * torque_mult
 			target_brake = 0.0
 		elif fwd < 0.0:
@@ -278,10 +290,12 @@ func is_rev_limited() -> bool:
 func _shift_up() -> void:
 	if _gear < GEAR_RATIOS.size():
 		_gear += 1
+		_shift_cooldown = SHIFT_COOLDOWN_S
 
 func _shift_down() -> void:
 	if _gear > 1:
 		_gear -= 1
+		_shift_cooldown = SHIFT_COOLDOWN_S
 
 func driver_seat_world() -> Vector3:
 	if _seat_markers.is_empty():
@@ -331,6 +345,7 @@ func exit_driver() -> void:
 	_gear = 1
 	_rpm = IDLE_RPM
 	_rev_limited = false
+	_shift_cooldown = 0.0
 	_enter_locked_until = Time.get_ticks_msec() / 1000.0 + 0.3
 
 func _find_camera(n: Node) -> Camera3D:
