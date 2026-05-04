@@ -21,10 +21,20 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var fps := Engine.get_frames_per_second()
 	var speed := 0.0
+	var label_extra := ""
 	if _player:
-		var v := _player.velocity
-		speed = Vector2(v.x, v.z).length()
-	_label.text = "FPS: %d\nSpeed: %.2f m/s" % [fps, speed]
+		# When seated as driver the player's own velocity is forced to zero, so
+		# fall through to the vehicle's linear_velocity for the readout.
+		if _player.has_method("is_in_vehicle") and _player.is_in_vehicle():
+			var veh: Node = _player.get_vehicle()
+			if veh is RigidBody3D:
+				var vv: Vector3 = (veh as RigidBody3D).linear_velocity
+				speed = Vector2(vv.x, vv.z).length()
+				label_extra = "  (driving)"
+		else:
+			var v := _player.velocity
+			speed = Vector2(v.x, v.z).length()
+	_label.text = "FPS: %d\nSpeed: %.2f m/s%s" % [fps, speed, label_extra]
 
 	if _weapon and _ammo_label:
 		var equipped: bool = not _weapon.has_method("is_equipped") or _weapon.is_equipped()

@@ -199,6 +199,9 @@ func has_interact_target() -> bool:
 func is_in_vehicle() -> bool:
 	return _vehicle != null
 
+func get_vehicle() -> Node:
+	return _vehicle
+
 # Called by vehicle.gd on enter (with the vehicle node) and on exit (with null).
 # We just stash a reference; _physics_process / _process check it and early-out.
 func set_in_vehicle(v: Node) -> void:
