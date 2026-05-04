@@ -119,6 +119,13 @@ var _object_props_panel: PanelContainer = null
 # after a cut so V drops the copy where the cursor is; false after a
 # copy so V re-stamps at the original transform (paste-in-place).
 var _object_clipboard: Dictionary = {}
+# Transform clipboard for the Ctrl+B / Ctrl+N pose-snapshot tool. The
+# bottom-left Global/Local toggle gates what gets captured: global only
+# copies world position, local copies the full world transform (pos +
+# rotation + scale). Snapshot survives the source being deleted — the
+# values live in this dict, not in any node ref.
+var _xform_clipboard: Dictionary = {}
+var _use_local_space: bool = false
 @onready var _world_env: WorldEnvironment = $WorldEnvironment
 @onready var _sun: DirectionalLight3D = $Sun
 
@@ -272,6 +279,10 @@ func _input(event: InputEvent) -> void:
 			_clipboard_cut()
 		elif event.keycode == KEY_V:
 			_clipboard_paste()
+		elif event.keycode == KEY_B:
+			_xform_capture()
+		elif event.keycode == KEY_N:
+			_xform_apply()
 
 func _enter_play_mode() -> void:
 	# Snapshot the current map into the autoload so the play scene can
@@ -595,6 +606,7 @@ func _find_table(table_id: String) -> Dictionary:
 	return {}
 
 func _on_space_changed(use_local: bool) -> void:
+	_use_local_space = use_local
 	if _gizmo != null:
 		_gizmo.set_use_local(use_local)
 
@@ -837,6 +849,43 @@ func _clipboard_paste() -> void:
 	# keeps stamping copies at the source xform.
 	_object_clipboard["paste_at_mouse"] = false
 	_object_clipboard["xform"] = box.global_transform
+
+# Pose snapshot tied to the bottom-left Global/Local toggle. Global mode
+# only stamps position; Local mode stamps the full transform (pos + rot
+# + scale). The snapshot lives in _xform_clipboard, so deleting the
+# source object doesn't lose the saved pose.
+func _xform_capture() -> void:
+	if _selected_prop == null or not is_instance_valid(_selected_prop):
+		return
+	if _use_local_space:
+		_xform_clipboard = {
+			"mode":     "local",
+			"position": _selected_prop.global_position,
+			"basis":    _selected_prop.global_transform.basis,
+		}
+	else:
+		_xform_clipboard = {
+			"mode":     "global",
+			"position": _selected_prop.global_position,
+		}
+
+func _xform_apply() -> void:
+	if _selected_prop == null or not is_instance_valid(_selected_prop):
+		return
+	if _xform_clipboard.is_empty():
+		return
+	var mode: String = String(_xform_clipboard.get("mode", "global"))
+	if mode == "local":
+		var t: Transform3D = Transform3D(
+			_xform_clipboard.get("basis", Basis()),
+			_xform_clipboard.get("position", Vector3.ZERO),
+		)
+		_selected_prop.global_transform = t
+	else:
+		_selected_prop.global_position = _xform_clipboard.get("position", Vector3.ZERO)
+	# Rebind the gizmo so its handles redraw at the new pose.
+	if _gizmo != null:
+		_gizmo.set_target(_selected_prop)
 
 func _snapshot_object_box(box: Node3D) -> Dictionary:
 	return {
