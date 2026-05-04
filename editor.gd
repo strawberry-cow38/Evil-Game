@@ -531,7 +531,13 @@ func _close_pause_menu() -> void:
 	_pause_menu.close()
 
 func _is_pause_menu_open() -> bool:
-	return _pause_menu != null and _pause_menu.is_open()
+	# Read the wrap's visibility — _pause_menu itself stays visible inside
+	# the wrap so its own Controls (LineEdit etc) lay out correctly. The
+	# wrap is the gate, not the panel.
+	if _pause_menu == null:
+		return false
+	var wrap: Node = _pause_menu.get_meta("wrap")
+	return wrap is Control and (wrap as Control).visible
 
 func _on_pause_save(save_name: String) -> void:
 	_snapshot_to_mapstate()
