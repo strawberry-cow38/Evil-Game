@@ -36,8 +36,8 @@ var _close_locked_until_msec: int = 0
 # Cached row metadata so the index in each ItemList maps back to a real
 # entry dict — `_player_rows[i]` is the entry currently rendered at row i
 # on the player side.
-var _player_rows: Array[Dictionary] = []
-var _container_rows: Array[Dictionary] = []
+var _player_rows: Array = []
+var _container_rows: Array = []
 
 var _root: Control
 var _bg: ColorRect
