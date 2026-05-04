@@ -249,6 +249,10 @@ func _spawn_corpse(parent: Node, pos: Vector3, color: Color, label: String, drop
 	corpse.set("label_name", label)
 	parent.add_child(corpse)
 	corpse.global_position = pos
+	# Player walks through corpses (vehicles + bullets still collide).
+	var player_node := get_node_or_null("Player")
+	if player_node is CollisionObject3D and corpse.has_method("ignore_collision_with"):
+		corpse.ignore_collision_with(player_node)
 	if drop_id == "" or not itables_by_id.has(drop_id):
 		return
 	var table: Dictionary = itables_by_id[drop_id]

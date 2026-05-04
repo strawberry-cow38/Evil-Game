@@ -10,6 +10,7 @@ const CORPSE_SIZE := Vector3(0.5, 0.4, 1.6)   # x=width, y=height (laying flat),
 const CORPSE_MAX_WEIGHT := 200.0
 
 var corpse_color: Color = Color(0.6, 0.4, 0.3, 1)
+var _body: StaticBody3D
 
 func _ready() -> void:
 	# Override crate defaults before our parent's _ready builds visual/collision.
@@ -50,12 +51,21 @@ func _build_visual() -> void:
 	add_child(head_mi)
 
 func _build_collision() -> void:
-	var body := StaticBody3D.new()
-	body.position = Vector3(0, CORPSE_SIZE.y * 0.5, 0)
-	body.set_meta("container", self)
+	_body = StaticBody3D.new()
+	_body.position = Vector3(0, CORPSE_SIZE.y * 0.5, 0)
+	_body.set_meta("container", self)
 	var shape := CollisionShape3D.new()
 	var box_shape := BoxShape3D.new()
 	box_shape.size = CORPSE_SIZE
 	shape.shape = box_shape
-	body.add_child(shape)
-	add_child(body)
+	_body.add_child(shape)
+	add_child(_body)
+
+# Tell the corpse's collider to ignore `other` so the player can walk
+# through it. Corpse still collides with everything else (vehicles,
+# bullets, interact ray) and the player's interact ray still finds the
+# `container` meta because raycasts ignore exception lists they aren't
+# explicitly added to.
+func ignore_collision_with(other: CollisionObject3D) -> void:
+	if _body != null and other != null:
+		_body.add_collision_exception_with(other)
