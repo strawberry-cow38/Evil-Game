@@ -76,6 +76,32 @@ func _ready() -> void:
 	cabin.material_override = cabin_mat
 	cabin.position = Vector3(0, 1.15, 0.2)
 	add_child(cabin)
+	# --- big forward arrow on the roof --------------------------------
+	# Shaft (long box) + head (prism via PrismMesh) so you can spot which way
+	# the car will drive from any angle.
+	var arrow_mat := StandardMaterial3D.new()
+	arrow_mat.albedo_color = Color(1.0, 0.95, 0.1)
+	arrow_mat.emission_enabled = true
+	arrow_mat.emission = Color(1.0, 0.85, 0.0)
+	arrow_mat.emission_energy_multiplier = 0.6
+	var shaft := MeshInstance3D.new()
+	var sm := BoxMesh.new()
+	sm.size = Vector3(0.35, 0.08, 1.6)
+	shaft.mesh = sm
+	shaft.material_override = arrow_mat
+	# Forward in Godot is -Z. Roof sits ~1.45y; centre shaft slightly behind so
+	# the head pokes past the front of the cabin.
+	shaft.position = Vector3(0, 1.55, -0.2)
+	add_child(shaft)
+	var head := MeshInstance3D.new()
+	var pm := PrismMesh.new()
+	pm.size = Vector3(0.9, 0.08, 0.7)
+	head.mesh = pm
+	head.material_override = arrow_mat
+	# PrismMesh tip points along +Y by default; rotate so tip points -Z (forward).
+	head.rotation = Vector3(deg_to_rad(-90.0), 0, 0)
+	head.position = Vector3(0, 1.55, -1.35)
+	add_child(head)
 	# --- wheels --------------------------------------------------------
 	# Layout: front-left, front-right, rear-left, rear-right.
 	var wheel_specs: Array = [
