@@ -39,6 +39,14 @@ const RPM_FOLLOW_RATE := 9.0      # how fast displayed RPM eases toward target e
 const SHIFT_COOLDOWN_S := 0.45
 const SHIFT_BUMP_BRAKE := 3.0
 
+# Procedural audio constants. Engine fundamental sweeps from a low rumble at
+# idle up to a higher honk at redline; the second oscillator one octave up
+# adds the rasp.
+const AUDIO_SAMPLE_RATE := 22050
+const ENGINE_BASE_HZ := 38.0
+const ENGINE_TOP_HZ := 230.0
+const SHIFT_SOUND_S := 0.16
+
 const ENTER_RANGE := 4.0
 
 # Local-space seat positions (relative to car body origin).
@@ -65,6 +73,16 @@ var _gear: int = 1                    # 1..GEAR_RATIOS.size(); reverse handled v
 var _rpm: float = IDLE_RPM            # displayed RPM, eased toward _target_rpm each frame
 var _rev_limited: bool = false        # true while the limiter is currently cutting fuel
 var _shift_cooldown: float = 0.0      # seconds remaining in clutch-disengaged window
+var _throttle: float = 0.0            # last frame's W input, used by the engine sound generator
+# Procedural audio state.
+var _engine_player: AudioStreamPlayer3D = null
+var _engine_playback: AudioStreamGeneratorPlayback = null
+var _engine_phase: float = 0.0
+var _engine_phase2: float = 0.0
+var _shift_player: AudioStreamPlayer3D = null
+var _shift_playback: AudioStreamGeneratorPlayback = null
+var _shift_frames_remaining: int = 0  # frames left in current shift-noise burst
+var _shift_burst_total: int = 1       # frames in the burst (for envelope normalization)
 
 func _ready() -> void:
 	mass = 900.0
@@ -181,6 +199,33 @@ func _ready() -> void:
 	# default sits on the cabin. Bias it down so the car doesn't tip.
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 	center_of_mass = Vector3(0, 0.2, 0)
+	# Procedural audio — engine loop + one-shot shift noise. Both use
+	# AudioStreamGenerator so they pan + attenuate naturally in 3D.
+	_setup_audio()
+
+func _setup_audio() -> void:
+	_engine_player = AudioStreamPlayer3D.new()
+	var eg := AudioStreamGenerator.new()
+	eg.mix_rate = AUDIO_SAMPLE_RATE
+	eg.buffer_length = 0.10
+	_engine_player.stream = eg
+	_engine_player.volume_db = -6.0
+	_engine_player.unit_size = 8.0
+	_engine_player.max_distance = 60.0
+	add_child(_engine_player)
+	_engine_player.play()
+	_engine_playback = _engine_player.get_stream_playback()
+	_shift_player = AudioStreamPlayer3D.new()
+	var sg := AudioStreamGenerator.new()
+	sg.mix_rate = AUDIO_SAMPLE_RATE
+	sg.buffer_length = 0.20
+	_shift_player.stream = sg
+	_shift_player.volume_db = -4.0
+	_shift_player.unit_size = 6.0
+	_shift_player.max_distance = 40.0
+	add_child(_shift_player)
+	_shift_player.play()
+	_shift_playback = _shift_player.get_stream_playback()
 
 func _physics_process(delta: float) -> void:
 	# Driver input drives engine + steering. Brake is applied to all
@@ -195,6 +240,7 @@ func _physics_process(delta: float) -> void:
 			_shift_down()
 		var fwd: float = Input.get_action_strength("move_forward") - Input.get_action_strength("move_back")
 		var steer_in: float = Input.get_action_strength("move_left") - Input.get_action_strength("move_right")
+		_throttle = clampf(fwd, 0.0, 1.0)
 		var target_engine: float = 0.0
 		var target_brake: float = PASSIVE_BRAKE
 		# Compute current RPM from wheel speed projected onto the local -Z axis,
@@ -262,12 +308,66 @@ func _physics_process(delta: float) -> void:
 		brake = PASSIVE_BRAKE
 		_steer = lerpf(_steer, 0.0, 1.0 - exp(-STEER_SPEED * delta))
 		steering = _steer
+		_throttle = 0.0
+		_rpm = lerpf(_rpm, IDLE_RPM, 1.0 - exp(-RPM_FOLLOW_RATE * delta))
 
 func _process(_delta: float) -> void:
 	# F to exit (E is shift-up while seated). Entering is handled by player.gd.
 	if _driver != null and Input.is_action_just_pressed("vehicle_exit"):
 		if Time.get_ticks_msec() / 1000.0 >= _enter_locked_until:
 			exit_driver()
+	_fill_engine_buffer()
+	_fill_shift_buffer()
+
+func _fill_engine_buffer() -> void:
+	if _engine_playback == null:
+		return
+	# Frequency rises linearly with RPM. Two oscillators (fundamental + octave)
+	# layered for a fuller tone; throttle adds a touch more amplitude on top of
+	# the RPM-driven base.
+	var rpm_t: float = clampf(_rpm / REDLINE_RPM, 0.0, 1.2)
+	var freq: float = lerpf(ENGINE_BASE_HZ, ENGINE_TOP_HZ, rpm_t)
+	var omega: float = TAU * freq / float(AUDIO_SAMPLE_RATE)
+	var omega2: float = omega * 2.0
+	# Idle hum is always present so the car "feels" running. Throttle bumps
+	# amplitude by another 50%. Driver-only audibility is fine — others can
+	# still hear it via 3D attenuation since it always plays.
+	var amp: float = 0.10 + 0.16 * rpm_t + 0.08 * _throttle
+	var frames: int = _engine_playback.get_frames_available()
+	for i in range(frames):
+		_engine_phase += omega
+		_engine_phase2 += omega2
+		if _engine_phase > TAU:
+			_engine_phase -= TAU
+		if _engine_phase2 > TAU:
+			_engine_phase2 -= TAU
+		# Sawtooth scaled to [-1, 1]. Octave layered for rasp.
+		var saw1: float = (_engine_phase / PI) - 1.0
+		var saw2: float = (_engine_phase2 / PI) - 1.0
+		var s: float = (saw1 * 0.7 + saw2 * 0.3) * amp
+		_engine_playback.push_frame(Vector2(s, s))
+
+func _fill_shift_buffer() -> void:
+	if _shift_playback == null:
+		return
+	var frames: int = _shift_playback.get_frames_available()
+	for i in range(frames):
+		var s: float = 0.0
+		if _shift_frames_remaining > 0:
+			# t goes 0 → 1 across the burst; envelope decays exponentially so the
+			# noise reads as a percussive "thunk" rather than a flat hiss.
+			var t: float = 1.0 - (float(_shift_frames_remaining) / float(_shift_burst_total))
+			var env: float = exp(-t * 6.0)
+			var noise: float = randf() * 2.0 - 1.0
+			# Mix in a low rumble component (40Hz sine) so it has body, not just hiss.
+			var rumble: float = sin(t * TAU * 40.0 * SHIFT_SOUND_S)
+			s = (noise * 0.5 + rumble * 0.5) * env * 0.35
+			_shift_frames_remaining -= 1
+		_shift_playback.push_frame(Vector2(s, s))
+
+func _trigger_shift_sound() -> void:
+	_shift_burst_total = int(float(AUDIO_SAMPLE_RATE) * SHIFT_SOUND_S)
+	_shift_frames_remaining = _shift_burst_total
 
 func is_driver_seat_open() -> bool:
 	return _driver == null
@@ -291,11 +391,13 @@ func _shift_up() -> void:
 	if _gear < GEAR_RATIOS.size():
 		_gear += 1
 		_shift_cooldown = SHIFT_COOLDOWN_S
+		_trigger_shift_sound()
 
 func _shift_down() -> void:
 	if _gear > 1:
 		_gear -= 1
 		_shift_cooldown = SHIFT_COOLDOWN_S
+		_trigger_shift_sound()
 
 func driver_seat_world() -> Vector3:
 	if _seat_markers.is_empty():
