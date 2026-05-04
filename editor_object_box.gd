@@ -17,6 +17,11 @@ var object_id: String = ""
 # Container objects (crates) read this at play-mode bootstrap to roll
 # their starting loot. Empty string = no table = empty crate.
 var loot_table_id: String = ""
+# Per-placement override for the crate's roll count. -1 = use the catalog
+# default for this object id (e.g. 6 for small / 14 for large). Anything
+# >= 0 wins so the editor can drop a one-item stash next to a stuffed
+# bonanza without forking the catalog.
+var roll_count_override: int = -1
 var _local_aabb: AABB = AABB(-FALLBACK_SIZE * 0.5, FALLBACK_SIZE)
 
 var _mesh_instance: MeshInstance3D

@@ -175,6 +175,7 @@ func _ready() -> void:
 	_container_panel.visible = false
 	$UI.add_child(_container_panel)
 	_container_panel.table_chosen.connect(_on_container_table_chosen)
+	_container_panel.rolls_changed.connect(_on_container_rolls_changed)
 
 func _input(event: InputEvent) -> void:
 	# F9 → play mode. Either the input action OR the raw key fires it,
@@ -247,6 +248,8 @@ func _enter_play_mode() -> void:
 		# play-mode bootstrap can roll loot into the spawned crate.
 		if kind == "object" and "loot_table_id" in box:
 			entry["loot_table_id"] = String(box.loot_table_id)
+		if kind == "object" and "roll_count_override" in box:
+			entry["roll_count_override"] = int(box.roll_count_override)
 		MapState.placed_props.append(entry)
 	# Snapshot item-spawn tables + placed cubes. Tables are deep-duped so
 	# the play scene never aliases editor state (color edits in a future
@@ -669,24 +672,29 @@ func _refresh_container_panel() -> void:
 		_container_panel.visible = false
 		return
 	var current_id: String = String(_selected_prop.get("loot_table_id"))
+	var current_rolls: int = int(_selected_prop.get("roll_count_override"))
 	# Pull capacity / roll info from a throwaway built crate so the panel
 	# shows the same numbers main_bootstrap will use at play.
 	var info: String = ""
+	var default_rolls: int = 0
 	var probe: Node3D = OBJECTS_CATALOG.build(oid)
 	if probe != null:
-		info = "Capacity: %.0f kg   Rolls: %d" % [
-			float(probe.get("max_weight")),
-			int(probe.get("roll_count")),
-		]
+		info = "Capacity: %.0f kg" % float(probe.get("max_weight"))
+		default_rolls = int(probe.get("roll_count"))
 		probe.queue_free()
 	var label: String = "Container: %s" % oid
-	_container_panel.bind(label, current_id, _item_tables_panel.tables, info)
+	_container_panel.bind(label, current_id, _item_tables_panel.tables, info, current_rolls, default_rolls)
 	_container_panel.visible = true
 
 func _on_container_table_chosen(table_id: String) -> void:
 	if _selected_prop == null or not "loot_table_id" in _selected_prop:
 		return
 	_selected_prop.loot_table_id = table_id
+
+func _on_container_rolls_changed(rolls: int) -> void:
+	if _selected_prop == null or not "roll_count_override" in _selected_prop:
+		return
+	_selected_prop.roll_count_override = rolls
 
 func _pick_prop_under_cursor() -> void:
 	# Ray-vs-AABB pick over every placed effect; closest hit wins.

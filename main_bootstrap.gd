@@ -72,6 +72,10 @@ func _ready() -> void:
 			# fed through crate.add(), which weight-checks against the
 			# crate's max_weight; once it refuses, we stop early.
 			if kind == "object" and OBJECT_CATALOG.is_container(id):
+				# Per-placement override > catalog default; -1 = use default.
+				var override: int = int(entry.get("roll_count_override", -1))
+				if override >= 0 and "roll_count" in content:
+					content.roll_count = override
 				var tid: String = String(entry.get("loot_table_id", ""))
 				if tid != "" and tables_for_props.has(tid):
 					_seed_container(content, tables_for_props[tid])
