@@ -57,6 +57,10 @@ var _spawn_visuals: Array[Node3D] = []
 var _spawn_marker_mat: StandardMaterial3D = null
 var _spawn_ghost_mat: StandardMaterial3D = null
 var _spawn_ghost: Node3D = null
+# Translucent cube preview shown while the Spawns → Items tool is active,
+# tinted live to whatever the active table's color is.
+var _item_spawn_ghost: MeshInstance3D = null
+var _item_spawn_ghost_mat: StandardMaterial3D = null
 # Placed props — wireframe-boxed nodes for both Effects and Objects.
 # Both editor_effect_box and editor_object_box implement the same
 # interface (set_selected, get_aabb_local) so picking + gizmo binding
@@ -136,6 +140,18 @@ func _ready() -> void:
 	_spawn_ghost = _build_marker_node(_get_ghost_material())
 	_spawn_ghost.visible = false
 	add_child(_spawn_ghost)
+	# Item-spawn ghost: translucent cube tinted to active table color.
+	_item_spawn_ghost_mat = StandardMaterial3D.new()
+	_item_spawn_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_item_spawn_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_item_spawn_ghost_mat.albedo_color = Color(1, 1, 1, 0.45)
+	_item_spawn_ghost = MeshInstance3D.new()
+	var ig_mesh := BoxMesh.new()
+	ig_mesh.size = Vector3(0.6, 0.6, 0.6)
+	_item_spawn_ghost.mesh = ig_mesh
+	_item_spawn_ghost.material_override = _item_spawn_ghost_mat
+	_item_spawn_ghost.visible = false
+	add_child(_item_spawn_ghost)
 	# Transform gizmo — follows the selected effect, hidden until Q/W/R.
 	_gizmo = Node3D.new()
 	_gizmo.set_script(GIZMO_SCRIPT)
@@ -241,6 +257,8 @@ func _process(delta: float) -> void:
 	_fps_label.text = "FPS: %d" % Engine.get_frames_per_second()
 	# Hide all hover visuals by default; per-tool branches re-enable them.
 	_spawn_ghost.visible = false
+	if _item_spawn_ghost != null:
+		_item_spawn_ghost.visible = false
 	_flatten_ring.hide_ring()
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
@@ -259,6 +277,27 @@ func _process(delta: float) -> void:
 			gp.y = _terrain.sample_height(gp)
 			_spawn_ghost.global_position = gp
 			_spawn_ghost.visible = true
+		return
+	# Item-spawn ghost: translucent cube tinted to active table color,
+	# bottom face on the terrain so the user previews exactly where the
+	# placed cube will land.
+	if _active_tool == TOOL_S_ITEMS:
+		_brush_ring.hide_ring()
+		if _is_over_ui():
+			return
+		var t: Dictionary = _item_tables_panel.get_active_table()
+		if t.is_empty():
+			return
+		var ig_hit := _raycast_cursor()
+		if ig_hit.is_empty():
+			return
+		var igp: Vector3 = ig_hit.position
+		igp.y = _terrain.sample_height(igp)
+		# Mesh is centred on origin, so lift by half so the bottom sits on terrain.
+		_item_spawn_ghost.global_position = igp + Vector3(0, 0.3, 0)
+		var col: Color = t.get("color", Color.WHITE)
+		_item_spawn_ghost_mat.albedo_color = Color(col.r, col.g, col.b, 0.45)
+		_item_spawn_ghost.visible = true
 		return
 	# Brush ring only makes sense for terrain brushes; spawn tools use
 	# pinpoint clicks.
