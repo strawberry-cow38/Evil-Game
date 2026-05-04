@@ -83,6 +83,7 @@ var _rng := RandomNumberGenerator.new()
 var _reload_held: bool = false
 var _reload_press_time: float = 0.0
 var _pie_active: bool = false
+var _vehicle: Node = null  # set when seated as driver; suppresses movement + interact
 
 const FALL_SAFETY_Y := -40.0   # below this y → fell out of the map; respawn
 
@@ -195,6 +196,19 @@ func is_pie_open() -> bool:
 func has_interact_target() -> bool:
 	return _interact_target != null
 
+func is_in_vehicle() -> bool:
+	return _vehicle != null
+
+# Called by vehicle.gd on enter (with the vehicle node) and on exit (with null).
+# We just stash a reference; _physics_process / _process check it and early-out.
+func set_in_vehicle(v: Node) -> void:
+	_vehicle = v
+	if v != null:
+		velocity = Vector3.ZERO
+		_prompt_label.text = ""
+		_interact_target = null
+	visible = v == null
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not is_pie_open():
 		# Scale sensitivity with current FOV so ADS (and especially scoped ADS)
@@ -223,9 +237,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 
 func _process(delta: float) -> void:
+	# Driving: vehicle.gd owns input + camera, so nothing for the player to do.
+	if _vehicle != null:
+		return
 	_update_interact_target()
-	if not is_menu_open() and _interact_target != null and Input.is_action_just_pressed("interact"):
-		_loot(_interact_target)
+	# E priority: try entering a nearby vehicle BEFORE looting a pickup, so the
+	# player can stand near a car+item and have E mean "drive" rather than "loot".
+	if not is_menu_open() and Input.is_action_just_pressed("interact"):
+		if _try_enter_nearby_vehicle():
+			return
+		if _interact_target != null:
+			_loot(_interact_target)
 	if not is_menu_open():
 		_check_equip_hotkeys()
 		_handle_reload_input()
@@ -263,6 +285,11 @@ func _process(delta: float) -> void:
 			_scope.hide_scope()
 
 func _physics_process(delta: float) -> void:
+	# Driving: vehicle parks us at the seat marker each frame (effectively),
+	# but we still run zero physics so we don't fall away or eat collisions.
+	if _vehicle != null:
+		velocity = Vector3.ZERO
+		return
 	# Fall-out-of-the-world safety net — teleport back to spawn before
 	# the player falls forever.
 	if global_position.y < FALL_SAFETY_Y:
@@ -330,6 +357,25 @@ func _update_interact_target() -> void:
 		_prompt_label.text = "[E] Pick up %s" % pickup.get_label()
 	else:
 		_prompt_label.text = ""
+
+# Walk the "vehicle" group, pick the closest one with an open driver seat, and
+# call try_enter_driver on it. Returns true if we actually got in.
+func _try_enter_nearby_vehicle() -> bool:
+	var best: Node = null
+	var best_d: float = INF
+	for v in get_tree().get_nodes_in_group("vehicle"):
+		if v == null or not v.has_method("try_enter_driver"):
+			continue
+		if v.has_method("is_driver_seat_open") and not v.is_driver_seat_open():
+			continue
+		var seat: Vector3 = v.driver_seat_world() if v.has_method("driver_seat_world") else (v as Node3D).global_position
+		var d: float = global_position.distance_to(seat)
+		if d < best_d:
+			best_d = d
+			best = v
+	if best == null:
+		return false
+	return best.try_enter_driver(self)
 
 func _check_equip_hotkeys() -> void:
 	if _inventory == null:

@@ -10,7 +10,11 @@ const EDITOR_TERRAIN := preload("res://editor_terrain.gd")
 const EFFECT_CATALOG := preload("res://editor_effect_catalog.gd")
 const OBJECT_CATALOG := preload("res://editor_objects_catalog.gd")
 const PICKUP := preload("res://pickup.gd")
+const VEHICLE := preload("res://vehicle.gd")
 const NOTHING_ITEM_ID := "nothing"
+
+# Fixed vehicle spawn — sits a few meters off the player spawn so it's findable.
+const VEHICLE_SPAWN_OFFSET := Vector3(6.0, 0.0, 0.0)
 
 func _ready() -> void:
 	var terrain_node: Node = null
@@ -81,6 +85,22 @@ func _ready() -> void:
 			pickup.count = int(result.get("count", 1))
 			pickup.position = pos + Vector3(0, 0.3, 0)
 			spawn_root.add_child(pickup)
+
+	# Always-spawn vehicle. Sit it slightly off the player spawn at terrain
+	# height + clearance so it lands on the ground rather than clipping in.
+	var v := VehicleBody3D.new()
+	v.set_script(VEHICLE)
+	v.name = "Vehicle"
+	var spawn_xz: Vector3 = Vector3.ZERO
+	var player_node := get_node_or_null("Player")
+	if player_node != null and player_node is Node3D:
+		spawn_xz = (player_node as Node3D).global_position
+	spawn_xz += VEHICLE_SPAWN_OFFSET
+	var ground_y: float = spawn_xz.y
+	if terrain_node != null and terrain_node.has_method("sample_height"):
+		ground_y = terrain_node.sample_height(spawn_xz)
+	v.position = Vector3(spawn_xz.x, ground_y + 1.0, spawn_xz.z)
+	add_child(v)
 
 func _roll_table(table: Dictionary) -> Dictionary:
 	if table.is_empty():
