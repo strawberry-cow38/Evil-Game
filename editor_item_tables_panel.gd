@@ -18,6 +18,10 @@ extends PanelContainer
 
 const REGISTRY := preload("res://editor_items_registry.gd")
 
+# Tables persist to user://. Wiped only by an explicit user delete or
+# by manually nuking the file — closing the editor never loses work.
+const SAVE_PATH := "user://item_spawn_tables.json"
+
 signal active_table_changed(table_index: int)
 
 # Dictionary entries:
@@ -114,6 +118,7 @@ func _ready() -> void:
 	_add_item_btn.text = "Add Item"
 	_add_item_btn.pressed.connect(_on_add_item_pressed)
 	vbox.add_child(_add_item_btn)
+	_load()
 	_refresh_all()
 
 func _make_color_slider(parent: Container, label_text: String) -> HSlider:
@@ -176,6 +181,69 @@ func roll_table(table_index: int) -> String:
 
 # --- table list management -------------------------------------------
 
+func _save() -> void:
+	var out: Dictionary = {"next_id": _next_id, "tables": []}
+	for t in tables:
+		var entries_out: Array = []
+		for e in t.get("entries", []):
+			entries_out.append({
+				"id": String(e.get("id", "")),
+				"weight": float(e.get("weight", 0.0)),
+			})
+		var c: Color = t.get("color", Color.WHITE)
+		out["tables"].append({
+			"id": String(t.get("id", "")),
+			"name": String(t.get("name", "")),
+			"color": [c.r, c.g, c.b],
+			"entries": entries_out,
+		})
+	var f: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f == null:
+		push_warning("item_tables: could not write %s" % SAVE_PATH)
+		return
+	f.store_string(JSON.stringify(out))
+
+func _load() -> void:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
+	var f: FileAccess = FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var txt: String = f.get_as_text()
+	var parsed: Variant = JSON.parse_string(txt)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var dict: Dictionary = parsed
+	_next_id = int(dict.get("next_id", 1))
+	tables.clear()
+	for t in dict.get("tables", []):
+		var col_arr: Array = t.get("color", [1.0, 1.0, 1.0])
+		var col: Color = Color(1, 1, 1, 1)
+		if col_arr.size() >= 3:
+			col = Color(float(col_arr[0]), float(col_arr[1]), float(col_arr[2]), 1.0)
+		var entries_in: Array = []
+		for e in t.get("entries", []):
+			entries_in.append({
+				"id": String(e.get("id", "")),
+				"weight": float(e.get("weight", 0.0)),
+			})
+		# Defensive: every loaded table needs the implicit Nothing entry.
+		var has_nothing: bool = false
+		for e in entries_in:
+			if String(e.get("id", "")) == REGISTRY.NOTHING_ID:
+				has_nothing = true
+				break
+		if not has_nothing:
+			entries_in.push_front({"id": REGISTRY.NOTHING_ID, "weight": 0.0})
+		tables.append({
+			"id": String(t.get("id", "")),
+			"name": String(t.get("name", "")),
+			"color": col,
+			"entries": entries_in,
+		})
+	if tables.size() > 0:
+		_active_index = 0
+
 func _on_create_pressed() -> void:
 	var nm: String = _name_edit.text.strip_edges()
 	if nm.is_empty():
@@ -192,6 +260,7 @@ func _on_create_pressed() -> void:
 	_next_id += 1
 	tables.append(t)
 	_active_index = tables.size() - 1
+	_save()
 	_refresh_all()
 	_emit_active_changed()
 
@@ -201,6 +270,7 @@ func _on_delete_pressed() -> void:
 	tables.remove_at(_active_index)
 	if _active_index >= tables.size():
 		_active_index = tables.size() - 1
+	_save()
 	_refresh_all()
 	_emit_active_changed()
 
@@ -267,11 +337,13 @@ func _on_color_changed(_v: float) -> void:
 		tables[_active_index]["color"] = c
 		_refresh_table_list()
 		_emit_active_changed()  # editor recolors live cubes
+		_save()
 
 func _on_name_changed(t: String) -> void:
 	if _active_index >= 0:
 		tables[_active_index]["name"] = t
 		_refresh_table_list()
+		_save()
 
 # --- entries (items in the active table) -----------------------------
 
@@ -351,6 +423,7 @@ func _on_weight_changed(entry_idx: int, v: float) -> void:
 	_redistribute_others(entry_idx, v_clamped)
 	_push_slider_values()
 	_refresh_pcts()
+	_save()
 
 # Scale every entry except `changed_idx` so the table re-totals to 100.
 # If the others currently sum to zero, split the remaining target evenly
@@ -432,6 +505,7 @@ func _on_entry_remove(entry_idx: int) -> void:
 	entries.remove_at(entry_idx)
 	_normalize_to_100()
 	_refresh_entries()
+	_save()
 
 func _on_add_item_pressed() -> void:
 	if _active_index < 0 or _picker == null:
@@ -453,3 +527,4 @@ func _on_items_picked(ids: Array) -> void:
 		# user slides them up to allocate (which auto-shrinks the others).
 		entries.append({"id": sid, "weight": 0.0})
 	_refresh_entries()
+	_save()
