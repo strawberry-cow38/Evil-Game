@@ -16,12 +16,12 @@ extends VehicleBody3D
 # the driver door at the vehicle's current world position.
 
 const ENGINE_FORCE := 2400.0
-const REVERSE_FORCE := 1200.0
+const REVERSE_FORCE := 1800.0
 const BRAKE_FORCE := 14.0
 const PASSIVE_BRAKE := 0.6   # mild drag when no input so the car coasts to a stop
 const STEER_MAX := 0.55         # max wheel steer angle (radians) at low speed
-const STEER_MAX_HIGH := 0.10    # max steer angle once cruising fast — prevents tip-overs
-const STEER_SPEED_REF := 18.0   # m/s where steering authority bottoms out at STEER_MAX_HIGH
+const STEER_MAX_HIGH := 0.06    # max steer angle once cruising fast — prevents tip-overs
+const STEER_SPEED_REF := 14.0   # m/s where steering authority bottoms out at STEER_MAX_HIGH
 const STEER_SPEED := 4.0        # how fast steering eases toward target
 const HANDBRAKE_FORCE := 32.0
 const HANDBRAKE_TAP_S := 0.18  # space held shorter than this = toggle latched
@@ -56,6 +56,7 @@ const AUDIO_SAMPLE_RATE := 22050
 const ENGINE_BASE_HZ := 38.0
 const ENGINE_TOP_HZ := 230.0
 const SHIFT_SOUND_S := 0.16
+const DIE_SOUND_S := 0.75   # engine-cut splutter envelope length
 
 const ENTER_RANGE := 4.0
 
@@ -102,6 +103,11 @@ var _crank_playback: AudioStreamGeneratorPlayback = null
 var _crank_phase: float = 0.0
 var _crank_mod_phase: float = 0.0
 var _crank_active: bool = false       # set in _physics_process, consumed by _fill_crank_buffer
+var _die_player: AudioStreamPlayer3D = null
+var _die_playback: AudioStreamGeneratorPlayback = null
+var _die_phase: float = 0.0
+var _die_frames_remaining: int = 0     # frames left in current die-splutter burst
+var _die_burst_total: int = 1
 
 func _ready() -> void:
 	mass = 900.0
@@ -221,7 +227,7 @@ func _ready() -> void:
 	# Damp body roll/yaw oscillations so the car settles after sharp turns
 	# instead of fishtailing forever (but not too hard — the user wants some
 	# visible body roll for character).
-	angular_damp = 2.5
+	angular_damp = 1.5
 	# Procedural audio — engine loop + one-shot shift noise. Both use
 	# AudioStreamGenerator so they pan + attenuate naturally in 3D.
 	_setup_audio()
@@ -260,6 +266,17 @@ func _setup_audio() -> void:
 	add_child(_crank_player)
 	_crank_player.play()
 	_crank_playback = _crank_player.get_stream_playback()
+	_die_player = AudioStreamPlayer3D.new()
+	var dg := AudioStreamGenerator.new()
+	dg.mix_rate = AUDIO_SAMPLE_RATE
+	dg.buffer_length = 0.10
+	_die_player.stream = dg
+	_die_player.volume_db = -3.0
+	_die_player.unit_size = 7.0
+	_die_player.max_distance = 50.0
+	add_child(_die_player)
+	_die_player.play()
+	_die_playback = _die_player.get_stream_playback()
 
 func _physics_process(delta: float) -> void:
 	# Driver input drives engine + steering. Brake is applied to all
@@ -320,9 +337,14 @@ func _physics_process(delta: float) -> void:
 			_rpm = lerpf(_rpm, target_rpm, na)
 		else:
 			target_rpm = wheel_rps * 60.0 * absf(ratio) * FINAL_DRIVE
-			# Idle controller only props RPM up to idle while the throttle is
-			# touched. Off-throttle the engine is allowed to bog below idle
-			# (and stall) instead of pretending it can hold 700 with no fuel.
+			# Idle controller:
+			#  - throttle pressed: prop RPM above idle.
+			#  - off-throttle but crawling (<0.8 m/s): floor at idle so 1st/R
+			#    creep doesn't insta-stall.
+			#  - off-throttle at any real speed: no floor, RPM bogs naturally
+			#    and stalls if it drops under STALL_RPM.
+			if absf(fwd_speed) < 0.8:
+				target_rpm = max(target_rpm, IDLE_RPM)
 			if fwd > 0.0:
 				target_rpm = max(target_rpm, IDLE_RPM + (REDLINE_RPM - IDLE_RPM) * 0.18 * fwd)
 			# Hard cap so a downshift from 5th to 1st can't paint 14k on the gauge.
@@ -336,6 +358,7 @@ func _physics_process(delta: float) -> void:
 		# sustain itself). Neutral never stalls — engine spins free.
 		if _engine_on and _gear != 0 and _throttle <= 0.0 and _rpm < STALL_RPM:
 			_engine_on = false
+			_trigger_die_sound()
 		# Torque magnitude scales by ratio relative to first gear. Reverse gets
 		# its own dedicated force constant, sign-flipped vs the +Z forward
 		# convention so it pushes the car -Z.
@@ -418,6 +441,7 @@ func _process(_delta: float) -> void:
 	_fill_engine_buffer()
 	_fill_shift_buffer()
 	_fill_crank_buffer()
+	_fill_die_buffer()
 
 func _fill_engine_buffer() -> void:
 	if _engine_playback == null:
@@ -496,6 +520,38 @@ func _fill_crank_buffer() -> void:
 			var noise: float = randf() * 2.0 - 1.0
 			s = (sq * 0.65 + noise * 0.35) * env * amp
 		_crank_playback.push_frame(Vector2(s, s))
+
+func _trigger_die_sound() -> void:
+	_die_burst_total = int(float(AUDIO_SAMPLE_RATE) * DIE_SOUND_S)
+	_die_frames_remaining = _die_burst_total
+	_die_phase = 0.0
+
+func _fill_die_buffer() -> void:
+	if _die_playback == null:
+		return
+	# Engine death splutter: low square wave that drops in pitch + scratchy
+	# noise, both fading out across the burst. Reads as the engine coughing
+	# and slowing to a stop.
+	var frames: int = _die_playback.get_frames_available()
+	for i in range(frames):
+		var s: float = 0.0
+		if _die_frames_remaining > 0:
+			var t: float = 1.0 - (float(_die_frames_remaining) / float(_die_burst_total))
+			# Pitch droops from ~80Hz to ~25Hz across the burst.
+			var freq: float = lerpf(80.0, 25.0, t)
+			var d_phase: float = TAU * freq / float(AUDIO_SAMPLE_RATE)
+			_die_phase += d_phase
+			if _die_phase > TAU:
+				_die_phase -= TAU
+			var sq: float = 1.0 if sin(_die_phase) > 0.0 else -1.0
+			var noise: float = randf() * 2.0 - 1.0
+			# Envelope: two overlapping coughs (sin pulses) under an exp decay so
+			# the cut sounds like "chug-chug-fizzle" not a single click.
+			var coughs: float = 0.5 + 0.5 * sin(t * TAU * 3.0)
+			var env: float = exp(-t * 2.5) * coughs
+			s = (sq * 0.55 + noise * 0.45) * env * 0.45
+			_die_frames_remaining -= 1
+		_die_playback.push_frame(Vector2(s, s))
 
 func is_driver_seat_open() -> bool:
 	return _driver == null
