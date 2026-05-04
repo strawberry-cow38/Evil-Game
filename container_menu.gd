@@ -27,7 +27,10 @@ const SIDE_CONTAINER := 1
 var _inventory: Node = null
 var _container: Node = null
 var _open := false
-var _category_idx := 0
+# Each panel keeps its own active category so the player can browse one
+# slice on their side and a different slice on the crate side.
+var _player_category_idx := 0
+var _container_category_idx := 0
 var _hover_side := SIDE_PLAYER
 # Closing the menu blocks immediate reopens for a short window so the same R
 # press that closed the menu doesn't re-trigger the open path on the player.
@@ -41,8 +44,8 @@ var _container_rows: Array = []
 
 var _root: Control
 var _bg: ColorRect
-var _category_box: HBoxContainer
-var _category_buttons: Array[Button] = []
+var _player_category_buttons: Array[Button] = []
+var _container_category_buttons: Array[Button] = []
 var _player_title: Label
 var _container_title: Label
 var _player_list: ItemList
@@ -118,19 +121,7 @@ func _build_ui() -> void:
 	v.offset_bottom = -30
 	v.add_theme_constant_override("separation", 8)
 	_root.add_child(v)
-	# --- Category tabs (shared across both panels).
-	_category_box = HBoxContainer.new()
-	_category_box.add_theme_constant_override("separation", 6)
-	v.add_child(_category_box)
-	for i in range(CATEGORIES.size()):
-		var b := Button.new()
-		b.toggle_mode = true
-		b.text = String(CATEGORIES[i].label)
-		b.pressed.connect(_on_category_pressed.bind(i))
-		_category_box.add_child(b)
-		_category_buttons.append(b)
-	_category_buttons[_category_idx].button_pressed = true
-	# --- Side-by-side panels.
+	# --- Side-by-side panels (each owns its own category tab row).
 	var sides := HBoxContainer.new()
 	sides.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sides.add_theme_constant_override("separation", 16)
@@ -158,35 +149,53 @@ func _build_panel(title: String, is_player: bool) -> Control:
 	t.add_theme_color_override("font_color", Color(1, 0.95, 0.6))
 	t.text = title
 	col.add_child(t)
+	# Per-side category tab row — each panel filters independently so the
+	# player can browse, say, Ammo on their side and Weapons on the crate side.
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 4)
+	col.add_child(tabs)
+	var side_id := SIDE_PLAYER if is_player else SIDE_CONTAINER
+	var buttons: Array[Button] = []
+	for i in range(CATEGORIES.size()):
+		var b := Button.new()
+		b.toggle_mode = true
+		b.text = String(CATEGORIES[i].label)
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(_on_category_pressed.bind(side_id, i))
+		tabs.add_child(b)
+		buttons.append(b)
+	buttons[0].button_pressed = true
 	var lst := ItemList.new()
 	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lst.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	lst.allow_reselect = true
-	lst.focus_entered.connect(_on_list_focus.bind(SIDE_PLAYER if is_player else SIDE_CONTAINER))
-	lst.item_activated.connect(_on_list_activated.bind(SIDE_PLAYER if is_player else SIDE_CONTAINER))
+	lst.focus_entered.connect(_on_list_focus.bind(side_id))
+	lst.item_activated.connect(_on_list_activated.bind(side_id))
 	col.add_child(lst)
 	if is_player:
 		_player_title = t
 		_player_list = lst
+		_player_category_buttons = buttons
 	else:
 		_container_title = t
 		_container_list = lst
+		_container_category_buttons = buttons
 	return col
 
 # --- Filter / refresh -----------------------------------------------------
 
-func _matches_category(kind: String) -> bool:
-	var kinds: Array = CATEGORIES[_category_idx].kinds
+func _matches_category(kind: String, category_idx: int) -> bool:
+	var kinds: Array = CATEGORIES[category_idx].kinds
 	if kinds.is_empty():
 		return true
 	if kinds.has("__misc__"):
 		return not NAMED_KINDS.has(kind)
 	return kinds.has(kind)
 
-func _filtered(entries: Array) -> Array:
+func _filtered(entries: Array, category_idx: int) -> Array:
 	var out: Array = []
 	for e in entries:
-		if _matches_category(String(e.get("kind", ""))):
+		if _matches_category(String(e.get("kind", "")), category_idx):
 			out.append(e)
 	out.sort_custom(func(a, b): return String(a.name).naturalnocasecmp_to(String(b.name)) < 0)
 	return out
@@ -195,7 +204,7 @@ func _refresh() -> void:
 	if _inventory == null or _container == null:
 		return
 	# Player side.
-	_player_rows = _filtered(_inventory.entries())
+	_player_rows = _filtered(_inventory.entries(), _player_category_idx)
 	_player_list.clear()
 	for e in _player_rows:
 		_player_list.add_item(_format_row(e))
@@ -203,7 +212,7 @@ func _refresh() -> void:
 	var max_w: float = float(_inventory.MAX_WEIGHT)
 	_player_title.text = "YOU — %.1f / %.1f kg" % [enc, max_w]
 	# Container side.
-	_container_rows = _filtered(_container.entries())
+	_container_rows = _filtered(_container.entries(), _container_category_idx)
 	_container_list.clear()
 	for e in _container_rows:
 		_container_list.add_item(_format_row(e))
@@ -240,10 +249,15 @@ func _input(event: InputEvent) -> void:
 			_transfer_focused()
 			get_viewport().set_input_as_handled()
 
-func _on_category_pressed(idx: int) -> void:
-	for i in range(_category_buttons.size()):
-		_category_buttons[i].button_pressed = (i == idx)
-	_category_idx = idx
+func _on_category_pressed(side: int, idx: int) -> void:
+	var buttons: Array[Button] = _player_category_buttons if side == SIDE_PLAYER else _container_category_buttons
+	for i in range(buttons.size()):
+		buttons[i].button_pressed = (i == idx)
+	if side == SIDE_PLAYER:
+		_player_category_idx = idx
+	else:
+		_container_category_idx = idx
+	_hover_side = side
 	_refresh()
 
 func _on_list_focus(side: int) -> void:
@@ -332,7 +346,7 @@ func _take_or_store_category() -> void:
 		var rows: Array = _player_rows.duplicate()
 		for entry in rows:
 			_store(entry)
-		_status_label.text = "Stored: %s" % String(CATEGORIES[_category_idx].label)
+		_status_label.text = "Stored: %s" % String(CATEGORIES[_player_category_idx].label)
 	else:
 		var rows2: Array = _container_rows.duplicate()
 		var any_skipped: bool = false
@@ -343,6 +357,6 @@ func _take_or_store_category() -> void:
 			if _inventory.has_method("total_weight") and is_equal_approx(_inventory.total_weight(), before):
 				any_skipped = true
 		_status_label.text = "Took: %s%s" % [
-			String(CATEGORIES[_category_idx].label),
+			String(CATEGORIES[_container_category_idx].label),
 			"  (some too heavy)" if any_skipped else ""
 		]
