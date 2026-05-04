@@ -74,6 +74,15 @@ func _ready() -> void:
 				continue
 			props_root.add_child(content)
 			content.global_transform = xform
+			# Per-placement object settings: disable collision shapes,
+			# stamp HP metadata for downstream damage code to consume.
+			if kind == "object":
+				if bool(entry.get("no_collide", false)):
+					_disable_collision(content)
+				if bool(entry.get("destructible", false)):
+					content.set_meta("destructible", true)
+					content.set_meta("hp_max", int(entry.get("hp_max", 100)))
+					content.set_meta("hp", int(entry.get("hp_max", 100)))
 			# Container loot fill — roll the assigned table N times where N
 			# is the crate variant's roll_count. Each successful roll is
 			# fed through crate.add(), which weight-checks against the
@@ -182,6 +191,15 @@ func _roll_table(table: Dictionary) -> Dictionary:
 			var count: int = randi_range(min_c, max_c)
 			return {"id": id, "count": count}
 	return {"id": NOTHING_ITEM_ID, "count": 1}
+
+func _disable_collision(root: Node) -> void:
+	# Walk the spawned object subtree and turn off every CollisionShape3D
+	# we find. Cheaper + safer than zeroing collision_layer on the body
+	# (which would also stop area queries that may be useful later).
+	for c in root.get_children():
+		if c is CollisionShape3D:
+			(c as CollisionShape3D).disabled = true
+		_disable_collision(c)
 
 func _input(event: InputEvent) -> void:
 	# F9 toggles back to the editor with the current map intact.

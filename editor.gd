@@ -31,6 +31,7 @@ const ITEM_SPAWN_BOX_SCRIPT := preload("res://editor_item_spawn_box.gd")
 const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 const CONTAINER_PANEL_SCRIPT := preload("res://editor_container_panel.gd")
 const LIGHTING_PANEL_SCRIPT := preload("res://editor_lighting_panel.gd")
+const OBJECT_PROPS_PANEL_SCRIPT := preload("res://editor_object_props_panel.gd")
 const OBJECTS_CATALOG := preload("res://editor_objects_catalog.gd")
 const CRATE := preload("res://crate.gd")
 
@@ -111,6 +112,13 @@ var _drag_scale_pivot: bool = false
 var _container_panel: PanelContainer = null
 # Lighting tuner shown only while Environment → Lighting is active.
 var _lighting_panel: PanelContainer = null
+# Per-placement settings for the selected object_box (no-collide,
+# destructible/HP). Built at runtime, hidden until an object is selected.
+var _object_props_panel: PanelContainer = null
+# Object clipboard. Empty dict = nothing copied. `paste_at_mouse` true
+# after a cut so V drops the copy where the cursor is; false after a
+# copy so V re-stamps at the original transform (paste-in-place).
+var _object_clipboard: Dictionary = {}
 @onready var _world_env: WorldEnvironment = $WorldEnvironment
 @onready var _sun: DirectionalLight3D = $Sun
 
@@ -200,6 +208,20 @@ func _ready() -> void:
 	if not MapState.lighting.is_empty():
 		_lighting_panel.set_state(MapState.lighting)
 		_apply_lighting(MapState.lighting)
+	# Object props panel — sits below the container panel on the right
+	# rail. Visible only when an object_box is selected.
+	_object_props_panel = PanelContainer.new()
+	_object_props_panel.set_script(OBJECT_PROPS_PANEL_SCRIPT)
+	_object_props_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_object_props_panel.offset_left = -560
+	_object_props_panel.offset_right = -292
+	_object_props_panel.offset_top = 340
+	_object_props_panel.offset_bottom = 480
+	_object_props_panel.visible = false
+	$UI.add_child(_object_props_panel)
+	_object_props_panel.no_collide_changed.connect(_on_no_collide_changed)
+	_object_props_panel.destructible_changed.connect(_on_destructible_changed)
+	_object_props_panel.hp_changed.connect(_on_hp_changed)
 
 func _input(event: InputEvent) -> void:
 	# F9 → play mode. Either the input action OR the raw key fires it,
@@ -241,6 +263,15 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_DELETE:
 		if _selected_prop != null and not _camera.is_looking():
 			_delete_selected_prop()
+	# Ctrl+C / Ctrl+X / Ctrl+V on object boxes. Effects + spawns aren't
+	# clipboard-eligible (no good "what does it mean" story for those yet).
+	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed:
+		if event.keycode == KEY_C:
+			_clipboard_copy()
+		elif event.keycode == KEY_X:
+			_clipboard_cut()
+		elif event.keycode == KEY_V:
+			_clipboard_paste()
 
 func _enter_play_mode() -> void:
 	# Snapshot the current map into the autoload so the play scene can
@@ -274,6 +305,11 @@ func _enter_play_mode() -> void:
 			entry["loot_table_id"] = String(box.loot_table_id)
 		if kind == "object" and "roll_count_override" in box:
 			entry["roll_count_override"] = int(box.roll_count_override)
+		if kind == "object" and "no_collide" in box:
+			entry["no_collide"] = bool(box.no_collide)
+		if kind == "object" and "destructible" in box:
+			entry["destructible"] = bool(box.destructible)
+			entry["hp_max"] = int(box.hp_max)
 		MapState.placed_props.append(entry)
 	# Snapshot item-spawn tables + placed cubes. Tables are deep-duped so
 	# the play scene never aliases editor state (color edits in a future
@@ -499,7 +535,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle, _container_panel, _lighting_panel]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -683,6 +719,7 @@ func _select_prop(box: Node3D) -> void:
 		if _selected_prop != null and _gizmo.mode == _gizmo.MODE_NONE:
 			_gizmo.set_mode(_gizmo.MODE_TRANSLATE_AXES)
 	_refresh_container_panel()
+	_refresh_object_props_panel()
 
 # Show + bind the loot-table picker iff the current selection is a crate;
 # hide it otherwise. Called from _select_prop and from the table-list
@@ -721,6 +758,96 @@ func _on_container_rolls_changed(rolls: int) -> void:
 	if _selected_prop == null or not "roll_count_override" in _selected_prop:
 		return
 	_selected_prop.roll_count_override = rolls
+
+func _refresh_object_props_panel() -> void:
+	if _object_props_panel == null:
+		return
+	if _selected_prop == null or not "object_id" in _selected_prop:
+		_object_props_panel.visible = false
+		return
+	var oid: String = String(_selected_prop.object_id)
+	_object_props_panel.bind(
+		"Object: %s" % oid,
+		bool(_selected_prop.get("no_collide")),
+		bool(_selected_prop.get("destructible")),
+		int(_selected_prop.get("hp_max")),
+	)
+	_object_props_panel.visible = true
+
+func _on_no_collide_changed(v: bool) -> void:
+	if _selected_prop == null or not "no_collide" in _selected_prop:
+		return
+	_selected_prop.no_collide = v
+
+func _on_destructible_changed(v: bool) -> void:
+	if _selected_prop == null or not "destructible" in _selected_prop:
+		return
+	_selected_prop.destructible = v
+
+func _on_hp_changed(v: int) -> void:
+	if _selected_prop == null or not "hp_max" in _selected_prop:
+		return
+	_selected_prop.hp_max = v
+
+# Clipboard ops. Only object_box props are supported (effects + spawn
+# cubes don't carry the same per-placement settings yet — when they do,
+# extend the clipboard dict's `kind` field accordingly).
+func _clipboard_copy() -> void:
+	var box: Node3D = _selected_prop
+	if box == null or not is_instance_valid(box) or not "object_id" in box:
+		return
+	_object_clipboard = _snapshot_object_box(box)
+	_object_clipboard["paste_at_mouse"] = false
+
+func _clipboard_cut() -> void:
+	var box: Node3D = _selected_prop
+	if box == null or not is_instance_valid(box) or not "object_id" in box:
+		return
+	_object_clipboard = _snapshot_object_box(box)
+	_object_clipboard["paste_at_mouse"] = true
+	_delete_selected_prop()
+
+func _clipboard_paste() -> void:
+	if _object_clipboard.is_empty():
+		return
+	var oid: String = String(_object_clipboard.get("object_id", ""))
+	if oid == "":
+		return
+	var box: Node3D = Node3D.new()
+	box.set_script(OBJECT_BOX_SCRIPT)
+	box.object_id = oid
+	add_child(box)
+	# Default: re-stamp at the source transform (paste-in-place, sits
+	# inside the original). After a cut, retarget origin to the cursor
+	# so the paste lands where the user is looking.
+	var xform: Transform3D = _object_clipboard.get("xform", Transform3D.IDENTITY)
+	if bool(_object_clipboard.get("paste_at_mouse", false)):
+		var hit: Dictionary = _raycast_cursor()
+		if not hit.is_empty():
+			xform.origin = hit.position
+	box.global_transform = xform
+	box.loot_table_id = String(_object_clipboard.get("loot_table_id", ""))
+	box.roll_count_override = int(_object_clipboard.get("roll_count_override", -1))
+	box.no_collide = bool(_object_clipboard.get("no_collide", false))
+	box.destructible = bool(_object_clipboard.get("destructible", false))
+	box.hp_max = int(_object_clipboard.get("hp_max", 100))
+	_placed_props.append(box)
+	_select_prop(box)
+	# After a cut+paste, behave like a copy from now on so subsequent V
+	# keeps stamping copies at the source xform.
+	_object_clipboard["paste_at_mouse"] = false
+	_object_clipboard["xform"] = box.global_transform
+
+func _snapshot_object_box(box: Node3D) -> Dictionary:
+	return {
+		"object_id":           String(box.object_id),
+		"xform":               box.global_transform,
+		"loot_table_id":       String(box.get("loot_table_id")),
+		"roll_count_override": int(box.get("roll_count_override")),
+		"no_collide":          bool(box.get("no_collide")),
+		"destructible":        bool(box.get("destructible")),
+		"hp_max":              int(box.get("hp_max")),
+	}
 
 func _on_lighting_changed(state: Dictionary) -> void:
 	# Live-edit feedback + persist for the F9 round-trip. main_bootstrap

@@ -22,6 +22,13 @@ var loot_table_id: String = ""
 # >= 0 wins so the editor can drop a one-item stash next to a stuffed
 # bonanza without forking the catalog.
 var roll_count_override: int = -1
+# Skip collision on the spawned prop (player walks through it). Useful
+# for decorative meshes the player can pass under or for set dressing.
+var no_collide: bool = false
+# Marks the prop as destructible at play. Bootstrap stamps hp_max as
+# metadata; gameplay damage code reads/decrements it.
+var destructible: bool = false
+var hp_max: int = 100
 var _local_aabb: AABB = AABB(-FALLBACK_SIZE * 0.5, FALLBACK_SIZE)
 
 var _mesh_instance: MeshInstance3D
