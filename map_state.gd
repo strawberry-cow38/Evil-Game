@@ -23,6 +23,10 @@ var item_tables: Array = []
 # Placed item-spawn cubes. Each entry: { "table_id": String, "pos": Vector3 }.
 # Play scene rolls the referenced table per entry to drop a single pickup.
 var item_spawn_points: Array = []
+# Sky/sun/ambient state authored via Environment → Lighting. Empty dict
+# = play scene uses main.tscn's hardcoded defaults. See
+# editor_lighting_panel.gd DEFAULTS for key list.
+var lighting: Dictionary = {}
 
 func has_map() -> bool:
 	return heights.size() > 0 and grid_w > 0 and grid_h > 0
@@ -35,6 +39,7 @@ func clear() -> void:
 	placed_props.clear()
 	item_tables.clear()
 	item_spawn_points.clear()
+	lighting.clear()
 
 func random_player_spawn() -> Vector3:
 	if player_spawns.is_empty():

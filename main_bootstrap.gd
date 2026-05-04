@@ -11,12 +11,19 @@ const EFFECT_CATALOG := preload("res://editor_effect_catalog.gd")
 const OBJECT_CATALOG := preload("res://editor_objects_catalog.gd")
 const PICKUP := preload("res://pickup.gd")
 const VEHICLE := preload("res://vehicle.gd")
+const EDITOR_SCRIPT := preload("res://editor.gd")
 const NOTHING_ITEM_ID := "nothing"
 
 # Fixed vehicle spawn — sits a few meters off the player spawn so it's findable.
 const VEHICLE_SPAWN_OFFSET := Vector3(6.0, 0.0, 0.0)
 
 func _ready() -> void:
+	# Apply authored sky/sun/ambient before anything else so the first
+	# frame already shows the right lighting (no flash of defaults).
+	if not MapState.lighting.is_empty():
+		var env_node: WorldEnvironment = get_node_or_null("WorldEnvironment")
+		var sun_node: DirectionalLight3D = get_node_or_null("Sun")
+		EDITOR_SCRIPT.apply_lighting_to(env_node, sun_node, MapState.lighting)
 	var terrain_node: Node = null
 	if MapState.has_map():
 		var ground := get_node_or_null("Ground")

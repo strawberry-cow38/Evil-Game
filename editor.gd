@@ -23,12 +23,14 @@ const TOOL_S_ITEMS := "s_items"
 const TOOL_S_ITEMS_REMOVE := "s_items_remove"
 const TOOL_L_EFFECTS := "l_effects"
 const TOOL_O_OBJECTS := "o_objects"
+const TOOL_E_LIGHTING := "e_lighting"
 
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
 const ITEM_SPAWN_BOX_SCRIPT := preload("res://editor_item_spawn_box.gd")
 const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 const CONTAINER_PANEL_SCRIPT := preload("res://editor_container_panel.gd")
+const LIGHTING_PANEL_SCRIPT := preload("res://editor_lighting_panel.gd")
 const OBJECTS_CATALOG := preload("res://editor_objects_catalog.gd")
 const CRATE := preload("res://crate.gd")
 
@@ -107,6 +109,10 @@ var _drag_scale_pivot: bool = false
 # Loot-table picker shown only when the selected prop is a crate. Built
 # at runtime so editor.tscn doesn't need a new node.
 var _container_panel: PanelContainer = null
+# Lighting tuner shown only while Environment → Lighting is active.
+var _lighting_panel: PanelContainer = null
+@onready var _world_env: WorldEnvironment = $WorldEnvironment
+@onready var _sun: DirectionalLight3D = $Sun
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -176,6 +182,24 @@ func _ready() -> void:
 	$UI.add_child(_container_panel)
 	_container_panel.table_chosen.connect(_on_container_table_chosen)
 	_container_panel.rolls_changed.connect(_on_container_rolls_changed)
+	# Lighting tuner. Same pattern as the container panel — built at
+	# runtime so editor.tscn doesn't need a new node, hidden until the
+	# Environment → Lighting tool is picked.
+	_lighting_panel = PanelContainer.new()
+	_lighting_panel.set_script(LIGHTING_PANEL_SCRIPT)
+	_lighting_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_lighting_panel.offset_left = -300
+	_lighting_panel.offset_right = -8
+	_lighting_panel.offset_top = 60
+	_lighting_panel.offset_bottom = 520
+	_lighting_panel.visible = false
+	$UI.add_child(_lighting_panel)
+	_lighting_panel.lighting_changed.connect(_on_lighting_changed)
+	# Restore prior lighting (round-trip from F9 play) so the editor
+	# matches what the player saw.
+	if not MapState.lighting.is_empty():
+		_lighting_panel.set_state(MapState.lighting)
+		_apply_lighting(MapState.lighting)
 
 func _input(event: InputEvent) -> void:
 	# F9 → play mode. Either the input action OR the raw key fires it,
@@ -475,7 +499,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle, _container_panel]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _space_toggle, _container_panel, _lighting_panel]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -498,6 +522,8 @@ func _on_tool_picked(tool_id: String) -> void:
 	_item_tables_panel.visible = (tool_id == TOOL_S_ITEMS)
 	if tool_id != TOOL_S_ITEMS:
 		_item_picker_panel.visible = false
+	if _lighting_panel != null:
+		_lighting_panel.visible = (tool_id == TOOL_E_LIGHTING)
 	# Gizmo only matters while a placement tool is active.
 	if _gizmo != null:
 		if tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS:
@@ -695,6 +721,43 @@ func _on_container_rolls_changed(rolls: int) -> void:
 	if _selected_prop == null or not "roll_count_override" in _selected_prop:
 		return
 	_selected_prop.roll_count_override = rolls
+
+func _on_lighting_changed(state: Dictionary) -> void:
+	# Live-edit feedback + persist for the F9 round-trip. main_bootstrap
+	# reads MapState.lighting on play scene start.
+	MapState.lighting = state.duplicate(true)
+	_apply_lighting(state)
+
+# Apply a lighting dict (same shape as editor_lighting_panel.DEFAULTS) to
+# the scene's WorldEnvironment + Sun. Shared by the live-edit hook and
+# the F9-restore path so both behave identically.
+static func apply_lighting_to(env_node: WorldEnvironment, sun: DirectionalLight3D, state: Dictionary) -> void:
+	if env_node == null or sun == null or state.is_empty():
+		return
+	var env: Environment = env_node.environment
+	if env != null:
+		env.ambient_light_energy = float(state.get("ambient_energy", 0.5))
+		env.ambient_light_color = state.get("ambient_color", Color(0.6, 0.65, 0.7, 1))
+		env.bg_energy_multiplier = float(state.get("sky_energy", 1.0))
+		var sky: Sky = env.sky
+		if sky != null and sky.sky_material is ProceduralSkyMaterial:
+			var mat: ProceduralSkyMaterial = sky.sky_material
+			mat.sky_top_color = state.get("sky_top", mat.sky_top_color)
+			mat.sky_horizon_color = state.get("sky_horizon", mat.sky_horizon_color)
+	sun.light_energy = float(state.get("sun_energy", 1.0))
+	sun.light_color = state.get("sun_color", Color.WHITE)
+	# Pitch = elevation above horizon, yaw = compass. Build basis with
+	# yaw around Y first then pitch around the rotated X so the sun
+	# rotates intuitively (yaw spins, pitch tilts).
+	var pitch: float = deg_to_rad(float(state.get("sun_pitch_deg", 45.0)))
+	var yaw: float = deg_to_rad(float(state.get("sun_yaw_deg", 30.0)))
+	var b: Basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -pitch)
+	var t: Transform3D = sun.global_transform
+	t.basis = b
+	sun.global_transform = t
+
+func _apply_lighting(state: Dictionary) -> void:
+	apply_lighting_to(_world_env, _sun, state)
 
 func _pick_prop_under_cursor() -> void:
 	# Ray-vs-AABB pick over every placed effect; closest hit wins.
