@@ -24,6 +24,16 @@ const STEER_SPEED := 4.0     # how fast steering eases toward target
 const HANDBRAKE_FORCE := 32.0
 const HANDBRAKE_TAP_S := 0.18  # space held shorter than this = toggle latched
 
+# Manual transmission. Higher gear = lower torque multiplier = higher top speed
+# at any given RPM. Reverse uses its own ratio (negative is implicit in REVERSE_FORCE).
+const GEAR_RATIOS: Array[float] = [3.6, 2.4, 1.7, 1.25, 0.95]
+const FINAL_DRIVE := 3.5
+const WHEEL_RADIUS := 0.34
+const IDLE_RPM := 800.0
+const REDLINE_RPM := 7500.0
+const REV_LIMITER_CUT := 7600.0   # engine_force gates above this until RPM drops back
+const RPM_FOLLOW_RATE := 9.0      # how fast displayed RPM eases toward target each second
+
 const ENTER_RANGE := 4.0
 
 # Local-space seat positions (relative to car body origin).
@@ -46,6 +56,9 @@ var _steer: float = 0.0
 var _enter_locked_until: float = 0.0  # debounce E so it doesn't enter+exit same press
 var _space_press_time: float = -1.0   # -1 = not pressed; otherwise wall-clock seconds
 var _handbrake_latched: bool = false  # toggled by tap-release; held independently while space down
+var _gear: int = 1                    # 1..GEAR_RATIOS.size(); reverse handled via S input
+var _rpm: float = IDLE_RPM            # displayed RPM, eased toward _target_rpm each frame
+var _rev_limited: bool = false        # true while the limiter is currently cutting fuel
 
 func _ready() -> void:
 	mass = 900.0
@@ -167,19 +180,46 @@ func _physics_process(delta: float) -> void:
 	# Driver input drives engine + steering. Brake is applied to all
 	# wheels via the VehicleBody3D `brake` property.
 	if _driver != null:
+		# Gear shifts (edge-triggered). Guarded by the same enter-debounce so the
+		# E press that seated the player doesn't immediately shift to gear 2.
+		var unlocked: bool = Time.get_ticks_msec() / 1000.0 >= _enter_locked_until
+		if unlocked and Input.is_action_just_pressed("interact"):
+			_shift_up()
+		if unlocked and Input.is_action_just_pressed("vehicle_shift_down"):
+			_shift_down()
 		var fwd: float = Input.get_action_strength("move_forward") - Input.get_action_strength("move_back")
 		var steer_in: float = Input.get_action_strength("move_left") - Input.get_action_strength("move_right")
 		var target_engine: float = 0.0
 		var target_brake: float = PASSIVE_BRAKE
+		# Compute current RPM from wheel speed projected onto the local -Z axis,
+		# the gear ratio, and the final drive. Below idle we clamp up so the
+		# engine doesn't stall visually.
+		var local_v: Vector3 = global_transform.basis.transposed() * linear_velocity
+		var fwd_speed: float = local_v.z   # +Z is forward; sign carried for completeness
+		var wheel_rps: float = absf(fwd_speed) / (TAU * WHEEL_RADIUS)   # revs/sec
+		var ratio: float = GEAR_RATIOS[_gear - 1]
+		var target_rpm: float = wheel_rps * 60.0 * ratio * FINAL_DRIVE
+		if target_rpm < IDLE_RPM:
+			target_rpm = IDLE_RPM
+		# Slight bump toward redline when throttle is pinned and the car can't
+		# spin the wheels fast enough (eg starting from a stop) so the gauge
+		# isn't dead-flat at idle.
+		if fwd > 0.0:
+			target_rpm = max(target_rpm, IDLE_RPM + (REDLINE_RPM - IDLE_RPM) * 0.18 * fwd)
+		var alpha_rpm: float = 1.0 - exp(-RPM_FOLLOW_RATE * delta)
+		_rpm = lerpf(_rpm, target_rpm, alpha_rpm)
+		_rev_limited = _rpm >= REV_LIMITER_CUT
+		# Engine force scales by gear ratio relative to first gear (lower gears =
+		# more torque). Rev limiter cuts fuel above the cap.
 		# Engine force signs are inverted from the Godot default so W drives the
 		# car along +local-Z (matches the chase-cam orientation).
-		if fwd > 0.0:
-			target_engine = -ENGINE_FORCE * fwd
+		var torque_mult: float = ratio / GEAR_RATIOS[0]
+		if fwd > 0.0 and not _rev_limited:
+			target_engine = -ENGINE_FORCE * fwd * torque_mult
 			target_brake = 0.0
 		elif fwd < 0.0:
 			# Reverse if nearly stopped, otherwise brake. Forward motion is +Z
 			# now, so "still going forward" means local_v.z is positive.
-			var local_v: Vector3 = global_transform.basis.transposed() * linear_velocity
 			if local_v.z < 0.5:
 				target_engine = REVERSE_FORCE * absf(fwd)
 				target_brake = 0.0
@@ -212,15 +252,36 @@ func _physics_process(delta: float) -> void:
 		steering = _steer
 
 func _process(_delta: float) -> void:
-	# E to exit. Entering is driven from main_bootstrap (or any other
-	# system that calls try_enter_driver) so we don't race the player's
-	# own E handling for pickups.
-	if _driver != null and Input.is_action_just_pressed("interact"):
+	# F to exit (E is shift-up while seated). Entering is handled by player.gd.
+	if _driver != null and Input.is_action_just_pressed("vehicle_exit"):
 		if Time.get_ticks_msec() / 1000.0 >= _enter_locked_until:
 			exit_driver()
 
 func is_driver_seat_open() -> bool:
 	return _driver == null
+
+func get_rpm() -> float:
+	return _rpm
+
+func get_gear() -> int:
+	return _gear
+
+func get_gear_count() -> int:
+	return GEAR_RATIOS.size()
+
+func get_redline() -> float:
+	return REDLINE_RPM
+
+func is_rev_limited() -> bool:
+	return _rev_limited
+
+func _shift_up() -> void:
+	if _gear < GEAR_RATIOS.size():
+		_gear += 1
+
+func _shift_down() -> void:
+	if _gear > 1:
+		_gear -= 1
 
 func driver_seat_world() -> Vector3:
 	if _seat_markers.is_empty():
@@ -267,6 +328,9 @@ func exit_driver() -> void:
 	steering = 0.0
 	_handbrake_latched = false
 	_space_press_time = -1.0
+	_gear = 1
+	_rpm = IDLE_RPM
+	_rev_limited = false
 	_enter_locked_until = Time.get_ticks_msec() / 1000.0 + 0.3
 
 func _find_camera(n: Node) -> Camera3D:
