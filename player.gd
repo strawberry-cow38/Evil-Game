@@ -22,6 +22,7 @@ const INTERACT_MASK := 0xFFFFFFFF
 
 const Items = preload("res://items.gd")
 const PICKUP_SCRIPT := preload("res://pickup.gd")
+const CONTAINER_HOVER := preload("res://container_hover.gd")
 const DROP_FORWARD := 1.1            # m in front of player center
 const DROP_SPREAD := 0.45            # m random radius around drop anchor
 const DROP_HEIGHT := 0.35            # m above floor
@@ -78,6 +79,8 @@ var _inventory: Node
 var _pie: Node
 var _scope: Node
 var _interact_target: Node = null    # current Pickup the player is looking at, if any
+var _container_target: Node = null   # current crate the player is looking at, if any
+var _container_hover: CanvasLayer    # right-side hover panel listing the crate's items
 var _prompt_label: Label
 var _rng := RandomNumberGenerator.new()
 var _reload_held: bool = false
@@ -102,6 +105,8 @@ func _ready() -> void:
 	if scope_overlay_path != NodePath():
 		_scope = get_node(scope_overlay_path)
 	_build_prompt()
+	_container_hover = CONTAINER_HOVER.new()
+	add_child(_container_hover)
 	_seed_starting_inventory()
 	if _inventory != null and _inventory.has_signal("equipped_changed"):
 		_inventory.equipped_changed.connect(_on_equipped_changed)
@@ -210,6 +215,9 @@ func set_in_vehicle(v: Node) -> void:
 		velocity = Vector3.ZERO
 		_prompt_label.text = ""
 		_interact_target = null
+		_container_target = null
+		if _container_hover != null:
+			_container_hover.hide_panel()
 	visible = v == null
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -232,6 +240,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Menu handles its own ESC when open; only the click-recapture flow runs here.
 		if not is_menu_open():
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
+	elif event is InputEventMouseButton and event.pressed and _container_target != null and not is_menu_open():
+		# Mouse wheel scrolls the highlighted item in the hover panel. Swallow
+		# the event so the weapon doesn't see it.
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			if _container_hover != null:
+				_container_hover.cycle(-1)
+			get_viewport().set_input_as_handled()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			if _container_hover != null:
+				_container_hover.cycle(1)
+			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.pressed and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE and not is_menu_open():
 		# Click anywhere in the window re-grabs the cursor; swallow the click
 		# so the gun doesn't fire on the same press. Skip while menu is open
@@ -248,6 +267,9 @@ func _process(delta: float) -> void:
 	# player can stand near a car+item and have E mean "drive" rather than "loot".
 	if not is_menu_open() and Input.is_action_just_pressed("interact"):
 		if _try_enter_nearby_vehicle():
+			return
+		if _container_target != null:
+			_loot_from_container()
 			return
 		if _interact_target != null:
 			_loot(_interact_target)
@@ -339,9 +361,13 @@ func _physics_process(delta: float) -> void:
 func _update_interact_target() -> void:
 	if is_menu_open():
 		_interact_target = null
+		_container_target = null
 		_prompt_label.text = ""
+		if _container_hover != null:
+			_container_hover.hide_panel()
 		return
-	# Short ray straight forward from the camera; only hits pickup bodies (layer 4).
+	# Short ray straight forward from the camera. The collider's meta tells us
+	# whether it's a pickup, a container, or just geometry.
 	var origin: Vector3 = _camera.global_transform.origin
 	var dir: Vector3 = -_camera.global_transform.basis.z
 	var q := PhysicsRayQueryParameters3D.create(origin, origin + dir * INTERACT_RANGE)
@@ -349,17 +375,36 @@ func _update_interact_target() -> void:
 	q.exclude = [get_rid()]
 	var r := get_world_3d().direct_space_state.intersect_ray(q)
 	var pickup: Node = null
+	var container: Node = null
 	if r and r.has("collider"):
 		var col: Object = r.collider
-		if col is Node and col.has_meta("pickup"):
-			var p = col.get_meta("pickup")
-			if is_instance_valid(p):
-				pickup = p
+		if col is Node:
+			if col.has_meta("pickup"):
+				var p = col.get_meta("pickup")
+				if is_instance_valid(p):
+					pickup = p
+			elif col.has_meta("container"):
+				var c = col.get_meta("container")
+				if is_instance_valid(c):
+					container = c
 	_interact_target = pickup
-	if pickup != null and pickup.has_method("get_label"):
+	_container_target = container
+	if container != null:
+		_prompt_label.text = ""
+		if _container_hover != null:
+			_container_hover.show_for(container)
+	elif pickup != null and pickup.has_method("get_label"):
 		_prompt_label.text = "[E] Pick up %s" % pickup.get_label()
+		if _container_hover != null:
+			_container_hover.hide_panel()
 	else:
 		_prompt_label.text = ""
+		if _container_hover != null:
+			_container_hover.hide_panel()
+	# Container contents may have changed (we just transferred items, or some
+	# other path mutated them) — keep the panel readout fresh.
+	if container != null and _container_hover != null:
+		_container_hover.refresh()
 
 # Walk the "vehicle" group, pick the closest one with an open driver seat, and
 # call try_enter_driver on it. Returns true if we actually got in.
@@ -520,6 +565,41 @@ func _spawn_drop(id: String, count: int, instance: Dictionary) -> void:
 		p.instance = instance.duplicate(true)
 	get_tree().current_scene.add_child(p)
 	p.global_position = anchor
+
+func _loot_from_container() -> void:
+	if _inventory == null or _container_target == null or _container_hover == null:
+		return
+	var entry: Dictionary = _container_hover.selected_entry()
+	if entry.is_empty():
+		return
+	if bool(entry.get("is_instance", false)):
+		var uid: int = int(entry.get("uid", 0))
+		if uid == 0:
+			return
+		var inst: Dictionary = _container_target.remove_instance(uid)
+		if inst.is_empty():
+			return
+		if not _inventory.add_instance(inst):
+			# Weight failed — restore to crate so nothing vanishes.
+			_container_target.add_instance(inst)
+			_prompt_label.text = "Too heavy! (%s)" % String(entry.get("name", ""))
+	else:
+		var id: String = String(entry.get("id", ""))
+		var count: int = int(entry.get("count", 1))
+		if id == "" or count <= 0:
+			return
+		# Try the whole stack first; fall back to as much as fits if the
+		# player can't carry the lot.
+		var fits: int = count
+		while fits > 0 and not _inventory.can_add(id, fits):
+			fits -= 1
+		if fits <= 0:
+			_prompt_label.text = "Too heavy! (%s)" % String(entry.get("name", ""))
+			return
+		if _container_target.remove(id, fits):
+			_inventory.add(id, fits)
+	# Refresh the hover panel so the new counts/list show immediately.
+	_container_hover.refresh()
 
 func _loot(target: Node) -> void:
 	if _inventory == null or target == null:
