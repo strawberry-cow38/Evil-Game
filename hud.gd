@@ -56,6 +56,8 @@ func _process(delta: float) -> void:
 	var redline := 1.0
 	var gear_label := "N"
 	var rev_limited := false
+	var engine_on := true
+	var start_progress := -1.0
 	if _player:
 		# When seated as driver the player's own velocity is forced to zero, so
 		# fall through to the vehicle's linear_velocity for the readout.
@@ -73,13 +75,24 @@ func _process(delta: float) -> void:
 					gear_label = veh.get_gear_label()
 				if veh.has_method("is_rev_limited"):
 					rev_limited = veh.is_rev_limited()
+				if veh.has_method("is_engine_on"):
+					engine_on = veh.is_engine_on()
+				if veh.has_method("get_start_progress"):
+					start_progress = veh.get_start_progress()
 		else:
 			var v := _player.velocity
 			speed = Vector2(v.x, v.z).length()
 	if driving:
-		var rl_marker: String = "  REV LIMIT" if rev_limited else ""
+		var status: String = ""
+		if not engine_on:
+			if start_progress >= 0.0:
+				status = "  CRANKING %d%%" % int(round(start_progress * 100.0))
+			else:
+				status = "  ENGINE OFF (hold N to start)"
+		elif rev_limited:
+			status = "  REV LIMIT"
 		_label.text = "FPS: %d\nSpeed: %.2f m/s  (driving)\nRPM: %d / %d   Gear: %s%s" % [
-			fps, speed, int(round(rpm)), int(round(redline)), gear_label, rl_marker
+			fps, speed, int(round(rpm)), int(round(redline)), gear_label, status
 		]
 		_update_rpm_gauge(rpm, redline, rev_limited)
 	else:

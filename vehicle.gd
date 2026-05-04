@@ -20,8 +20,8 @@ const REVERSE_FORCE := 1200.0
 const BRAKE_FORCE := 14.0
 const PASSIVE_BRAKE := 0.6   # mild drag when no input so the car coasts to a stop
 const STEER_MAX := 0.55         # max wheel steer angle (radians) at low speed
-const STEER_MAX_HIGH := 0.18    # max steer angle once cruising fast — prevents tip-overs
-const STEER_SPEED_REF := 22.0   # m/s where steering authority bottoms out at STEER_MAX_HIGH
+const STEER_MAX_HIGH := 0.10    # max steer angle once cruising fast — prevents tip-overs
+const STEER_SPEED_REF := 18.0   # m/s where steering authority bottoms out at STEER_MAX_HIGH
 const STEER_SPEED := 4.0        # how fast steering eases toward target
 const HANDBRAKE_FORCE := 32.0
 const HANDBRAKE_TAP_S := 0.18  # space held shorter than this = toggle latched
@@ -38,6 +38,11 @@ const REV_LIMITER_CUT := 6300.0   # engine_force gates above this until RPM drop
 const RPM_HARD_CAP := 6500.0      # absolute ceiling on displayed RPM, even from downshifts
 const RPM_FOLLOW_RATE := 9.0      # how fast displayed RPM eases toward target each second
 const NEUTRAL_REV_RATE := 14.0    # how fast RPM tracks throttle in neutral
+const RPM_OFF_DECAY := 6.0        # how fast RPM falls toward 0 when engine is off
+const ENGINE_BRAKE := 4.0         # brake force applied off-throttle in gear (engine drag)
+const STALL_RPM := 450.0          # RPM below which an in-gear engine cuts out
+const ENGINE_START_HOLD_S := 0.9  # how long N must be held to attempt a start
+const ENGINE_START_SUCCESS := 0.65 # chance per attempt of catching
 # Shift "bump": clutch-disengaged window after every shift where engine_force
 # drops to zero and a small drag pulses through, so the driver feels the gear
 # change as a momentum hiccup rather than a silent torque tweak.
@@ -88,6 +93,15 @@ var _shift_player: AudioStreamPlayer3D = null
 var _shift_playback: AudioStreamGeneratorPlayback = null
 var _shift_frames_remaining: int = 0  # frames left in current shift-noise burst
 var _shift_burst_total: int = 1       # frames in the burst (for envelope normalization)
+# Engine on/off + start procedure.
+var _engine_on: bool = false          # car spawns with the engine cold
+var _start_hold: float = 0.0          # how long N has been held this attempt
+var _start_locked: bool = false       # true after a failed attempt until N is released
+var _crank_player: AudioStreamPlayer3D = null
+var _crank_playback: AudioStreamGeneratorPlayback = null
+var _crank_phase: float = 0.0
+var _crank_mod_phase: float = 0.0
+var _crank_active: bool = false       # set in _physics_process, consumed by _fill_crank_buffer
 
 func _ready() -> void:
 	mass = 900.0
@@ -162,11 +176,11 @@ func _ready() -> void:
 		w.use_as_steering = spec["steer"]
 		w.use_as_traction = spec["drive"]
 		w.wheel_radius = 0.34
-		w.wheel_friction_slip = 5.5
-		w.suspension_stiffness = 60.0
-		w.suspension_max_force = 9000.0
-		w.damping_compression = 0.85
-		w.damping_relaxation = 0.85
+		w.wheel_friction_slip = 5.0
+		w.suspension_stiffness = 48.0
+		w.suspension_max_force = 8000.0
+		w.damping_compression = 0.7
+		w.damping_relaxation = 0.7
 		var wm := MeshInstance3D.new()
 		var wmesh := CylinderMesh.new()
 		wmesh.top_radius = 0.34
@@ -203,10 +217,11 @@ func _ready() -> void:
 	# Mass on the body itself drags the centre of mass too high if the
 	# default sits on the cabin. Bias it down so the car doesn't tip.
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
-	center_of_mass = Vector3(0, -0.05, 0)
+	center_of_mass = Vector3(0, 0.0, 0)
 	# Damp body roll/yaw oscillations so the car settles after sharp turns
-	# instead of fishtailing forever.
-	angular_damp = 4.0
+	# instead of fishtailing forever (but not too hard — the user wants some
+	# visible body roll for character).
+	angular_damp = 2.5
 	# Procedural audio — engine loop + one-shot shift noise. Both use
 	# AudioStreamGenerator so they pan + attenuate naturally in 3D.
 	_setup_audio()
@@ -234,6 +249,17 @@ func _setup_audio() -> void:
 	add_child(_shift_player)
 	_shift_player.play()
 	_shift_playback = _shift_player.get_stream_playback()
+	_crank_player = AudioStreamPlayer3D.new()
+	var cg := AudioStreamGenerator.new()
+	cg.mix_rate = AUDIO_SAMPLE_RATE
+	cg.buffer_length = 0.10
+	_crank_player.stream = cg
+	_crank_player.volume_db = -3.0
+	_crank_player.unit_size = 7.0
+	_crank_player.max_distance = 50.0
+	add_child(_crank_player)
+	_crank_player.play()
+	_crank_playback = _crank_player.get_stream_playback()
 
 func _physics_process(delta: float) -> void:
 	# Driver input drives engine + steering. Brake is applied to all
@@ -249,19 +275,46 @@ func _physics_process(delta: float) -> void:
 		var fwd: float = Input.get_action_strength("move_forward") - Input.get_action_strength("move_back")
 		var steer_in: float = Input.get_action_strength("move_left") - Input.get_action_strength("move_right")
 		_throttle = clampf(fwd, 0.0, 1.0)
+		# Engine start procedure. Hold N for ENGINE_START_HOLD_S; one chance to
+		# catch per press. Failed attempts lock out until release.
+		_crank_active = false
+		if _engine_on:
+			_start_hold = 0.0
+			_start_locked = false
+		else:
+			if Input.is_action_just_pressed("vehicle_restart"):
+				_start_hold = 0.0
+				_start_locked = false
+			if Input.is_action_pressed("vehicle_restart"):
+				if not _start_locked:
+					_start_hold += delta
+					_crank_active = true
+					if _start_hold >= ENGINE_START_HOLD_S:
+						if randf() < ENGINE_START_SUCCESS:
+							_engine_on = true
+							_rpm = IDLE_RPM
+							_start_hold = 0.0
+						else:
+							_start_locked = true   # need to release & retry
+			else:
+				_start_hold = 0.0
+				_start_locked = false
 		var target_engine: float = 0.0
 		var target_brake: float = PASSIVE_BRAKE
-		# Compute current RPM. Two paths:
+		# Compute current RPM. Three paths:
+		#  - engine off: RPM falls to 0 (gauge dead)
+		#  - neutral: engine free-revs to throttle position
 		#  - in gear (incl. reverse): RPM follows wheel speed * ratio * final drive
-		#  - in neutral: engine free-revs to throttle position
 		var local_v: Vector3 = global_transform.basis.transposed() * linear_velocity
 		var fwd_speed: float = local_v.z
 		var wheel_rps: float = absf(fwd_speed) / (TAU * WHEEL_RADIUS)
 		var ratio: float = _current_ratio()
 		var target_rpm: float
-		if _gear == 0:
+		if not _engine_on:
+			_rpm = lerpf(_rpm, 0.0, 1.0 - exp(-RPM_OFF_DECAY * delta))
+		elif _gear == 0:
 			# Neutral: throttle directly drives RPM. Faster follow rate so the
-			# engine "barks" when blipped.
+			# engine "barks" when blipped, and falls back fast when released.
 			target_rpm = lerpf(IDLE_RPM, REDLINE_RPM * 0.95, _throttle)
 			var na: float = 1.0 - exp(-NEUTRAL_REV_RATE * delta)
 			_rpm = lerpf(_rpm, target_rpm, na)
@@ -274,9 +327,15 @@ func _physics_process(delta: float) -> void:
 				target_rpm = max(target_rpm, IDLE_RPM + (REDLINE_RPM - IDLE_RPM) * 0.18 * fwd)
 			# Hard cap so a downshift from 5th to 1st can't paint 14k on the gauge.
 			target_rpm = min(target_rpm, RPM_HARD_CAP)
-			var alpha_rpm: float = 1.0 - exp(-RPM_FOLLOW_RATE * delta)
-			_rpm = lerpf(_rpm, target_rpm, alpha_rpm)
-		_rev_limited = _rpm >= REV_LIMITER_CUT
+			# Asymmetric follow: rises at the standard rate, falls faster so
+			# letting off the gas drops the needle quickly toward idle.
+			var rate: float = RPM_FOLLOW_RATE if target_rpm > _rpm else RPM_FOLLOW_RATE * 2.0
+			_rpm = lerpf(_rpm, target_rpm, 1.0 - exp(-rate * delta))
+		_rev_limited = _engine_on and _rpm >= REV_LIMITER_CUT
+		# Stall: in-gear, off-throttle, RPM dropped below idle (engine couldn't
+		# sustain itself). Neutral never stalls — engine spins free.
+		if _engine_on and _gear != 0 and _throttle <= 0.0 and _rpm < STALL_RPM:
+			_engine_on = false
 		# Torque magnitude scales by ratio relative to first gear. Reverse gets
 		# its own dedicated force constant, sign-flipped vs the +Z forward
 		# convention so it pushes the car -Z.
@@ -287,6 +346,10 @@ func _physics_process(delta: float) -> void:
 			_shift_cooldown -= delta
 			target_engine = 0.0
 			target_brake = max(target_brake, SHIFT_BUMP_BRAKE)
+		elif not _engine_on:
+			# Coast — no torque, very mild rolling resistance only.
+			target_engine = 0.0
+			target_brake = PASSIVE_BRAKE * 0.4
 		elif _gear == 0:
 			# Neutral: no engine force at the wheels regardless of throttle.
 			target_engine = 0.0
@@ -295,9 +358,17 @@ func _physics_process(delta: float) -> void:
 			if fwd > 0.0 and not _rev_limited:
 				target_engine = REVERSE_FORCE * fwd
 				target_brake = 0.0
+			elif fwd <= 0.0:
+				# Engine braking off-throttle, scales with reverse ratio (low).
+				target_brake = max(target_brake, ENGINE_BRAKE * 0.6)
 		elif fwd > 0.0 and not _rev_limited:
 			target_engine = -ENGINE_FORCE * fwd * torque_mult
 			target_brake = 0.0
+		else:
+			# In a forward gear, off throttle: engine drag bleeds wheel speed
+			# (and hence RPM) so the gauge falls naturally. Lower gears brake
+			# harder — that's where engine braking is most felt in real cars.
+			target_brake = max(target_brake, ENGINE_BRAKE * torque_mult)
 		# S is now a brake-only input — no automatic reverse, the player must
 		# shift to R to back up. Brake strength scales with how hard S is held.
 		if fwd < 0.0:
@@ -333,7 +404,11 @@ func _physics_process(delta: float) -> void:
 		_steer = lerpf(_steer, 0.0, 1.0 - exp(-STEER_SPEED * delta))
 		steering = _steer
 		_throttle = 0.0
-		_rpm = lerpf(_rpm, IDLE_RPM, 1.0 - exp(-RPM_FOLLOW_RATE * delta))
+		_crank_active = false
+		# Engine RPM follows whether it's running: idle if on, decay to 0 if off.
+		var passive_target: float = IDLE_RPM if _engine_on else 0.0
+		var passive_rate: float = RPM_FOLLOW_RATE if _engine_on else RPM_OFF_DECAY
+		_rpm = lerpf(_rpm, passive_target, 1.0 - exp(-passive_rate * delta))
 
 func _process(_delta: float) -> void:
 	# F to exit (E is shift-up while seated). Entering is handled by player.gd.
@@ -342,6 +417,7 @@ func _process(_delta: float) -> void:
 			exit_driver()
 	_fill_engine_buffer()
 	_fill_shift_buffer()
+	_fill_crank_buffer()
 
 func _fill_engine_buffer() -> void:
 	if _engine_playback == null:
@@ -353,10 +429,11 @@ func _fill_engine_buffer() -> void:
 	var freq: float = lerpf(ENGINE_BASE_HZ, ENGINE_TOP_HZ, rpm_t)
 	var omega: float = TAU * freq / float(AUDIO_SAMPLE_RATE)
 	var omega2: float = omega * 2.0
-	# Idle hum is always present so the car "feels" running. Throttle bumps
-	# amplitude by another 50%. Driver-only audibility is fine — others can
-	# still hear it via 3D attenuation since it always plays.
-	var amp: float = 0.10 + 0.16 * rpm_t + 0.08 * _throttle
+	# Idle hum is always present while the engine is running. When off the
+	# generator goes silent (no rumble) so the car reads as dead.
+	var amp: float = 0.0
+	if _engine_on:
+		amp = 0.10 + 0.16 * rpm_t + 0.08 * _throttle
 	var frames: int = _engine_playback.get_frames_available()
 	for i in range(frames):
 		_engine_phase += omega
@@ -393,6 +470,33 @@ func _trigger_shift_sound() -> void:
 	_shift_burst_total = int(float(AUDIO_SAMPLE_RATE) * SHIFT_SOUND_S)
 	_shift_frames_remaining = _shift_burst_total
 
+func _fill_crank_buffer() -> void:
+	if _crank_playback == null:
+		return
+	# Cranking sound = a deep ~60Hz square wave amplitude-modulated at 4Hz so
+	# it pulses like a starter motor, plus some grit from layered noise. Goes
+	# silent when not cranking.
+	var freq: float = 55.0
+	var mod_freq: float = 4.0
+	var d_phase: float = TAU * freq / float(AUDIO_SAMPLE_RATE)
+	var d_mod: float = TAU * mod_freq / float(AUDIO_SAMPLE_RATE)
+	var amp: float = 0.30 if _crank_active else 0.0
+	var frames: int = _crank_playback.get_frames_available()
+	for i in range(frames):
+		var s: float = 0.0
+		if amp > 0.0:
+			_crank_phase += d_phase
+			_crank_mod_phase += d_mod
+			if _crank_phase > TAU:
+				_crank_phase -= TAU
+			if _crank_mod_phase > TAU:
+				_crank_mod_phase -= TAU
+			var sq: float = 1.0 if sin(_crank_phase) > 0.0 else -1.0
+			var env: float = (sin(_crank_mod_phase) + 1.0) * 0.5
+			var noise: float = randf() * 2.0 - 1.0
+			s = (sq * 0.65 + noise * 0.35) * env * amp
+		_crank_playback.push_frame(Vector2(s, s))
+
 func is_driver_seat_open() -> bool:
 	return _driver == null
 
@@ -418,6 +522,16 @@ func get_redline() -> float:
 
 func is_rev_limited() -> bool:
 	return _rev_limited
+
+func is_engine_on() -> bool:
+	return _engine_on
+
+# 0..1 progress through the current N-hold start attempt. -1 if no attempt
+# is active or the engine is already running.
+func get_start_progress() -> float:
+	if _engine_on or _start_hold <= 0.0:
+		return -1.0
+	return clampf(_start_hold / ENGINE_START_HOLD_S, 0.0, 1.0)
 
 func _shift_up() -> void:
 	if _gear < GEAR_RATIOS.size():
