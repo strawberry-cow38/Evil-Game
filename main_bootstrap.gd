@@ -159,7 +159,11 @@ func _ready() -> void:
 			# drop_table still spawns a corpse so the player gets the
 			# visual feedback even with no loot.
 			var preset_color: Color = preset.get("color", Color(0.6, 0.4, 0.3, 1))
-			var label: String = String(preset.get("name", "Corpse"))
+			# Prefer the in-game display name; fall back to the table name
+			# (and finally "Corpse") if the field was left blank.
+			var label: String = String(preset.get("actor_name", "")).strip_edges()
+			if label == "":
+				label = String(preset.get("name", "Corpse"))
 			if body.has_signal("died"):
 				body.died.connect(func(drop_id: String, _xp: int):
 					_spawn_corpse(actors_root, body.global_position, preset_color, label, drop_id, itables_by_id)

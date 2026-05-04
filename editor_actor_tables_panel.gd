@@ -44,6 +44,7 @@ var _slot_tab_buttons: Dictionary = {}
 var _entries_box: VBoxContainer
 var _add_clothing_btn: Button
 # Settings field refs (refreshed each table switch)
+var _actor_name_edit: LineEdit
 var _hp_slider: HSlider
 var _hp_label: Label
 var _level_slider: HSlider
@@ -288,6 +289,7 @@ func _table_to_json(t: Dictionary) -> Dictionary:
 	return {
 		"id": String(t.get("id", "")),
 		"name": String(t.get("name", "")),
+		"actor_name": String(t.get("actor_name", "")),
 		"color": [c.r, c.g, c.b],
 		"actor_id": String(t.get("actor_id", "dummy")),
 		"hp": int(t.get("hp", 500)),
@@ -325,6 +327,7 @@ func _table_from_json(t: Dictionary) -> Dictionary:
 	return {
 		"id": String(t.get("id", "")),
 		"name": String(t.get("name", "")),
+		"actor_name": String(t.get("actor_name", "")),
 		"color": col,
 		"actor_id": String(t.get("actor_id", "dummy")),
 		"hp": int(t.get("hp", 500)),
@@ -350,6 +353,7 @@ func _on_create_pressed() -> void:
 	var t: Dictionary = {
 		"id": "atbl_%d" % _next_id,
 		"name": nm,
+		"actor_name": nm,
 		"color": col,
 		"actor_id": "dummy",
 		"hp": 500,
@@ -465,6 +469,20 @@ func _refresh_settings() -> void:
 	aval.modulate = Color(0.9, 0.9, 0.7, 1.0)
 	actor_row.add_child(aval)
 	_settings_box.add_child(actor_row)
+	# Display name — drives the loot UI header on the corpse + any in-game
+	# nameplates. Defaults to the table's own name when blank.
+	var aname_row := HBoxContainer.new()
+	var aname_lbl := Label.new()
+	aname_lbl.text = "Name"
+	aname_lbl.custom_minimum_size = Vector2(70, 0)
+	aname_row.add_child(aname_lbl)
+	_actor_name_edit = LineEdit.new()
+	_actor_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_actor_name_edit.text = String(t.get("actor_name", ""))
+	_actor_name_edit.placeholder_text = "(uses table name)"
+	_actor_name_edit.text_changed.connect(_on_actor_name_changed)
+	aname_row.add_child(_actor_name_edit)
+	_settings_box.add_child(aname_row)
 	# HP slider
 	_hp_slider = _build_int_slider("HP", int(t.get("hp", 500)), 1, HP_MAX)
 	_hp_label = _last_value_label
@@ -564,6 +582,12 @@ func _build_float_slider(label_text: String, initial: float, lo: float, hi: floa
 	s.value_changed.connect(func(val): v.text = fmt % val)
 	_last_value_label = v
 	return s
+
+func _on_actor_name_changed(t: String) -> void:
+	if _active_index < 0:
+		return
+	tables[_active_index]["actor_name"] = t
+	_save()
 
 func _on_hp_changed(v: int) -> void:
 	if _active_index < 0:
