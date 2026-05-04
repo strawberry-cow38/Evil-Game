@@ -1112,19 +1112,47 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 		_schedule_damage(hit_collider, impact_delay, distance)
 
 func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
-	if collider == null or not collider.has_method("take_damage"):
+	if collider == null:
+		return
+	# Walk up the parent chain looking for either a `take_damage` method
+	# (dummies, future enemies) or the destructible meta-flag stamped by
+	# main_bootstrap on placed objects. The collider itself is usually a
+	# StaticBody3D or MeshInstance3D nested inside the prop's root Node3D.
+	var target: Node = _find_damageable(collider)
+	if target == null:
 		return
 	var dmg: int = Items.ammo_damage_at(get_selected_ammo(), distance)
 	if dmg <= 0:
 		return
 	if delay <= 0.0:
-		collider.call("take_damage", dmg)
+		_apply_damage(target, dmg)
 		return
 	var timer := get_tree().create_timer(delay)
 	timer.timeout.connect(func():
-		if is_instance_valid(collider):
-			collider.call("take_damage", dmg)
+		if is_instance_valid(target):
+			_apply_damage(target, dmg)
 	)
+
+func _find_damageable(collider: Object) -> Node:
+	var n: Node = collider as Node
+	while n != null:
+		if n.has_method("take_damage"):
+			return n
+		if n.has_meta("destructible") and bool(n.get_meta("destructible")):
+			return n
+		n = n.get_parent()
+	return null
+
+func _apply_damage(target: Node, dmg: int) -> void:
+	if target.has_method("take_damage"):
+		target.call("take_damage", dmg)
+		return
+	# Meta-driven destructible: decrement HP, free the prop when it hits 0.
+	var hp: int = int(target.get_meta("hp", 0))
+	hp = max(hp - dmg, 0)
+	target.set_meta("hp", hp)
+	if hp <= 0:
+		target.queue_free()
 
 func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 	var mesh := ImmediateMesh.new()
@@ -1149,9 +1177,14 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 func _classify_material(collider: Object) -> String:
 	if collider == null:
 		return "concrete"
-	# Anything that takes damage is flesh — gives blood spray on hit.
-	if collider.has_method("take_damage"):
-		return "flesh"
+	# Walk up looking for a take_damage method — those are flesh (dummies,
+	# enemies). Destructible-meta props don't count as flesh; they get the
+	# default concrete impact since they're crates/boxes/etc.
+	var t: Node = collider as Node
+	while t != null:
+		if t.has_method("take_damage"):
+			return "flesh"
+		t = t.get_parent()
 	var n: String = ""
 	if collider is Node:
 		n = (collider as Node).name

@@ -81,9 +81,10 @@ func _ready() -> void:
 				if bool(entry.get("no_collide", false)):
 					_disable_collision(content)
 				if bool(entry.get("destructible", false)):
+					var hpmax: int = int(entry.get("hp_max", 100))
 					content.set_meta("destructible", true)
-					content.set_meta("hp_max", int(entry.get("hp_max", 100)))
-					content.set_meta("hp", int(entry.get("hp_max", 100)))
+					content.set_meta("hp_max", hpmax)
+					content.set_meta("hp", hpmax)
 			# Container loot fill — roll the assigned table N times where N
 			# is the crate variant's roll_count. Each successful roll is
 			# fed through crate.add(), which weight-checks against the
