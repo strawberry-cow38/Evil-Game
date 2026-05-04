@@ -922,6 +922,10 @@ func _delete_selected_prop() -> void:
 		_gizmo.set_target(null)
 	_drag_handle = ""
 	doomed.queue_free()
+	# Hide the per-selection side panels — selection's gone, their UI
+	# should follow.
+	_refresh_container_panel()
+	_refresh_object_props_panel()
 
 func _try_start_gizmo_drag() -> bool:
 	if _gizmo == null or _gizmo.mode == _gizmo.MODE_NONE or _selected_prop == null:
