@@ -1,6 +1,7 @@
 extends CanvasLayer
 
 const Items = preload("res://items.gd")
+const InventoryTable = preload("res://inventory_table.gd")
 
 const TAB_INVENTORY := "Inventory"
 const TABS: Array = [TAB_INVENTORY]   # extensible — add stats/map/etc here later
@@ -54,6 +55,7 @@ var _tab_box: HBoxContainer
 var _tab_buttons: Array[Button] = []
 var _category_box: HBoxContainer
 var _category_buttons: Array[Button] = []
+var _list_header: Label
 var _list: ItemList
 var _preview_color: ColorRect
 var _preview_name: Label
@@ -183,24 +185,44 @@ func _build_ui() -> void:
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vb.add_child(content)
 
+	# Tabular list column. Header sits above the ItemList, both share the
+	# same monospace font so the columns line up cell-for-cell.
+	var mono := InventoryTable.make_mono_font()
+	var list_col := VBoxContainer.new()
+	list_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	list_col.add_theme_constant_override("separation", 4)
+	content.add_child(list_col)
+
+	_list_header = Label.new()
+	_list_header.text = InventoryTable.header_text()
+	_list_header.add_theme_font_override("font", mono)
+	_list_header.add_theme_font_size_override("font_size", 16)
+	_list_header.add_theme_color_override("font_color", Color(1, 0.95, 0.6))
+	# Indent matches the ItemList icon margin so column heads line up over
+	# the text portion of each row, not the leading swatch icon.
+	_list_header.add_theme_constant_override("margin_left", 60)
+	list_col.add_child(_list_header)
+
 	_list = ItemList.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_list.custom_minimum_size = Vector2(520, 360)
-	_list.fixed_icon_size = Vector2i(48, 48)
+	_list.custom_minimum_size = Vector2(620, 360)
+	_list.fixed_icon_size = Vector2i(28, 28)
 	_list.icon_mode = ItemList.ICON_MODE_LEFT
 	_list.max_columns = 1
 	_list.same_column_width = true
 	_list.auto_height = false
 	_list.allow_reselect = true
-	_list.add_theme_font_size_override("font_size", 24)
-	_list.add_theme_constant_override("v_separation", 10)
-	_list.add_theme_constant_override("icon_margin", 12)
+	_list.add_theme_font_override("font", mono)
+	_list.add_theme_font_size_override("font_size", 16)
+	_list.add_theme_constant_override("v_separation", 6)
+	_list.add_theme_constant_override("icon_margin", 8)
 	_list.item_selected.connect(func(_i): _refresh_preview())
 	_list.item_clicked.connect(_on_item_clicked)
 	_list.item_activated.connect(_on_item_activated)
 	_list.gui_input.connect(_on_list_gui_input)
-	content.add_child(_list)
+	list_col.add_child(_list)
 
 	var preview_panel := PanelContainer.new()
 	preview_panel.custom_minimum_size = Vector2(320, 0)
@@ -453,18 +475,10 @@ func _refresh_list() -> void:
 		_list.ensure_current_is_visible()
 
 func _row_label(e: Dictionary, equipped_uid: int) -> String:
-	if bool(e.is_instance):
-		var eq_marker: String = "  [E]" if int(e.uid) == equipped_uid else ""
-		var qual: String = Items.quality_name(int(e.quality))
-		var tier: Dictionary = Items.condition_tier(float(e.condition), String(e.kind))
-		return "%s %s   %.2f kg   ¢%d   %s %d%%%s" % [
-			qual, e.name, e.weight_total, e.value_each,
-			tier.name, int(round(float(e.condition) * 100.0)),
-			eq_marker,
-		]
-	return "%s   x%d   %.2f kg   ¢%d" % [
-		e.name, e.count, e.weight_total, e.value_each,
-	]
+	var suffix: String = ""
+	if bool(e.is_instance) and int(e.uid) == equipped_uid:
+		suffix = " [E]"
+	return InventoryTable.row_text(e, suffix)
 
 func _compare_entries(a: Dictionary, b: Dictionary) -> bool:
 	var lt := false

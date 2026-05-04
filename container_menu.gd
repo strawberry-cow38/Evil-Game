@@ -7,6 +7,7 @@ extends CanvasLayer
 # tab — direction is decided by which side has focus when T is pressed.
 
 const Items = preload("res://items.gd")
+const InventoryTable = preload("res://inventory_table.gd")
 
 # Mirrors menu.gd's category layout so the two menus feel consistent.
 const CATEGORIES: Array = [
@@ -165,10 +166,21 @@ func _build_panel(title: String, is_player: bool) -> Control:
 		tabs.add_child(b)
 		buttons.append(b)
 	buttons[0].button_pressed = true
+	# Header + list both use the shared monospace font so the columns line
+	# up with the header on every row.
+	var mono := InventoryTable.make_mono_font()
+	var header := Label.new()
+	header.text = InventoryTable.header_text()
+	header.add_theme_font_override("font", mono)
+	header.add_theme_font_size_override("font_size", 14)
+	header.add_theme_color_override("font_color", Color(1, 0.95, 0.6))
+	col.add_child(header)
 	var lst := ItemList.new()
 	lst.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lst.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	lst.allow_reselect = true
+	lst.add_theme_font_override("font", mono)
+	lst.add_theme_font_size_override("font_size", 14)
 	lst.focus_entered.connect(_on_list_focus.bind(side_id))
 	lst.item_activated.connect(_on_list_activated.bind(side_id))
 	col.add_child(lst)
@@ -228,12 +240,7 @@ func _refresh() -> void:
 	_container_title.text = "%s — %d item%s%s" % [label_name, total, "" if total == 1 else "s", w_str]
 
 func _format_row(e: Dictionary) -> String:
-	var name: String = String(e.get("name", ""))
-	if bool(e.get("is_instance", false)):
-		var qual: int = int(e.get("quality", Items.QUALITY_NORMAL))
-		var cond: float = float(e.get("condition", 1.0))
-		return "%s  [%s · %d%%]" % [name, Items.quality_name(qual), int(round(cond * 100.0))]
-	return "%s  x%d" % [name, int(e.get("count", 1))]
+	return InventoryTable.row_text(e)
 
 # --- Input ----------------------------------------------------------------
 
