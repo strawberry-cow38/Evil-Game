@@ -194,30 +194,36 @@ func _build_ui() -> void:
 	_list.select_mode = Tree.SELECT_ROW
 	_list.allow_reselect = true
 	_list.add_theme_font_size_override("font_size", 16)
-	# Column setup: NAME flexes, the rest are fixed-width readouts. Set
-	# alignments so numeric cells right-align and labels stay left.
+	# Cell padding so columns breathe even when empty. Without these the
+	# Quality/Cond cells of stackables touch the next column's text.
+	_list.add_theme_constant_override("inner_item_margin_left", 10)
+	_list.add_theme_constant_override("inner_item_margin_right", 10)
+	# NAME flexes but is capped by an expand_ratio split so it can't eat the
+	# whole row when everything else is short. Numeric columns stay fixed
+	# with generous mins so values don't crowd the column edge.
 	_list.set_column_title(0, "Name")
 	_list.set_column_expand(0, true)
+	_list.set_column_expand_ratio(0, 2)
 	_list.set_column_clip_content(0, true)
-	_list.set_column_custom_minimum_width(0, 220)
+	_list.set_column_custom_minimum_width(0, 260)
 	_list.set_column_title(1, "Qty")
 	_list.set_column_expand(1, false)
-	_list.set_column_custom_minimum_width(1, 60)
+	_list.set_column_custom_minimum_width(1, 80)
 	_list.set_column_title_alignment(1, HORIZONTAL_ALIGNMENT_RIGHT)
 	_list.set_column_title(2, "Quality")
 	_list.set_column_expand(2, false)
-	_list.set_column_custom_minimum_width(2, 110)
+	_list.set_column_custom_minimum_width(2, 130)
 	_list.set_column_title(3, "Cond")
 	_list.set_column_expand(3, false)
-	_list.set_column_custom_minimum_width(3, 70)
+	_list.set_column_custom_minimum_width(3, 90)
 	_list.set_column_title_alignment(3, HORIZONTAL_ALIGNMENT_RIGHT)
 	_list.set_column_title(4, "Weight")
 	_list.set_column_expand(4, false)
-	_list.set_column_custom_minimum_width(4, 90)
+	_list.set_column_custom_minimum_width(4, 110)
 	_list.set_column_title_alignment(4, HORIZONTAL_ALIGNMENT_RIGHT)
 	_list.set_column_title(5, "Value")
 	_list.set_column_expand(5, false)
-	_list.set_column_custom_minimum_width(5, 80)
+	_list.set_column_custom_minimum_width(5, 100)
 	_list.set_column_title_alignment(5, HORIZONTAL_ALIGNMENT_RIGHT)
 	_list.cell_selected.connect(_refresh_preview)
 	_list.item_activated.connect(_equip_selected)
