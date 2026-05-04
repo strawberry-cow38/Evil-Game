@@ -218,6 +218,8 @@ func _enter_play_mode() -> void:
 			entries_dup.append({
 				"id": String(e.get("id", "")),
 				"weight": float(e.get("weight", 1.0)),
+				"min_count": int(e.get("min_count", 1)),
+				"max_count": int(e.get("max_count", 1)),
 			})
 		MapState.item_tables.append({
 			"id": String(t.get("id", "")),

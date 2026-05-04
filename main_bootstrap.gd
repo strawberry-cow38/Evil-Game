@@ -71,19 +71,20 @@ func _ready() -> void:
 		for sp in MapState.item_spawn_points:
 			var tid: String = String(sp.get("table_id", ""))
 			var pos: Vector3 = sp.get("pos", Vector3.ZERO)
-			var rolled: String = _roll_table(tables_by_id.get(tid, {}))
+			var result: Dictionary = _roll_table(tables_by_id.get(tid, {}))
+			var rolled: String = String(result.get("id", ""))
 			if rolled == "" or rolled == NOTHING_ITEM_ID:
 				continue
 			var pickup := Area3D.new()
 			pickup.set_script(PICKUP)
 			pickup.item_id = rolled
-			pickup.count = 1
+			pickup.count = int(result.get("count", 1))
 			pickup.position = pos + Vector3(0, 0.3, 0)
 			spawn_root.add_child(pickup)
 
-func _roll_table(table: Dictionary) -> String:
+func _roll_table(table: Dictionary) -> Dictionary:
 	if table.is_empty():
-		return ""
+		return {"id": "", "count": 1}
 	var entries: Array = table.get("entries", [])
 	var has_nothing: bool = false
 	var total: float = 0.0
@@ -100,7 +101,7 @@ func _roll_table(table: Dictionary) -> String:
 	if not has_nothing:
 		total += 1.0
 	if total <= 0.0:
-		return ""
+		return {"id": "", "count": 1}
 	var roll: float = randf() * total
 	var acc: float = 0.0
 	for e in entries:
@@ -109,8 +110,16 @@ func _roll_table(table: Dictionary) -> String:
 			w2 = 0.0
 		acc += w2
 		if roll <= acc:
-			return String(e.get("id", ""))
-	return NOTHING_ITEM_ID
+			var id: String = String(e.get("id", ""))
+			var min_c: int = int(e.get("min_count", 1))
+			var max_c: int = int(e.get("max_count", 1))
+			if min_c < 1:
+				min_c = 1
+			if max_c < min_c:
+				max_c = min_c
+			var count: int = randi_range(min_c, max_c)
+			return {"id": id, "count": count}
+	return {"id": NOTHING_ITEM_ID, "count": 1}
 
 func _input(event: InputEvent) -> void:
 	# F9 toggles back to the editor with the current map intact.

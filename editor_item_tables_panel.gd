@@ -40,7 +40,14 @@ var _b_slider: HSlider
 var _swatch: ColorRect
 var _delete_btn: Button
 var _entries_box: VBoxContainer
+var _minmax_box: VBoxContainer
 var _add_item_btn: Button
+# Currently-highlighted entry within the active table. -1 = none. Drives
+# the min/max sliders shown beneath the entries list.
+var _selected_entry_idx: int = -1
+# Per-row select buttons keyed by entry index — modulated so the user
+# can see which row owns the min/max sliders below.
+var _entry_buttons: Dictionary = {}
 var _picker: Node = null  # editor_item_picker_panel — wired via set_picker()
 # Per-row "X%" labels keyed by entry index. Refreshed every time any
 # weight slider moves (or entries are added/removed) so the displayed
@@ -118,6 +125,12 @@ func _ready() -> void:
 	_add_item_btn.text = "Add Item"
 	_add_item_btn.pressed.connect(_on_add_item_pressed)
 	vbox.add_child(_add_item_btn)
+	# Min/max stack-count sliders for the selected entry. Empty until the
+	# user clicks an entry row above. Hidden entirely while no entry is
+	# selected so it doesn't take up UI real estate.
+	_minmax_box = VBoxContainer.new()
+	_minmax_box.add_theme_constant_override("separation", 4)
+	vbox.add_child(_minmax_box)
 	_load()
 	_refresh_all()
 
@@ -189,6 +202,8 @@ func _save() -> void:
 			entries_out.append({
 				"id": String(e.get("id", "")),
 				"weight": float(e.get("weight", 0.0)),
+				"min_count": int(e.get("min_count", 1)),
+				"max_count": int(e.get("max_count", 1)),
 			})
 		var c: Color = t.get("color", Color.WHITE)
 		out["tables"].append({
@@ -226,6 +241,8 @@ func _load() -> void:
 			entries_in.append({
 				"id": String(e.get("id", "")),
 				"weight": float(e.get("weight", 0.0)),
+				"min_count": int(e.get("min_count", 1)),
+				"max_count": int(e.get("max_count", 1)),
 			})
 		# Defensive: every loaded table needs the implicit Nothing entry.
 		var has_nothing: bool = false
@@ -352,19 +369,29 @@ func _refresh_entries() -> void:
 		c.queue_free()
 	_pct_labels.clear()
 	_sliders.clear()
+	_entry_buttons.clear()
 	if _active_index < 0:
+		_selected_entry_idx = -1
+		_refresh_minmax()
 		return
 	var entries: Array = tables[_active_index].get("entries", [])
+	# Selection from a previous table doesn't carry over.
+	if _selected_entry_idx >= entries.size():
+		_selected_entry_idx = -1
 	for i in range(entries.size()):
 		var e: Dictionary = entries[i]
 		var id: String = String(e.get("id", ""))
 		var w: float = float(e.get("weight", 1.0))
 		var row := HBoxContainer.new()
-		var lbl := Label.new()
-		lbl.text = REGISTRY.label_for(id)
-		lbl.custom_minimum_size = Vector2(80, 0)
-		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		row.add_child(lbl)
+		var name_btn := Button.new()
+		name_btn.text = REGISTRY.label_for(id)
+		name_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		name_btn.custom_minimum_size = Vector2(80, 0)
+		name_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var sel_idx: int = i
+		name_btn.pressed.connect(func(): _on_entry_selected(sel_idx))
+		row.add_child(name_btn)
+		_entry_buttons[sel_idx] = name_btn
 		var slider := HSlider.new()
 		slider.min_value = 0.0
 		slider.max_value = 100.0
@@ -390,6 +417,114 @@ func _refresh_entries() -> void:
 			row.add_child(rm)
 		_entries_box.add_child(row)
 	_refresh_pcts()
+	_refresh_entry_highlight()
+	_refresh_minmax()
+
+func _on_entry_selected(idx: int) -> void:
+	_selected_entry_idx = idx
+	_refresh_entry_highlight()
+	_refresh_minmax()
+
+func _refresh_entry_highlight() -> void:
+	for k in _entry_buttons.keys():
+		var b: Button = _entry_buttons[k]
+		b.modulate = Color(1.0, 1.0, 0.5, 1.0) if k == _selected_entry_idx else Color(1, 1, 1, 1)
+
+func _refresh_minmax() -> void:
+	for c in _minmax_box.get_children():
+		c.queue_free()
+	if _active_index < 0 or _selected_entry_idx < 0:
+		_minmax_box.visible = false
+		return
+	var entries: Array = tables[_active_index].get("entries", [])
+	if _selected_entry_idx >= entries.size():
+		_minmax_box.visible = false
+		return
+	var e: Dictionary = entries[_selected_entry_idx]
+	if String(e.get("id", "")) == REGISTRY.NOTHING_ID:
+		# Nothing has no stack count — selecting it just hides the section.
+		_minmax_box.visible = false
+		return
+	_minmax_box.visible = true
+	var hdr := Label.new()
+	hdr.text = "Stack: %s" % REGISTRY.label_for(String(e.get("id", "")))
+	hdr.add_theme_font_size_override("font_size", 13)
+	_minmax_box.add_child(hdr)
+	var min_v: int = int(e.get("min_count", 1))
+	var max_v: int = int(e.get("max_count", 1))
+	var min_slider: HSlider = _build_count_slider("Min", min_v)
+	var max_slider: HSlider = _build_count_slider("Max", max_v)
+	min_slider.value_changed.connect(func(v: float): _on_min_count_changed(v, max_slider))
+	max_slider.value_changed.connect(func(v: float): _on_max_count_changed(v, min_slider))
+
+func _build_count_slider(label_text: String, initial: int) -> HSlider:
+	var row := HBoxContainer.new()
+	_minmax_box.add_child(row)
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.custom_minimum_size = Vector2(36, 0)
+	row.add_child(lbl)
+	var s := HSlider.new()
+	s.min_value = 1.0
+	s.max_value = 100.0
+	s.step = 1.0
+	s.value = float(initial)
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(s)
+	var val_lbl := Label.new()
+	val_lbl.text = "%d" % initial
+	val_lbl.custom_minimum_size = Vector2(30, 0)
+	val_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(val_lbl)
+	s.value_changed.connect(func(v: float): val_lbl.text = "%d" % int(v))
+	return s
+
+func _on_min_count_changed(v: float, max_slider: HSlider) -> void:
+	if _active_index < 0 or _selected_entry_idx < 0:
+		return
+	var entries: Array = tables[_active_index].get("entries", [])
+	if _selected_entry_idx >= entries.size():
+		return
+	var min_v: int = int(v)
+	entries[_selected_entry_idx]["min_count"] = min_v
+	# Keep max ≥ min; nudge the max slider up if the user pushed past it.
+	if int(max_slider.value) < min_v:
+		max_slider.set_block_signals(true)
+		max_slider.value = float(min_v)
+		max_slider.set_block_signals(false)
+		entries[_selected_entry_idx]["max_count"] = min_v
+		# Refresh the trailing label on the max row manually since we
+		# bypassed its value_changed handler.
+		var max_row: Node = max_slider.get_parent()
+		if max_row != null:
+			var n: int = max_row.get_child_count()
+			if n > 0:
+				var last: Node = max_row.get_child(n - 1)
+				if last is Label:
+					(last as Label).text = "%d" % min_v
+	_save()
+
+func _on_max_count_changed(v: float, min_slider: HSlider) -> void:
+	if _active_index < 0 or _selected_entry_idx < 0:
+		return
+	var entries: Array = tables[_active_index].get("entries", [])
+	if _selected_entry_idx >= entries.size():
+		return
+	var max_v: int = int(v)
+	entries[_selected_entry_idx]["max_count"] = max_v
+	if int(min_slider.value) > max_v:
+		min_slider.set_block_signals(true)
+		min_slider.value = float(max_v)
+		min_slider.set_block_signals(false)
+		entries[_selected_entry_idx]["min_count"] = max_v
+		var min_row: Node = min_slider.get_parent()
+		if min_row != null:
+			var n: int = min_row.get_child_count()
+			if n > 0:
+				var last: Node = min_row.get_child(n - 1)
+				if last is Label:
+					(last as Label).text = "%d" % max_v
+	_save()
 
 func _refresh_pcts() -> void:
 	if _active_index < 0:
@@ -525,6 +660,6 @@ func _on_items_picked(ids: Array) -> void:
 			continue
 		# New items join at 0% so the existing distribution is preserved;
 		# user slides them up to allocate (which auto-shrinks the others).
-		entries.append({"id": sid, "weight": 0.0})
+		entries.append({"id": sid, "weight": 0.0, "min_count": 1, "max_count": 1})
 	_refresh_entries()
 	_save()
