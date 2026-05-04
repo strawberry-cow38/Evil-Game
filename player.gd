@@ -23,6 +23,7 @@ const INTERACT_MASK := 0xFFFFFFFF
 const Items = preload("res://items.gd")
 const PICKUP_SCRIPT := preload("res://pickup.gd")
 const CONTAINER_HOVER := preload("res://container_hover.gd")
+const CONTAINER_MENU := preload("res://container_menu.gd")
 const DROP_FORWARD := 1.1            # m in front of player center
 const DROP_SPREAD := 0.45            # m random radius around drop anchor
 const DROP_HEIGHT := 0.35            # m above floor
@@ -81,6 +82,7 @@ var _scope: Node
 var _interact_target: Node = null    # current Pickup the player is looking at, if any
 var _container_target: Node = null   # current crate the player is looking at, if any
 var _container_hover: CanvasLayer    # right-side hover panel listing the crate's items
+var _container_menu: CanvasLayer     # full-screen looting menu (opens with R)
 var _prompt_label: Label
 var _rng := RandomNumberGenerator.new()
 var _reload_held: bool = false
@@ -107,6 +109,8 @@ func _ready() -> void:
 	_build_prompt()
 	_container_hover = CONTAINER_HOVER.new()
 	add_child(_container_hover)
+	_container_menu = CONTAINER_MENU.new()
+	add_child(_container_menu)
 	_seed_starting_inventory()
 	if _inventory != null and _inventory.has_signal("equipped_changed"):
 		_inventory.equipped_changed.connect(_on_equipped_changed)
@@ -193,7 +197,11 @@ func _respawn_at_safe_point() -> void:
 	velocity = Vector3.ZERO
 
 func is_menu_open() -> bool:
-	return _menu != null and _menu.has_method("is_open") and _menu.is_open()
+	if _menu != null and _menu.has_method("is_open") and _menu.is_open():
+		return true
+	if _container_menu != null and _container_menu.has_method("is_open") and _container_menu.is_open():
+		return true
+	return false
 
 func is_pie_open() -> bool:
 	return _pie != null and _pie.has_method("is_open") and _pie.is_open()
@@ -273,6 +281,14 @@ func _process(delta: float) -> void:
 			return
 		if _interact_target != null:
 			_loot(_interact_target)
+	# R while looking at a crate opens the full transfer menu. Steals R from the
+	# weapon reload path so reload can't fire on the same press. The
+	# can_reopen() check stops the same R press from immediately reopening
+	# right after the menu's own _input handled the close.
+	if not is_menu_open() and _container_target != null and Input.is_action_just_pressed("reload") \
+			and (_container_menu == null or _container_menu.can_reopen()):
+		_open_container_menu()
+		return
 	if not is_menu_open():
 		_check_equip_hotkeys()
 		_handle_reload_input()
@@ -565,6 +581,14 @@ func _spawn_drop(id: String, count: int, instance: Dictionary) -> void:
 		p.instance = instance.duplicate(true)
 	get_tree().current_scene.add_child(p)
 	p.global_position = anchor
+
+func _open_container_menu() -> void:
+	if _container_menu == null or _container_target == null or _inventory == null:
+		return
+	# Hide the hover panel while the full menu is up — they'd just stack.
+	if _container_hover != null:
+		_container_hover.hide_panel()
+	_container_menu.open(_inventory, _container_target)
 
 func _loot_from_container() -> void:
 	if _inventory == null or _container_target == null or _container_hover == null:
