@@ -738,7 +738,7 @@ static func apply_lighting_to(env_node: WorldEnvironment, sun: DirectionalLight3
 	if env != null:
 		env.ambient_light_energy = float(state.get("ambient_energy", 0.5))
 		env.ambient_light_color = state.get("ambient_color", Color(0.6, 0.65, 0.7, 1))
-		env.bg_energy_multiplier = float(state.get("sky_energy", 1.0))
+		env.background_energy_multiplier = float(state.get("sky_energy", 1.0))
 		var sky: Sky = env.sky
 		if sky != null and sky.sky_material is ProceduralSkyMaterial:
 			var mat: ProceduralSkyMaterial = sky.sky_material
