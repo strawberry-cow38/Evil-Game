@@ -663,6 +663,7 @@ func _on_mag_invalidated(uid: int) -> void:
 # a single dict the runtime queries. mag_size = max of installed mags; *_mult
 # values multiply; flag/value fields use last-write-wins.
 func _recompute_active_mods() -> void:
+	var prev_mag_size: int = get_mag_size()
 	_active_mods = {}
 	if not _equipped or _current_uid == 0 or _inventory == null:
 		return
@@ -681,6 +682,17 @@ func _recompute_active_mods() -> void:
 				_active_mods[key] = float(_active_mods.get(key, 1.0)) * float(v)
 			else:
 				_active_mods[key] = v
+	# Mag-size changed mid-reload: abort the current cycle and restart so the
+	# new capacity (and remaining-rounds math) takes effect immediately.
+	if _reloading and get_mag_size() != prev_mag_size:
+		_reloading = false
+		_reload_remaining = 0.0
+		_reload_amount = 0
+		if _reload_player != null:
+			_reload_player.stop()
+		if _bolt_voice != null:
+			_bolt_voice.stop()
+		_start_reload()
 
 # Snapshot the live state of the weapon instance keyed by `uid`. Used by
 # the drop path so the world pickup carries the player's current mag,
