@@ -66,7 +66,7 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "m60",     "condition": 0.20, "quality": 0},  # Awful Ruined
 	{"id": "mgl",     "condition": 1.00, "quality": 6},  # Legendary Pristine
 	{"id": "shotgun_combat", "condition": 0.95, "quality": 4},  # Excellent Pristine
-	{"id": "aa12",    "condition": 0.88, "quality": 4},  # Excellent Pristine
+	{"id": "usas12",  "condition": 0.88, "quality": 4},  # Excellent Pristine
 ]
 const STARTING_AMMO: Dictionary = {
 	"ammo_762x39":  200,

@@ -68,9 +68,9 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 	Vector2( 0.40, 1.60),
 	Vector2(-1.25, 1.55),
 ]
-# AA-12 full-auto shotgun. Gas system soaks most of the kick, but 12 gauge
-# at 300 RPM still climbs steadily.
-const RECOIL_PATTERN_AA12: Array[Vector2] = [
+# USAS-12 selective-fire shotgun. Gas-operated, slower cyclic than the AA-12,
+# with serious 12 gauge climb on full auto.
+const RECOIL_PATTERN_USAS12: Array[Vector2] = [
 	Vector2( 0.20, 2.60),
 	Vector2(-0.30, 2.90),
 	Vector2( 0.40, 3.10),
@@ -541,15 +541,15 @@ const PROFILES := {
 		"reload_time": 2.9,
 		"pullout_time": 0.5,
 	},
-	"aa12": {
-		"name": "AA-12",
+	"usas12": {
+		"name": "USAS-12",
 		"mag_size": 20,
-		"rpm": 300.0,
-		"modes": [FireMode.AUTO],
+		"rpm": 360.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
 		"fire_sounds": ["res://assets/audio/Shot_AA12.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
-		"recoil_pattern": RECOIL_PATTERN_AA12,
+		"recoil_pattern": RECOIL_PATTERN_USAS12,
 		"bloom_mult": 1.0,
 		"ammo_id": "ammo_12ga",
 		"ammo_ids": ["ammo_12ga", "ammo_12ga_slug"],
@@ -922,7 +922,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "aa12", "lever_4570", "pistol_4570", "python", "g11"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "usas12", "lever_4570", "pistol_4570", "python", "g11"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
