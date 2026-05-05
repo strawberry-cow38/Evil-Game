@@ -262,6 +262,21 @@ const RECOIL_PATTERN_BAR: Array[Vector2] = [
 const RECOIL_PATTERN_KS23: Array[Vector2] = [
 	Vector2(-0.30, 3.60),
 ]
+# HK G11 caseless: 4.7×33mm, low impulse per shot, very flat sustained
+# climb. The hyperburst dumps 3 rounds before the recoil even reaches the
+# shooter, so the per-shot pattern is intentionally tiny.
+const RECOIL_PATTERN_G11: Array[Vector2] = [
+	Vector2( 0.05, 0.40),
+	Vector2(-0.08, 0.45),
+	Vector2( 0.10, 0.50),
+	Vector2(-0.12, 0.55),
+	Vector2( 0.14, 0.55),
+	Vector2(-0.16, 0.55),
+	Vector2( 0.18, 0.55),
+	Vector2(-0.20, 0.50),
+	Vector2( 0.22, 0.50),
+	Vector2(-0.24, 0.50),
+]
 # Marlin 1895 .45-70 lever-action: huge per-shot shove, slow follow-up.
 const RECOIL_PATTERN_LEVER_4570: Array[Vector2] = [
 	Vector2( 0.10, 2.40),
@@ -725,6 +740,22 @@ const PROFILES := {
 		"pump_reload_pitch_min": 0.90,
 		"pump_reload_pitch_max": 1.00,
 	},
+	"g11": {
+		"name": "HK G11",
+		"mag_size": 50,
+		"rpm": 600.0,
+		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_M16A.ogg"],
+		"fire_hold": 0.18,
+		"fire_fade": 0.26,
+		"recoil_pattern": RECOIL_PATTERN_G11,
+		"bloom_mult": 0.85,
+		"ammo_id": "ammo_47x33",
+		"reload_time": 3.4,
+		"pullout_time": 1.2,
+		# 2160 RPM hyperburst — three rounds dump in ~83ms total.
+		"burst_rpm_mult": 3.6,
+	},
 	"lever_4570": {
 		"name": "Marlin 1895",
 		"mag_size": 6,
@@ -891,7 +922,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "aa12", "lever_4570", "pistol_4570", "python"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "aa12", "lever_4570", "pistol_4570", "python", "g11"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
@@ -1726,7 +1757,9 @@ func _process(delta: float) -> void:
 
 	var interval: float = _fire_interval()
 	if _fire_mode == FireMode.BURST:
-		interval /= BURST_RPM_MULT
+		# Per-profile override lets weapons like the G11 (hyperburst) crank
+		# intra-burst cyclic well past the global default.
+		interval /= float(_profile.get("burst_rpm_mult", BURST_RPM_MULT))
 	if want_fire and _ammo > 0 and now - _last_fire_time >= interval and now >= _pullout_until:
 		_fire(now)
 		_ammo -= 1
