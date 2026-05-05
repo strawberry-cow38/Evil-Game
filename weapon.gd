@@ -755,6 +755,8 @@ const PROFILES := {
 		"pullout_time": 1.2,
 		# 2160 RPM hyperburst — three rounds dump in ~83ms total.
 		"burst_rpm_mult": 3.6,
+		"burst_fire_sound": "res://assets/audio/Shot_GTEK473mm.ogg",
+		"burst_end_kick_deg": Vector2(0.4, 5.0),
 	},
 	"lever_4570": {
 		"name": "Marlin 1895",
@@ -978,6 +980,7 @@ var _laser_beam_im: ImmediateMesh
 var _laser_beam_mat: StandardMaterial3D
 var _profile: Dictionary = {}
 var _fire_streams: Dictionary = {}     # weapon key -> Array[AudioStream]
+var _burst_fire_streams: Dictionary = {}  # weapon key -> AudioStream (one per burst)
 var _ammo := 0
 var _fire_mode: FireMode = FireMode.AUTO
 var _burst_remaining := 0
@@ -1255,6 +1258,11 @@ func _setup_audio() -> void:
 			if s != null:
 				streams.append(s)
 		_fire_streams[key] = streams
+		var bpath: String = String(PROFILES[key].get("burst_fire_sound", ""))
+		if bpath != "":
+			var bs: AudioStream = _load_wav(bpath)
+			if bs != null:
+				_burst_fire_streams[key] = bs
 	_fire_stream_list = _fire_streams.get(_current_weapon, [])
 	# Voice pool so fast-fire shots don't restart each other mid-fade —
 	# the fade-out on shot N keeps ringing while shot N+1 starts on a fresh voice.
@@ -1586,6 +1594,11 @@ func _schedule_casing() -> void:
 func _play_fire_sound() -> void:
 	if _fire_stream_list.is_empty() or _audio_voices.is_empty():
 		return
+	_play_fire_sound_with(_fire_stream_list[_rng.randi() % _fire_stream_list.size()])
+
+func _play_fire_sound_with(stream: AudioStream) -> void:
+	if stream == null or _audio_voices.is_empty():
+		return
 	var idx: int = _audio_idx
 	_audio_idx = (_audio_idx + 1) % _audio_voices.size()
 	var voice: AudioStreamPlayer3D = _audio_voices[idx]
@@ -1593,7 +1606,7 @@ func _play_fire_sound() -> void:
 	var prev: Tween = _audio_tweens[idx]
 	if prev != null and prev.is_valid():
 		prev.kill()
-	voice.stream = _fire_stream_list[_rng.randi() % _fire_stream_list.size()]
+	voice.stream = stream
 	voice.volume_db = float(_profile.get("fire_vol_db", FIRE_VOL_DB))
 	voice.pitch_scale = _rng.randf_range(FIRE_PITCH_MIN, FIRE_PITCH_MAX)
 	voice.play()
@@ -1852,9 +1865,28 @@ func _fire(now: float) -> void:
 	_rec_kick_total += Vector2(kick_yaw_rad, kick_pitch_rad)
 	_target_yaw += kick_yaw_rad
 	_target_pitch += kick_pitch_rad
+	# Burst-end extra kick: apply once on the final shot of a burst so the
+	# camera shoves hard between bursts (G11 hyperburst impulse).
+	if _fire_mode == FireMode.BURST and _burst_remaining == 1:
+		var end_kick: Vector2 = _profile.get("burst_end_kick_deg", Vector2.ZERO)
+		if end_kick != Vector2.ZERO:
+			var jx: float = _rng.randf_range(-RECOIL_JITTER_DEG, RECOIL_JITTER_DEG)
+			var ek_yaw: float = deg_to_rad(end_kick.x + jx) * mult
+			var ek_pitch: float = deg_to_rad(end_kick.y) * mult
+			_rec_kick_total += Vector2(ek_yaw, ek_pitch)
+			_target_yaw += ek_yaw
+			_target_pitch += ek_pitch
 	_recoil_index += 1
 
-	_play_fire_sound()
+	# Burst with a one-per-burst sound: play override on the first shot,
+	# stay silent on the trailing shots so the burst lands as a single audio hit.
+	var burst_stream: AudioStream = _burst_fire_streams.get(_current_weapon, null)
+	if _fire_mode == FireMode.BURST and burst_stream != null:
+		if _burst_remaining == BURST_COUNT:
+			_play_fire_sound_with(burst_stream)
+		# else: silent — let the first sound carry the whole burst.
+	else:
+		_play_fire_sound()
 	# Casing clink disabled — too harsh when stacked under full-auto fire.
 	# Spent shell/brass impact — every weapon that registered streams in
 	# _setup_audio (XM1014 = unique shellimpact, everything else = default
