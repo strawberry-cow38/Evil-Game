@@ -68,6 +68,18 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 	Vector2( 0.40, 1.60),
 	Vector2(-1.25, 1.55),
 ]
+# AA-12 full-auto shotgun. Gas system soaks most of the kick, but 12 gauge
+# at 300 RPM still climbs steadily.
+const RECOIL_PATTERN_AA12: Array[Vector2] = [
+	Vector2( 0.10, 1.30),
+	Vector2(-0.15, 1.45),
+	Vector2( 0.20, 1.55),
+	Vector2(-0.25, 1.55),
+	Vector2( 0.30, 1.50),
+	Vector2(-0.35, 1.45),
+	Vector2( 0.40, 1.40),
+	Vector2(-0.45, 1.35),
+]
 # Colt M1911: heavy .45 ACP pistol. Sharp single-shot kick, recoil index resets
 # fast in semi so the early entries do the work.
 const RECOIL_PATTERN_M1911: Array[Vector2] = [
@@ -386,6 +398,21 @@ const PROFILES := {
 		"reload_time": 2.9,
 		"pullout_time": 0.5,
 	},
+	"aa12": {
+		"name": "AA-12",
+		"mag_size": 8,
+		"rpm": 300.0,
+		"modes": [FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_AA12.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_AA12,
+		"bloom_mult": 1.0,
+		"ammo_id": "ammo_12ga",
+		"ammo_ids": ["ammo_12ga", "ammo_12ga_slug"],
+		"reload_time": 4.0,
+		"pullout_time": 1.7,
+	},
 	"shotgun_combat": {
 		"name": "XM1014",
 		"mag_size": 6,
@@ -540,7 +567,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "aa12"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
