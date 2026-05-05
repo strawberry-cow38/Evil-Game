@@ -423,8 +423,8 @@ const PROFILES := {
 	"ppsh41": {
 		"name": "PPSh-41",
 		"mag_size": 71,
-		"rpm": 900.0,
-		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"rpm": 1000.0,
+		"modes": [FireMode.AUTO],
 		"fire_sounds": ["res://assets/audio/Shot_PPBizon.ogg"],
 		"fire_hold": 0.18,
 		"fire_fade": 0.26,
