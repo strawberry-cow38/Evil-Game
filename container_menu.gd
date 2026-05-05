@@ -136,7 +136,7 @@ func _build_ui() -> void:
 	# --- Footer hint + status.
 	_hint_label = Label.new()
 	_hint_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
-	_hint_label.text = "[E / Dbl-click] Transfer one    [T] Take/Store all of category (uses focused side)    [R / Esc] Close"
+	_hint_label.text = "[E / Dbl-click] Transfer one    [T] Take/Store all of category    [A/D] Category (focused side)    [R / Esc] Close"
 	v.add_child(_hint_label)
 	_status_label = Label.new()
 	_status_label.add_theme_color_override("font_color", Color(1, 0.5, 0.4))
@@ -336,6 +336,14 @@ func _input(event: InputEvent) -> void:
 		close()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("nav_left"):
+		_cycle_focused_category(-1)
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("nav_right"):
+		_cycle_focused_category(1)
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		# T = take/store category (Tab not bound by the project, so no conflict).
 		if event.keycode == KEY_T:
@@ -345,6 +353,17 @@ func _input(event: InputEvent) -> void:
 			# E transfers focused row from focused side.
 			_transfer_focused()
 			get_viewport().set_input_as_handled()
+
+func _cycle_focused_category(dir: int) -> void:
+	var n: int = CATEGORIES.size()
+	if n <= 0:
+		return
+	if _hover_side == SIDE_PLAYER:
+		var i: int = (_player_category_idx + dir + n) % n
+		_on_category_pressed(SIDE_PLAYER, i)
+	else:
+		var j: int = (_container_category_idx + dir + n) % n
+		_on_category_pressed(SIDE_CONTAINER, j)
 
 func _on_category_pressed(side: int, idx: int) -> void:
 	var buttons: Array[Button] = _player_category_buttons if side == SIDE_PLAYER else _container_category_buttons

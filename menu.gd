@@ -290,7 +290,7 @@ func _build_ui() -> void:
 	footer.add_child(_sort_label)
 
 	_hint_label = Label.new()
-	_hint_label.text = "[Enter/Dbl-Click] equip  [X] inspect  [R] drop / [Shift+R] drop all  [Q] favorite→1-9  [←/→] category  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
+	_hint_label.text = "[Enter/Dbl-Click] equip  [X] inspect  [R] drop / [Shift+R] drop all  [Q] favorite→1-9  [A/D ←/→] category  [Z]/[V] sort  [WS/↑↓] nav  [Tab/Esc] close"
 	_hint_label.modulate = Color(0.75, 0.75, 0.75)
 	_hint_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
