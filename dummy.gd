@@ -18,6 +18,7 @@ var regen_rate: float = 250.0
 var enemy: bool = false
 var xp_reward: int = 0
 var drop_table_id: String = ""
+var actor_name: String = ""
 
 var _hp: int = 0
 var _last_hit_time: float = -1000.0
@@ -72,9 +73,18 @@ func _die() -> void:
 func _refresh_hp_label() -> void:
 	if _hp_label == null:
 		return
-	_hp_label.text = "%d / %d" % [_hp, hp_max]
+	# Two-line plate: actor_name on top (if set), HP underneath. Living
+	# enemies get a redder tint, neutrals stay closer to white.
+	var hp_line: String = "%d / %d" % [_hp, hp_max]
+	if actor_name != "":
+		_hp_label.text = "%s\n%s" % [actor_name, hp_line]
+	else:
+		_hp_label.text = hp_line
 	var ratio: float = float(_hp) / float(hp_max)
-	_hp_label.modulate = Color(1.0, 0.4 + 0.6 * ratio, 0.4 + 0.6 * ratio)
+	if enemy:
+		_hp_label.modulate = Color(1.0, 0.3 + 0.5 * ratio, 0.3 + 0.5 * ratio)
+	else:
+		_hp_label.modulate = Color(1.0, 0.4 + 0.6 * ratio, 0.4 + 0.6 * ratio)
 
 func _spawn_popup(amount: int, headshot: bool = false) -> void:
 	var lbl := Label3D.new()

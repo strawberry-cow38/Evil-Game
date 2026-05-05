@@ -281,6 +281,11 @@ func _build_actor(actor_id: String, preset: Dictionary) -> Node3D:
 	body.enemy = bool(preset.get("enemy", false))
 	body.xp_reward = int(preset.get("xp", 0))
 	body.drop_table_id = String(preset.get("drop_table_id", ""))
+	# Display name — used by the floating HP plate above the actor.
+	var display: String = String(preset.get("actor_name", "")).strip_edges()
+	if display == "":
+		display = String(preset.get("name", ""))
+	body.actor_name = display
 	# Capsule body matches main.tscn's hand-built dummy dimensions.
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.45
