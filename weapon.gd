@@ -68,6 +68,22 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 	Vector2( 0.40, 1.60),
 	Vector2(-1.25, 1.55),
 ]
+# Steyr AUG: bullpup 5.56, slightly flatter than M16 (shorter cyclic, balanced
+# bullpup geometry). Vertical-leaning with mild horizontal weave.
+const RECOIL_PATTERN_AUG: Array[Vector2] = [
+	Vector2( 0.00, 0.65),
+	Vector2( 0.08, 0.78),
+	Vector2(-0.08, 0.92),
+	Vector2( 0.18, 0.96),
+	Vector2(-0.22, 0.92),
+	Vector2( 0.30, 0.88),
+	Vector2(-0.35, 0.80),
+	Vector2( 0.45, 0.74),
+	Vector2(-0.50, 0.70),
+	Vector2( 0.60, 0.62),
+	Vector2(-0.65, 0.60),
+	Vector2( 0.72, 0.52),
+]
 # FN FAL: full-power 7.62 NATO battle rifle. Heavy climb, drifts left-right
 # more than the M60 (handheld vs bipod-fed). Sits between M16 and M60.
 const RECOIL_PATTERN_FAL: Array[Vector2] = [
@@ -245,7 +261,7 @@ const PROFILES := {
 		"name": "M16A2",
 		"mag_size": 30,
 		"rpm": 700.0,
-		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
+		"modes": [FireMode.SEMI, FireMode.AUTO],
 		"fire_sounds": ["res://assets/audio/Shot_GTEK556mm.ogg"],
 		"fire_hold": 0.22,
 		"fire_fade": 0.32,
@@ -388,6 +404,22 @@ const PROFILES := {
 		"bolt_vol_db": -4.0,
 		"pullout_time": 1.0,
 	},
+	"aug": {
+		"name": "Steyr AUG",
+		"mag_size": 30,
+		"rpm": 660.0,
+		"modes": [FireMode.SEMI, FireMode.BURST, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK556mm.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_AUG,
+		"bloom_mult": 0.95,
+		"ammo_id": "ammo_556nato",
+		"reload_time": 4.0,
+		"pullout_time": 1.4,
+		"scope": true,
+		"ads_fov": 35.0,
+	},
 	"fal": {
 		"name": "FN FAL",
 		"mag_size": 20,
@@ -422,7 +454,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "fal", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 

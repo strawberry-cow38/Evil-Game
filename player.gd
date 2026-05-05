@@ -39,6 +39,7 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "akm",     "condition": 1.00, "quality": 2},  # Normal Pristine
 	{"id": "sks",     "condition": 0.83, "quality": 5},  # Masterwork Pristine
 	{"id": "m16a2",   "condition": 0.92, "quality": 3},  # Good Pristine
+	{"id": "aug",     "condition": 0.94, "quality": 4},  # Excellent Pristine
 	{"id": "bizon",   "condition": 0.65, "quality": 1},  # Poor Worn
 	{"id": "mp5sd",   "condition": 0.88, "quality": 4},  # Excellent Pristine
 	{"id": "p90",     "condition": 0.91, "quality": 3},  # Good Pristine
