@@ -262,6 +262,28 @@ const RECOIL_PATTERN_BAR: Array[Vector2] = [
 const RECOIL_PATTERN_KS23: Array[Vector2] = [
 	Vector2(-0.30, 3.60),
 ]
+# Marlin 1895 .45-70 lever-action: huge per-shot shove, slow follow-up.
+const RECOIL_PATTERN_LEVER_4570: Array[Vector2] = [
+	Vector2( 0.10, 2.40),
+	Vector2(-0.18, 2.55),
+	Vector2( 0.22, 2.60),
+	Vector2(-0.26, 2.55),
+	Vector2( 0.30, 2.50),
+	Vector2(-0.34, 2.45),
+]
+# Single-shot .45-70 hand cannon: one apocalyptic kick.
+const RECOIL_PATTERN_PISTOL_4570: Array[Vector2] = [
+	Vector2(-0.45, 5.20),
+]
+# Colt Python .357: stout revolver thump, tight cluster.
+const RECOIL_PATTERN_PYTHON: Array[Vector2] = [
+	Vector2( 0.10, 1.20),
+	Vector2(-0.15, 1.25),
+	Vector2( 0.18, 1.20),
+	Vector2(-0.22, 1.15),
+	Vector2( 0.25, 1.10),
+	Vector2(-0.28, 1.05),
+]
 # Milkor MGL: single launcher thump per pull.
 const RECOIL_PATTERN_MGL: Array[Vector2] = [
 	Vector2(-0.40, 2.80),
@@ -703,6 +725,49 @@ const PROFILES := {
 		"pump_reload_pitch_min": 0.90,
 		"pump_reload_pitch_max": 1.00,
 	},
+	"lever_4570": {
+		"name": "Marlin 1895",
+		"mag_size": 6,
+		"rpm": 80.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_FALA.ogg"],
+		"fire_hold": 0.28,
+		"fire_fade": 0.42,
+		"recoil_pattern": RECOIL_PATTERN_LEVER_4570,
+		"bloom_mult": 0.85,
+		"ammo_id": "ammo_4570",
+		"per_round_reload": true,
+		"reload_time_per_round": 0.70,
+		"pullout_time": 1.2,
+	},
+	"pistol_4570": {
+		"name": "Hand Cannon",
+		"mag_size": 1,
+		"rpm": 60.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm.ogg"],
+		"fire_hold": 0.32,
+		"fire_fade": 0.50,
+		"recoil_pattern": RECOIL_PATTERN_PISTOL_4570,
+		"bloom_mult": 1.5,
+		"ammo_id": "ammo_4570",
+		"reload_time": 2.4,
+		"pullout_time": 0.9,
+	},
+	"python": {
+		"name": "Colt Python",
+		"mag_size": 6,
+		"rpm": 200.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK45ACP.ogg"],
+		"fire_hold": 0.16,
+		"fire_fade": 0.26,
+		"recoil_pattern": RECOIL_PATTERN_PYTHON,
+		"bloom_mult": 1.3,
+		"ammo_id": "ammo_357",
+		"reload_time": 3.4,
+		"pullout_time": 0.7,
+	},
 	"thompson": {
 		"name": "Thompson",
 		"mag_size": 30,
@@ -823,7 +888,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "aa12"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "aa12", "lever_4570", "pistol_4570", "python"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
