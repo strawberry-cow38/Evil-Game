@@ -365,7 +365,8 @@ func _physics_process(delta: float) -> void:
 	# warn about transform changes outside the physics tick.
 	var base_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
 	var blend_alpha: float = 1.0 - exp(-TP_BLEND_RATE * delta)
-	var tp_target: float = 1.0 if _third_person and _vehicle == null else 0.0
+	var scope_lock: bool = _weapon != null and _weapon.has_method("has_scope") and _weapon.has_scope()
+	var tp_target: float = 1.0 if _third_person and _vehicle == null and not scope_lock else 0.0
 	_tp_blend = lerpf(_tp_blend, tp_target, blend_alpha)
 	var crouch_alpha: float = 1.0 - exp(-CROUCH_LERP_RATE * delta)
 	var cam_pos := _camera.position
