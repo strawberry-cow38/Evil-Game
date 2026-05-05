@@ -140,6 +140,22 @@ const RECOIL_PATTERN_AUG: Array[Vector2] = [
 	Vector2(-0.65, 0.60),
 	Vector2( 0.72, 0.52),
 ]
+# SIG STG-57: heavy Swiss battle rifle. Slower cyclic + serious mass tames the
+# climb compared to the FAL, but it's still a full-power round.
+const RECOIL_PATTERN_STG57: Array[Vector2] = [
+	Vector2( 0.10, 1.05),
+	Vector2(-0.18, 1.20),
+	Vector2( 0.22, 1.30),
+	Vector2(-0.30, 1.35),
+	Vector2( 0.35, 1.35),
+	Vector2(-0.42, 1.30),
+	Vector2( 0.48, 1.25),
+	Vector2(-0.55, 1.20),
+	Vector2( 0.60, 1.15),
+	Vector2(-0.68, 1.10),
+	Vector2( 0.72, 1.05),
+	Vector2(-0.78, 1.00),
+]
 # FN FAL: full-power 7.62 NATO battle rifle. Heavy climb, drifts left-right
 # more than the M60 (handheld vs bipod-fed). Sits between M16 and M60.
 const RECOIL_PATTERN_FAL: Array[Vector2] = [
@@ -539,6 +555,20 @@ const PROFILES := {
 		"scope": true,
 		"ads_fov": 35.0,
 	},
+	"stg57": {
+		"name": "STG-57",
+		"mag_size": 24,
+		"rpm": 600.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_FALA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_STG57,
+		"bloom_mult": 0.95,
+		"ammo_id": "ammo_762nato",
+		"reload_time": 4.0,
+		"pullout_time": 1.5,
+	},
 	"fal": {
 		"name": "FN FAL",
 		"mag_size": 20,
@@ -573,7 +603,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "aa12"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "stg57", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "aa12"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
