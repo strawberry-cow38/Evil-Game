@@ -548,11 +548,51 @@ func equip(key: String, uid: int = 0) -> void:
 			_reload_player.stop()
 	if key != _current_weapon or uid != _current_uid:
 		_apply_weapon(key, uid)
+	# Persisted-mag carry-over from a world drop: if the inventory instance
+	# we're equipping carries a "mag" / "selected_ammo" / "fire_mode" field
+	# (set when the weapon was dropped), use those instead of the saved-by-
+	# uid defaults — the new uid has no matching _saved_ammo entry yet.
+	if uid != 0 and _inventory != null and _inventory.has_method("get_instance"):
+		var inst: Dictionary = _inventory.get_instance(uid)
+		if not inst.is_empty():
+			if inst.has("mag"):
+				_ammo = clampi(int(inst["mag"]), 0, get_mag_size())
+				_saved_ammo[uid] = _ammo
+			if inst.has("selected_ammo") and String(inst["selected_ammo"]) != "":
+				var sa: String = String(inst["selected_ammo"])
+				if get_compatible_ammo_ids().has(sa):
+					_selected_ammo = sa
+					_saved_selected_ammo[uid] = sa
+			if inst.has("fire_mode"):
+				var fm: int = int(inst["fire_mode"])
+				if _profile.modes.has(fm):
+					_fire_mode = fm
+					_saved_fire_modes[uid] = fm
 	_equipped = true
 	# Start the pullout cooldown. Reading the profile here (after
 	# _apply_weapon swap) so per-weapon values land correctly.
 	var pullout: float = float(_profile.get("pullout_time", DEFAULT_PULLOUT_TIME))
 	_pullout_until = Time.get_ticks_msec() / 1000.0 + pullout
+
+# Snapshot the live state of the weapon instance keyed by `uid`. Used by
+# the drop path so the world pickup carries the player's current mag,
+# selected ammo, and fire mode rather than resetting on re-pickup.
+func capture_state(uid: int) -> Dictionary:
+	if uid == 0:
+		return {}
+	if uid == _current_uid:
+		return {
+			"mag": _ammo,
+			"selected_ammo": _selected_ammo,
+			"fire_mode": int(_fire_mode),
+		}
+	if _saved_ammo.has(uid):
+		return {
+			"mag": int(_saved_ammo[uid]),
+			"selected_ammo": String(_saved_selected_ammo.get(uid, "")),
+			"fire_mode": int(_saved_fire_modes.get(uid, FireMode.SEMI)),
+		}
+	return {}
 
 func unequip() -> void:
 	_equipped = false

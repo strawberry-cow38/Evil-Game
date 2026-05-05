@@ -550,12 +550,22 @@ func drop_item(id: String, count: int = 1) -> bool:
 	return true
 
 # Instance drop path (weapons, apparel) — preserves condition + quality.
+# Weapons also carry their live mag count, selected ammo, and fire mode so
+# re-picking up the dropped gun resumes where the player left it.
 func drop_instance(uid: int) -> bool:
 	if _inventory == null or uid == 0:
 		return false
+	# Capture weapon state BEFORE remove_instance — capture_state on the
+	# currently-equipped uid reads live _ammo, which doesn't survive
+	# unequip-on-removal.
+	var weapon_state: Dictionary = {}
+	if _weapon != null and _weapon.has_method("capture_state"):
+		weapon_state = _weapon.capture_state(uid)
 	var inst: Dictionary = _inventory.remove_instance(uid)
 	if inst.is_empty():
 		return false
+	for k in weapon_state.keys():
+		inst[k] = weapon_state[k]
 	_spawn_drop(String(inst.item_id), 1, inst)
 	return true
 
