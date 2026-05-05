@@ -502,6 +502,8 @@ func _ready() -> void:
 		_inventory = get_node(inventory_path)
 	if _inventory != null and _inventory.has_signal("changed"):
 		_inventory.changed.connect(_recompute_active_mods)
+	if _inventory != null and _inventory.has_signal("mag_invalidated"):
+		_inventory.mag_invalidated.connect(_on_mag_invalidated)
 	_setup_audio()
 	_setup_laser()
 	_apply_weapon(_current_weapon)
@@ -594,6 +596,38 @@ func equip(key: String, uid: int = 0) -> void:
 	# _apply_weapon swap) so per-weapon values land correctly.
 	var pullout: float = float(_profile.get("pullout_time", DEFAULT_PULLOUT_TIME))
 	_pullout_until = Time.get_ticks_msec() / 1000.0 + pullout
+
+# Magazine attachment was removed/swapped down — dump the loaded rounds
+# back to inventory and zero the mag for that uid so the player can't keep
+# firing rounds the new mag never held.
+func _on_mag_invalidated(uid: int) -> void:
+	if _inventory == null:
+		return
+	var inst: Dictionary = _inventory.get_instance(uid)
+	if inst.is_empty():
+		return
+	var weapon_key: String = String(inst.item_id)
+	if not PROFILES.has(weapon_key):
+		return
+	var ammo_id: String = ""
+	if uid == _current_uid:
+		ammo_id = _selected_ammo
+	if ammo_id == "":
+		ammo_id = String(inst.get("selected_ammo", ""))
+	if ammo_id == "":
+		ammo_id = String(_saved_selected_ammo.get(uid, ""))
+	if ammo_id == "":
+		ammo_id = String(PROFILES[weapon_key].get("ammo_id", ""))
+	var rounds: int = 0
+	if uid == _current_uid:
+		rounds = _ammo
+		_ammo = 0
+	else:
+		rounds = int(inst.get("mag", _saved_ammo.get(uid, 0)))
+		inst["mag"] = 0
+	_saved_ammo[uid] = 0
+	if rounds > 0 and ammo_id != "" and _inventory.has_method("grant"):
+		_inventory.grant(ammo_id, rounds)
 
 # Roll up every attachment's mods dict for the currently-equipped instance into
 # a single dict the runtime queries. mag_size = max of installed mags; *_mult

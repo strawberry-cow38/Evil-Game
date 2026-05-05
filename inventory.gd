@@ -9,6 +9,10 @@ signal changed
 signal favorites_changed
 # Equipped now identifies an instance by uid. 0 = nothing equipped.
 signal equipped_changed(uid: int)
+# Fired when an attachment swap reduced the mag-size mod on this instance.
+# Whoever owns the live mag state (weapon node) is expected to dump current
+# rounds back to inventory and zero the mag.
+signal mag_invalidated(uid: int)
 
 # Stackable items: id -> int count.
 var counts: Dictionary = {}
@@ -312,6 +316,7 @@ func attach(uid: int, slot_id: String, att_id: String) -> bool:
 	if not inst.has("attachments"):
 		inst["attachments"] = {}
 	var atts: Dictionary = inst["attachments"]
+	var prev_mag: int = int(Items.attachment_mods(String(atts.get(slot_id, ""))).get("mag_size", 0))
 	if atts.has(slot_id):
 		var prev: String = String(atts[slot_id])
 		counts[prev] = int(counts.get(prev, 0)) + 1
@@ -319,6 +324,9 @@ func attach(uid: int, slot_id: String, att_id: String) -> bool:
 	if int(counts[att_id]) <= 0:
 		counts.erase(att_id)
 	atts[slot_id] = att_id
+	var new_mag: int = int(Items.attachment_mods(att_id).get("mag_size", 0))
+	if prev_mag > 0 and new_mag < prev_mag:
+		mag_invalidated.emit(uid)
 	changed.emit()
 	return true
 
@@ -330,8 +338,11 @@ func detach(uid: int, slot_id: String) -> bool:
 	if not atts.has(slot_id):
 		return false
 	var prev: String = String(atts[slot_id])
+	var had_mag: bool = Items.attachment_mods(prev).has("mag_size")
 	counts[prev] = int(counts.get(prev, 0)) + 1
 	atts.erase(slot_id)
+	if had_mag:
+		mag_invalidated.emit(uid)
 	changed.emit()
 	return true
 
