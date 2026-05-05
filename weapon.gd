@@ -71,18 +71,18 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 # PPSh-41: WW2 Soviet SMG. Drum-fed 900rpm bash. Mostly vertical with mild
 # horizontal wobble from the open-bolt action.
 const RECOIL_PATTERN_PPSH: Array[Vector2] = [
-	Vector2( 0.00, 0.55),
-	Vector2( 0.10, 0.65),
-	Vector2(-0.12, 0.75),
-	Vector2( 0.18, 0.80),
-	Vector2(-0.22, 0.82),
-	Vector2( 0.28, 0.82),
-	Vector2(-0.32, 0.80),
-	Vector2( 0.38, 0.78),
-	Vector2(-0.42, 0.75),
-	Vector2( 0.48, 0.72),
-	Vector2(-0.52, 0.68),
-	Vector2( 0.58, 0.65),
+	Vector2( 0.20, 1.60),
+	Vector2(-0.30, 1.90),
+	Vector2( 0.45, 2.10),
+	Vector2(-0.55, 2.25),
+	Vector2( 0.70, 2.30),
+	Vector2(-0.85, 2.30),
+	Vector2( 1.00, 2.25),
+	Vector2(-1.15, 2.20),
+	Vector2( 1.30, 2.15),
+	Vector2(-1.45, 2.10),
+	Vector2( 1.60, 2.05),
+	Vector2(-1.75, 2.00),
 ]
 # Steyr AUG: bullpup 5.56, slightly flatter than M16 (shorter cyclic, balanced
 # bullpup geometry). Vertical-leaning with mild horizontal weave.
@@ -429,7 +429,7 @@ const PROFILES := {
 		"fire_hold": 0.18,
 		"fire_fade": 0.26,
 		"recoil_pattern": RECOIL_PATTERN_PPSH,
-		"bloom_mult": 1.5,
+		"bloom_mult": 2.4,
 		"ammo_id": "ammo_762x25",
 		"reload_time": 4.5,
 		"pullout_time": 1.4,
