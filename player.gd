@@ -133,21 +133,16 @@ func _seed_starting_inventory() -> void:
 		)
 	for id in STARTING_AMMO.keys():
 		_inventory.grant(id, int(STARTING_AMMO[id]))
-	# Walk the freshly-spawned weapon instances in grant order; auto-equip the
-	# first and bind subsequent ones to digit slots 1..9 so the player isn't
-	# naked.
+	# Walk the freshly-spawned weapon instances and bind them to digit
+	# slots 1..9. Player spawns unarmed — pressing a digit equips that
+	# weapon (and pays its pullout cost).
 	var slot := 1
-	var first_uid := 0
 	for inst in _inventory.instances:
 		if Items.item_kind(String(inst.item_id)) != "weapon":
 			continue
-		if first_uid == 0:
-			first_uid = int(inst.uid)
 		if slot <= 9:
 			_inventory.set_favorite(slot, int(inst.uid))
 			slot += 1
-	if first_uid != 0:
-		_inventory.set_equipped(first_uid)
 
 func _on_equipped_changed(uid: int) -> void:
 	if _weapon == null:

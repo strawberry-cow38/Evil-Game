@@ -209,6 +209,7 @@ const PROFILES := {
 		"bloom_mult": 1.0,
 		"ammo_id": "ammo_762x39",
 		"reload_time": 4.4,
+		"pullout_time": 1.0,
 	},
 	"sks": {
 		"name": "SKS",
@@ -222,6 +223,7 @@ const PROFILES := {
 		"bloom_mult": 0.85,
 		"ammo_id": "ammo_762x39",
 		"reload_time": 4.4,
+		"pullout_time": 1.15,
 	},
 	"m16a2": {
 		"name": "M16A2",
@@ -235,6 +237,7 @@ const PROFILES := {
 		"bloom_mult": 1.0,
 		"ammo_id": "ammo_556nato",
 		"reload_time": 4.0,
+		"pullout_time": 1.5,
 	},
 	"bizon": {
 		"name": "PP-19 Bizon",
@@ -248,6 +251,7 @@ const PROFILES := {
 		"bloom_mult": 1.4,
 		"ammo_id": "ammo_9x18",
 		"reload_time": 4.4,
+		"pullout_time": 1.2,
 	},
 	"mp5sd": {
 		"name": "MP5",
@@ -262,6 +266,7 @@ const PROFILES := {
 		"bloom_mult": 2.2,
 		"ammo_id": "ammo_9mm",
 		"reload_time": 4.0,
+		"pullout_time": 1.6,
 	},
 	"m249": {
 		"name": "M249",
@@ -275,6 +280,7 @@ const PROFILES := {
 		"bloom_mult": 1.6,
 		"ammo_id": "ammo_556nato",
 		"reload_time": 7.5,
+		"pullout_time": 1.8,
 	},
 	"m60": {
 		"name": "M60",
@@ -288,6 +294,7 @@ const PROFILES := {
 		"bloom_mult": 1.7,
 		"ammo_id": "ammo_762nato",
 		"reload_time": 7.5,
+		"pullout_time": 1.9,
 	},
 	"makarov": {
 		"name": "PM Makarov",
@@ -301,6 +308,7 @@ const PROFILES := {
 		"bloom_mult": 1.6,
 		"ammo_id": "ammo_9x18",
 		"reload_time": 2.9,
+		"pullout_time": 0.5,
 	},
 	"shotgun_combat": {
 		"name": "XM1014",
@@ -322,6 +330,7 @@ const PROFILES := {
 		"shell_impact_pitch_min": 0.90,
 		"shell_impact_pitch_max": 1.12,
 		"shell_impact_vol_db": -18.0,
+		"pullout_time": 1.6,
 	},
 	"p90": {
 		"name": "FN P90",
@@ -335,6 +344,7 @@ const PROFILES := {
 		"bloom_mult": 1.5,
 		"ammo_id": "ammo_57x28",
 		"reload_time": 3.6,
+		"pullout_time": 1.2,
 	},
 	"m700": {
 		"name": "Remington M700",
@@ -356,6 +366,7 @@ const PROFILES := {
 		"bolt_pitch_min": 0.96,
 		"bolt_pitch_max": 1.04,
 		"bolt_vol_db": -4.0,
+		"pullout_time": 1.0,
 	},
 	"mgl": {
 		"name": "MGL",
@@ -373,8 +384,10 @@ const PROFILES := {
 		"per_round_reload": true,
 		"reload_time_per_round": 1.0,
 		"no_shell_impact": true,
+		"pullout_time": 1.0,
 	},
 }
+const DEFAULT_PULLOUT_TIME := 1.0
 const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
@@ -407,7 +420,11 @@ var _target_pitch := 0.0
 var _applied_yaw := 0.0
 var _applied_pitch := 0.0
 var _current_weapon: String = "akm"
-var _equipped: bool = true   # false = empty hands; gates fire/reload/recoil decay
+var _equipped: bool = false   # false = empty hands; gates fire/reload/recoil decay. Player spawns unarmed.
+# Time (Time.get_ticks_msec()/1000.0) at which the current weapon
+# finishes its pullout/raise animation. Fire is gated until then so
+# every equip pays the per-weapon raise cost.
+var _pullout_until: float = 0.0
 # Laser sight nodes (top_level so we can drive them in world space).
 var _laser_dot: MeshInstance3D
 var _laser_beam: MeshInstance3D
@@ -532,6 +549,10 @@ func equip(key: String, uid: int = 0) -> void:
 	if key != _current_weapon or uid != _current_uid:
 		_apply_weapon(key, uid)
 	_equipped = true
+	# Start the pullout cooldown. Reading the profile here (after
+	# _apply_weapon swap) so per-weapon values land correctly.
+	var pullout: float = float(_profile.get("pullout_time", DEFAULT_PULLOUT_TIME))
+	_pullout_until = Time.get_ticks_msec() / 1000.0 + pullout
 
 func unequip() -> void:
 	_equipped = false
@@ -978,7 +999,7 @@ func _process(delta: float) -> void:
 	var interval: float = _fire_interval()
 	if _fire_mode == FireMode.BURST:
 		interval /= BURST_RPM_MULT
-	if want_fire and _ammo > 0 and now - _last_fire_time >= interval:
+	if want_fire and _ammo > 0 and now - _last_fire_time >= interval and now >= _pullout_until:
 		_fire(now)
 		_ammo -= 1
 		if _fire_mode == FireMode.BURST:
