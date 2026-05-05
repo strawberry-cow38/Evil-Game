@@ -400,7 +400,7 @@ const PROFILES := {
 	},
 	"aa12": {
 		"name": "AA-12",
-		"mag_size": 8,
+		"mag_size": 20,
 		"rpm": 300.0,
 		"modes": [FireMode.AUTO],
 		"fire_sounds": ["res://assets/audio/Shot_AA12.ogg"],
