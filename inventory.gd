@@ -38,6 +38,9 @@ func total_weight() -> float:
 		w += Items.item_weight(id) * float(counts[id])
 	for inst in instances:
 		w += Items.item_weight(String(inst.item_id))
+		var atts: Dictionary = inst.get("attachments", {})
+		for slot_id in atts.keys():
+			w += Items.item_weight(String(atts[slot_id]))
 	return w
 
 func encumbrance_ratio() -> float:
@@ -277,3 +280,68 @@ func find_favorite_slot_for_uid(uid: int) -> int:
 
 func favorite_uid(slot: int) -> int:
 	return int(favorites.get(slot, 0))
+
+# --- Attachments -----------------------------------------------------------
+
+func get_attachments(uid: int) -> Dictionary:
+	var inst: Dictionary = get_instance(uid)
+	if inst.is_empty():
+		return {}
+	return inst.get("attachments", {})
+
+# Install an attachment from stackable counts onto a weapon instance slot. The
+# slot's tag must match the attachment's fits_tag. Any prior occupant returns
+# to counts. Returns true on success.
+func attach(uid: int, slot_id: String, att_id: String) -> bool:
+	if att_id == "" or not Items.DEFS.has(att_id):
+		return false
+	if not Items.is_attachment(att_id):
+		return false
+	if int(counts.get(att_id, 0)) <= 0:
+		return false
+	var inst: Dictionary = get_instance(uid)
+	if inst.is_empty():
+		return false
+	var slot_tag: String = ""
+	for s in Items.item_slots(String(inst.item_id)):
+		if String(s.get("id", "")) == slot_id:
+			slot_tag = String(s.get("tag", ""))
+			break
+	if slot_tag == "" or slot_tag != Items.attachment_fits_tag(att_id):
+		return false
+	if not inst.has("attachments"):
+		inst["attachments"] = {}
+	var atts: Dictionary = inst["attachments"]
+	if atts.has(slot_id):
+		var prev: String = String(atts[slot_id])
+		counts[prev] = int(counts.get(prev, 0)) + 1
+	counts[att_id] = int(counts[att_id]) - 1
+	if int(counts[att_id]) <= 0:
+		counts.erase(att_id)
+	atts[slot_id] = att_id
+	changed.emit()
+	return true
+
+func detach(uid: int, slot_id: String) -> bool:
+	var inst: Dictionary = get_instance(uid)
+	if inst.is_empty():
+		return false
+	var atts: Dictionary = inst.get("attachments", {})
+	if not atts.has(slot_id):
+		return false
+	var prev: String = String(atts[slot_id])
+	counts[prev] = int(counts.get(prev, 0)) + 1
+	atts.erase(slot_id)
+	changed.emit()
+	return true
+
+# All attachment ids in stackable counts whose fits_tag matches slot_tag.
+func compatible_attachments(slot_tag: String) -> Array:
+	var out: Array = []
+	if slot_tag == "":
+		return out
+	for id in counts.keys():
+		var sid: String = String(id)
+		if Items.is_attachment(sid) and Items.attachment_fits_tag(sid) == slot_tag:
+			out.append(sid)
+	return out

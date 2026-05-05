@@ -13,18 +13,23 @@ const DEFS := {
 	"pineapple":  {"name": "Pineapple",  "weight": 1.50, "value":  20, "color": Color(0.85, 0.78, 0.20), "kind": "food", "desc": "Spiky tropical fruit. Heavy."},
 	"watermelon": {"name": "Watermelon", "weight": 4.00, "value":  30, "color": Color(0.20, 0.55, 0.25), "kind": "food", "desc": "Big juicy watermelon. Encumbering."},
 
-	"akm":    {"name": "AKM",          "weight": 3.50, "value":  350, "color": Color(0.45, 0.30, 0.18), "kind": "weapon", "desc": "Soviet 7.62×39 assault rifle. Reliable, harsh climb.", "slots": ["Optic", "Muzzle", "Mag"]},
-	"sks":    {"name": "SKS",          "weight": 3.85, "value":  260, "color": Color(0.50, 0.35, 0.20), "kind": "weapon", "desc": "Soviet 7.62×39 carbine. Semi-auto only, 10-round internal mag.", "slots": ["Optic", "Muzzle"]},
-	"m16a2":  {"name": "M16A2",        "weight": 3.40, "value":  420, "color": Color(0.20, 0.20, 0.22), "kind": "weapon", "desc": "5.56 NATO. Burst-capable. Cleaner than the AK.", "slots": ["Optic", "Muzzle", "Mag", "Grip"]},
-	"bizon":  {"name": "PP-19 Bizon",  "weight": 2.50, "value":  280, "color": Color(0.30, 0.32, 0.30), "kind": "weapon", "desc": "9mm SMG with helical 64-round mag. Compact.", "slots": ["Optic", "Muzzle"]},
-	"mp5sd":  {"name": "MP5",          "weight": 3.00, "value":  520, "color": Color(0.15, 0.15, 0.17), "kind": "weapon", "desc": "9mm roller-delayed SMG. Tight grouping, classic chatter.", "slots": ["Optic", "Mag"]},
-	"m249":   {"name": "M249 SAW",     "weight": 7.50, "value":  900, "color": Color(0.28, 0.28, 0.25), "kind": "weapon", "desc": "5.56 belt-fed LMG. 100-round box. Heavy.", "slots": ["Optic", "Bipod"]},
-	"m60":    {"name": "M60",          "weight": 10.50,"value": 1100, "color": Color(0.22, 0.22, 0.20), "kind": "weapon", "desc": "7.62 belt-fed LMG. Slow cyclic, devastating.", "slots": ["Optic", "Bipod"]},
-	"mgl":    {"name": "Milkor MGL",   "weight": 5.50, "value":  800, "color": Color(0.18, 0.30, 0.20), "kind": "weapon", "desc": "40mm 6-round revolving grenade launcher. Goes boom.", "slots": ["Optic"]},
-	"makarov":{"name": "PM Makarov",   "weight": 0.66, "value":  120, "color": Color(0.18, 0.18, 0.20), "kind": "weapon", "desc": "Soviet 9×18 service pistol. 8-round mag.", "slots": ["Muzzle"]},
-	"shotgun_combat": {"name": "XM1014",         "weight": 3.30, "value": 380, "color": Color(0.22, 0.18, 0.16), "kind": "weapon", "desc": "Semi-auto 12 gauge combat shotgun. 6-round tube, shell-by-shell reload.", "slots": ["Optic", "Muzzle"]},
-	"p90":            {"name": "FN P90",         "weight": 2.70, "value": 480, "color": Color(0.18, 0.18, 0.18), "kind": "weapon", "desc": "Bullpup PDW. 50-round top-mount mag in 5.7×28mm. High cyclic, flat recoil.", "slots": ["Optic", "Muzzle"]},
-	"m700":           {"name": "Remington M700", "weight": 4.50, "value": 700, "color": Color(0.22, 0.16, 0.10), "kind": "weapon", "desc": "Bolt-action 7.62 NATO sniper. 5-round internal mag. 6× scope. Surgical.", "slots": ["Muzzle"]},
+	"akm":    {"name": "AKM",          "weight": 3.50, "value":  350, "color": Color(0.45, 0.30, 0.18), "kind": "weapon", "desc": "Soviet 7.62×39 assault rifle. Reliable, harsh climb.", "slots": [{"id":"Optic","tag":"ak_optic"},{"id":"Muzzle","tag":"ak_muzzle"},{"id":"Mag","tag":"ak_mag"}]},
+	"sks":    {"name": "SKS",          "weight": 3.85, "value":  260, "color": Color(0.50, 0.35, 0.20), "kind": "weapon", "desc": "Soviet 7.62×39 carbine. Semi-auto only, 10-round internal mag.", "slots": [{"id":"Optic","tag":"sks_optic"},{"id":"Muzzle","tag":"sks_muzzle"}]},
+	"m16a2":  {"name": "M16A2",        "weight": 3.40, "value":  420, "color": Color(0.20, 0.20, 0.22), "kind": "weapon", "desc": "5.56 NATO. Burst-capable. Cleaner than the AK.", "slots": [{"id":"Optic","tag":"m16_optic"},{"id":"Muzzle","tag":"m16_muzzle"},{"id":"Mag","tag":"m16_mag"},{"id":"Grip","tag":"m16_grip"}]},
+	"bizon":  {"name": "PP-19 Bizon",  "weight": 2.50, "value":  280, "color": Color(0.30, 0.32, 0.30), "kind": "weapon", "desc": "9mm SMG with helical 64-round mag. Compact.", "slots": [{"id":"Optic","tag":"bizon_optic"},{"id":"Muzzle","tag":"bizon_muzzle"}]},
+	"mp5sd":  {"name": "MP5",          "weight": 3.00, "value":  520, "color": Color(0.15, 0.15, 0.17), "kind": "weapon", "desc": "9mm roller-delayed SMG. Tight grouping, classic chatter.", "slots": [{"id":"Optic","tag":"mp5_optic"},{"id":"Mag","tag":"mp5_mag"}]},
+	"m249":   {"name": "M249 SAW",     "weight": 7.50, "value":  900, "color": Color(0.28, 0.28, 0.25), "kind": "weapon", "desc": "5.56 belt-fed LMG. 100-round box. Heavy.", "slots": [{"id":"Optic","tag":"m249_optic"},{"id":"Bipod","tag":"m249_bipod"}]},
+	"m60":    {"name": "M60",          "weight": 10.50,"value": 1100, "color": Color(0.22, 0.22, 0.20), "kind": "weapon", "desc": "7.62 belt-fed LMG. Slow cyclic, devastating.", "slots": [{"id":"Optic","tag":"m60_optic"},{"id":"Bipod","tag":"m60_bipod"}]},
+	"mgl":    {"name": "Milkor MGL",   "weight": 5.50, "value":  800, "color": Color(0.18, 0.30, 0.20), "kind": "weapon", "desc": "40mm 6-round revolving grenade launcher. Goes boom.", "slots": [{"id":"Optic","tag":"mgl_optic"}]},
+	"makarov":{"name": "PM Makarov",   "weight": 0.66, "value":  120, "color": Color(0.18, 0.18, 0.20), "kind": "weapon", "desc": "Soviet 9×18 service pistol. 8-round mag.", "slots": [{"id":"Muzzle","tag":"makarov_muzzle"}]},
+	"shotgun_combat": {"name": "XM1014",         "weight": 3.30, "value": 380, "color": Color(0.22, 0.18, 0.16), "kind": "weapon", "desc": "Semi-auto 12 gauge combat shotgun. 6-round tube, shell-by-shell reload.", "slots": [{"id":"Optic","tag":"xm_optic"},{"id":"Muzzle","tag":"xm_muzzle"}]},
+	"p90":            {"name": "FN P90",         "weight": 2.70, "value": 480, "color": Color(0.18, 0.18, 0.18), "kind": "weapon", "desc": "Bullpup PDW. 50-round top-mount mag in 5.7×28mm. High cyclic, flat recoil.", "slots": [{"id":"Optic","tag":"p90_optic"},{"id":"Muzzle","tag":"p90_muzzle"}]},
+	"m700":           {"name": "Remington M700", "weight": 4.50, "value": 700, "color": Color(0.22, 0.16, 0.10), "kind": "weapon", "desc": "Bolt-action 7.62 NATO sniper. 5-round internal mag. 6× scope. Surgical.", "slots": [{"id":"Muzzle","tag":"m700_muzzle"}]},
+
+	"att_ak_scope":    {"name": "AK Scope",          "weight": 0.45, "value": 220, "color": Color(0.20, 0.20, 0.22), "kind": "attachment", "fits_tag": "ak_optic",  "mods": {"scope": true, "ads_fov": 25.0}, "desc": "Side-rail optic for the AK. Standard reticle, no laser."},
+	"att_ak_silencer": {"name": "7.62×39 Silencer",   "weight": 0.40, "value": 180, "color": Color(0.10, 0.10, 0.10), "kind": "attachment", "fits_tag": "ak_muzzle", "mods": {"velocity_mult": 0.80, "damage_mult": 0.80, "bloom_mult": 1.10}, "desc": "Threaded muzzle can. Quieter shots — but slower, weaker, sloppier."},
+	"att_ak_mag_40":   {"name": "AK 40rd Magazine",   "weight": 0.55, "value": 150, "color": Color(0.30, 0.22, 0.14), "kind": "attachment", "fits_tag": "ak_mag",    "mods": {"mag_size": 40}, "desc": "Extended 40-round AK magazine."},
+	"att_ak_drum_75":  {"name": "AK 75rd Drum",       "weight": 1.50, "value": 320, "color": Color(0.32, 0.24, 0.16), "kind": "attachment", "fits_tag": "ak_mag",    "mods": {"mag_size": 75}, "desc": "75-round drum magazine for the AK. Heavy, awkward, glorious."},
 
 	"ammo_762x39":  {"name": "7.62×39mm",       "weight": 0.016, "value":  1, "color": Color(0.85, 0.65, 0.20), "kind": "ammo", "damage": 50, "falloff_start": 100.0, "falloff_end": 300.0, "damage_min": 30, "desc": "Soviet intermediate cartridge. Feeds the AKM."},
 	"ammo_556nato": {"name": "5.56×45mm NATO",  "weight": 0.012, "value":  1, "color": Color(0.90, 0.78, 0.40), "kind": "ammo", "damage": 40, "falloff_start": 120.0, "falloff_end": 350.0, "damage_min": 22, "desc": "NATO standard. Feeds the M16A2 and M249."},
@@ -60,6 +65,15 @@ static func item_desc(id: String) -> String:
 
 static func item_slots(id: String) -> Array:
 	return DEFS.get(id, {}).get("slots", [])
+
+static func attachment_fits_tag(id: String) -> String:
+	return String(DEFS.get(id, {}).get("fits_tag", ""))
+
+static func attachment_mods(id: String) -> Dictionary:
+	return DEFS.get(id, {}).get("mods", {})
+
+static func is_attachment(id: String) -> bool:
+	return item_kind(id) == "attachment"
 
 static func ammo_damage(id: String) -> int:
 	return int(DEFS.get(id, {}).get("damage", 0))

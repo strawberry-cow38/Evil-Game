@@ -487,6 +487,11 @@ var _reload_stream: AudioStream
 var _pump_streams: Dictionary = {}
 var _pump_player: AudioStreamPlayer3D
 
+# Active attachment mods on the currently equipped instance — accumulated from
+# every attachment installed in the weapon's slots. Recomputed on equip + when
+# the inventory changes the equipped instance's attachments.
+var _active_mods: Dictionary = {}
+
 func _ready() -> void:
 	_rng.randomize()
 	if camera_path != NodePath():
@@ -495,6 +500,8 @@ func _ready() -> void:
 		_player = get_node(player_path)
 	if inventory_path != NodePath():
 		_inventory = get_node(inventory_path)
+	if _inventory != null and _inventory.has_signal("changed"):
+		_inventory.changed.connect(_recompute_active_mods)
 	_setup_audio()
 	_setup_laser()
 	_apply_weapon(_current_weapon)
@@ -578,10 +585,38 @@ func equip(key: String, uid: int = 0) -> void:
 					_fire_mode = fm
 					_saved_fire_modes[uid] = fm
 	_equipped = true
+	_recompute_active_mods()
+	# After mods may have changed mag_size, clamp current ammo so a 75-round
+	# drum equipped while holding 30 doesn't artificially overflow when reload
+	# math runs.
+	_ammo = clampi(_ammo, 0, get_mag_size())
 	# Start the pullout cooldown. Reading the profile here (after
 	# _apply_weapon swap) so per-weapon values land correctly.
 	var pullout: float = float(_profile.get("pullout_time", DEFAULT_PULLOUT_TIME))
 	_pullout_until = Time.get_ticks_msec() / 1000.0 + pullout
+
+# Roll up every attachment's mods dict for the currently-equipped instance into
+# a single dict the runtime queries. mag_size = max of installed mags; *_mult
+# values multiply; flag/value fields use last-write-wins.
+func _recompute_active_mods() -> void:
+	_active_mods = {}
+	if not _equipped or _current_uid == 0 or _inventory == null:
+		return
+	if not _inventory.has_method("get_attachments"):
+		return
+	var atts: Dictionary = _inventory.get_attachments(_current_uid)
+	for slot_id in atts.keys():
+		var att_id: String = String(atts[slot_id])
+		var mods: Dictionary = Items.attachment_mods(att_id)
+		for k in mods.keys():
+			var key: String = String(k)
+			var v = mods[k]
+			if key == "mag_size":
+				_active_mods[key] = max(int(_active_mods.get(key, 0)), int(v))
+			elif key.ends_with("_mult"):
+				_active_mods[key] = float(_active_mods.get(key, 1.0)) * float(v)
+			else:
+				_active_mods[key] = v
 
 # Snapshot the live state of the weapon instance keyed by `uid`. Used by
 # the drop path so the world pickup carries the player's current mag,
@@ -947,10 +982,14 @@ func is_ads() -> bool:
 
 # True if the equipped weapon should render the scope overlay when ADS.
 func has_scope() -> bool:
+	if bool(_active_mods.get("scope", false)):
+		return true
 	return bool(_profile.get("scope", false))
 
 # Per-weapon ADS FOV override (sniper scopes are much narrower than 55°).
 func get_ads_fov(default_fov: float) -> float:
+	if _active_mods.has("ads_fov"):
+		return float(_active_mods["ads_fov"])
 	return float(_profile.get("ads_fov", default_fov))
 
 # Bolt-action rifles force the player out of ADS for the cycle duration so
@@ -969,6 +1008,8 @@ func get_ammo() -> int:
 	return _ammo
 
 func get_mag_size() -> int:
+	if _active_mods.has("mag_size"):
+		return int(_active_mods["mag_size"])
 	return int(_profile.get("mag_size", 0))
 
 func _fire_interval() -> float:
@@ -1009,6 +1050,7 @@ func get_current_bloom_deg() -> float:
 	if airborne:
 		bloom_deg += AIR_BLOOM_DEG
 	bloom_deg *= float(_profile.get("bloom_mult", 1.0))
+	bloom_deg *= float(_active_mods.get("bloom_mult", 1.0))
 	if _fire_mode == FireMode.BURST:
 		bloom_deg *= BURST_BLOOM_MULT
 	return bloom_deg
@@ -1189,7 +1231,8 @@ func _fire(now: float) -> void:
 		_fire_pellet(origin, pdir)
 
 func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
-	var vel: Vector3 = pdir * MUZZLE_VELOCITY
+	var muzzle_speed: float = MUZZLE_VELOCITY * float(_active_mods.get("velocity_mult", 1.0))
+	var vel: Vector3 = pdir * muzzle_speed
 	var gravity := Vector3(0.0, -BULLET_GRAVITY, 0.0)
 
 	var space := get_world_3d().direct_space_state
@@ -1221,7 +1264,7 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 		hit_pos = pos
 
 	var distance := origin.distance_to(hit_pos)
-	var impact_delay := distance / MUZZLE_VELOCITY
+	var impact_delay := distance / muzzle_speed
 	_spawn_tracer(origin, hit_pos)
 	if has_hit:
 		var material := _classify_material(hit_collider)
@@ -1239,6 +1282,7 @@ func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
 	if target == null:
 		return
 	var dmg: int = Items.ammo_damage_at(get_selected_ammo(), distance)
+	dmg = int(round(float(dmg) * float(_active_mods.get("damage_mult", 1.0))))
 	if dmg <= 0:
 		return
 	if delay <= 0.0:

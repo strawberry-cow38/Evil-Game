@@ -73,6 +73,7 @@ var _inspect_desc: Label
 var _inspect_stats: Label
 var _inspect_slots_label: Label
 var _inspect_slots_box: VBoxContainer
+var _inspect_uid: int = 0
 
 # Split-drop overlay nodes + active context.
 var _split_root: Control
@@ -325,6 +326,7 @@ func _build_inspect_overlay() -> void:
 	dim.color = Color(0.0, 0.0, 0.0, 0.6)
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
 	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.gui_input.connect(_on_inspect_dim_input)
 	_inspect_root.add_child(dim)
 
 	var center := CenterContainer.new()
@@ -421,6 +423,7 @@ func _category_matches(kind: String) -> bool:
 func _on_inventory_changed() -> void:
 	if _open:
 		_refresh()
+		_refresh_inspect_if_open()
 
 func _refresh() -> void:
 	_refresh_list()
@@ -629,10 +632,40 @@ func _on_list_gui_input(event: InputEvent) -> void:
 			_move_selection(1)
 			_list.accept_event()
 
+func _on_inspect_dim_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed:
+		_close_inspect()
+
 func _open_inspect() -> void:
 	var row: Dictionary = _selected_row()
 	if row.is_empty():
 		return
+	_inspect_uid = int(row.uid) if bool(row.is_instance) else 0
+	_render_inspect(row)
+
+func _refresh_inspect_if_open() -> void:
+	if not _is_inspect_open() or _inspect_uid == 0:
+		return
+	var inst: Dictionary = _inventory.get_instance(_inspect_uid)
+	if inst.is_empty():
+		_close_inspect()
+		return
+	var iid: String = String(inst.item_id)
+	var row: Dictionary = {
+		"id": iid,
+		"uid": _inspect_uid,
+		"count": 1,
+		"name": Items.item_name(iid),
+		"kind": Items.item_kind(iid),
+		"weight_total": Items.item_weight(iid),
+		"value_each": Items.item_value(iid),
+		"condition": float(inst.condition),
+		"quality": int(inst.quality),
+		"is_instance": true,
+	}
+	_render_inspect(row)
+
+func _render_inspect(row: Dictionary) -> void:
 	var id: String = String(row.id)
 	_inspect_color.color = Items.item_color(id)
 	if bool(row.is_instance):
@@ -666,20 +699,65 @@ func _open_inspect() -> void:
 		none.text = "(no attachment slots)"
 		none.modulate = Color(0.7, 0.7, 0.7)
 		_inspect_slots_box.add_child(none)
+	elif not bool(row.is_instance):
+		var note := Label.new()
+		note.text = "Drop or pick up to install attachments."
+		note.modulate = Color(0.7, 0.7, 0.7)
+		_inspect_slots_box.add_child(note)
 	else:
+		var inst_atts: Dictionary = _inventory.get_attachments(int(row.uid))
 		for s in slots:
+			var slot_id: String = String(s.get("id", ""))
+			var slot_tag: String = String(s.get("tag", ""))
 			var slot_row := HBoxContainer.new()
 			slot_row.add_theme_constant_override("separation", 12)
 			var name_lbl := Label.new()
-			name_lbl.text = "• %s" % String(s)
-			name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			name_lbl.text = "• %s" % slot_id
+			name_lbl.custom_minimum_size = Vector2(110, 0)
 			slot_row.add_child(name_lbl)
-			var status := Label.new()
-			status.text = "(empty)"
-			status.modulate = Color(0.65, 0.65, 0.65)
-			slot_row.add_child(status)
+			var dd := OptionButton.new()
+			dd.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			var cur: String = String(inst_atts.get(slot_id, ""))
+			var ids: Array = []
+			ids.append("")
+			if cur != "":
+				ids.append(cur)
+			for cid in _inventory.compatible_attachments(slot_tag):
+				if String(cid) != cur:
+					ids.append(String(cid))
+			var sel_idx := 0
+			for i in range(ids.size()):
+				var cid2: String = String(ids[i])
+				if cid2 == "":
+					dd.add_item("(empty)")
+				else:
+					var lbl := Items.item_name(cid2)
+					if cid2 != cur:
+						lbl += " (x%d)" % int(_inventory.counts.get(cid2, 0))
+					dd.add_item(lbl)
+				dd.set_item_metadata(i, cid2)
+				if cid2 == cur:
+					sel_idx = i
+			dd.select(sel_idx)
+			var bound_uid: int = int(row.uid)
+			var bound_slot: String = slot_id
+			dd.item_selected.connect(func(idx: int):
+				_on_attach_selected(bound_uid, bound_slot, String(dd.get_item_metadata(idx)))
+			)
+			slot_row.add_child(dd)
 			_inspect_slots_box.add_child(slot_row)
 	_inspect_root.visible = true
+
+func _on_attach_selected(uid: int, slot_id: String, att_id: String) -> void:
+	var atts: Dictionary = _inventory.get_attachments(uid)
+	var cur: String = String(atts.get(slot_id, ""))
+	if att_id == cur:
+		return
+	if att_id == "":
+		_inventory.detach(uid, slot_id)
+	else:
+		_inventory.attach(uid, slot_id, att_id)
+	_refresh_inspect_if_open()
 
 func _close_inspect() -> void:
 	_inspect_root.visible = false

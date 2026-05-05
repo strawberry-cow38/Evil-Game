@@ -56,6 +56,10 @@ const STARTING_AMMO: Dictionary = {
 	"ammo_40mm":    200,
 	"ammo_12ga":    100,
 	"ammo_12ga_slug": 50,
+	"att_ak_scope":    1,
+	"att_ak_silencer": 1,
+	"att_ak_mag_40":   1,
+	"att_ak_drum_75":  1,
 }
 
 # Reload-as-pie threshold: holding R longer than this opens the radial menu;
