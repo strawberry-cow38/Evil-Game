@@ -348,7 +348,7 @@ const RECOIL_PATTERN_BIZON: Array[Vector2] = [
 	Vector2( 1.65, 0.85),
 	Vector2(-1.65, 0.80),
 ]
-# XM1014: heavy semi-auto shotgun. Big single-shot kick, recoil index resets
+# SPAS-12: heavy semi-auto shotgun. Big single-shot kick, recoil index resets
 # fast in semi so the first few entries do the work.
 const RECOIL_PATTERN_SHOTGUN: Array[Vector2] = [
 	Vector2( 0.10, 2.20),
@@ -563,8 +563,8 @@ const PROFILES := {
 		"shell_impact_vol_db": -18.0,
 	},
 	"shotgun_combat": {
-		"name": "XM1014",
-		"mag_size": 6,
+		"name": "SPAS-12",
+		"mag_size": 8,
 		"rpm": 240.0,
 		"modes": [FireMode.SEMI],
 		"fire_sounds": ["res://assets/audio/Shot_GTEK12GaA.ogg"],
@@ -943,7 +943,7 @@ var _saved_fire_modes: Dictionary = {}
 # Per-instance current magazine count so swapping doesn't dupe ammo or refill
 # mid-fight. Also keyed by uid.
 var _saved_ammo: Dictionary = {}
-# Per-instance selected ammo id (multi-ammo weapons like XM1014). Keyed by uid.
+# Per-instance selected ammo id (multi-ammo weapons like SPAS-12). Keyed by uid.
 var _saved_selected_ammo: Dictionary = {}
 # Currently selected ammo id for the equipped weapon. Defaults to profile's ammo_id.
 var _selected_ammo: String = ""
@@ -1012,7 +1012,7 @@ const SHELL_IMPACT_VOICES := 4
 var _bolt_streams: Dictionary = {}
 var _bolt_voice: AudioStreamPlayer3D = null
 # Default brass-casing impact set used by every weapon that doesn't override
-# (XM1014 ships its own shellimpact.wav; MGL opts out via no_shell_impact).
+# (SPAS-12 ships its own shellimpact.wav; MGL opts out via no_shell_impact).
 const DEFAULT_BRASS_PATHS: Array = [
 	"res://assets/audio/brassimpact_1a.wav",
 	"res://assets/audio/brassimpact_1b.wav",
@@ -1027,7 +1027,7 @@ const DEFAULT_BRASS_PITCH_MAX := 1.12
 const DEFAULT_BRASS_VOL_DB := -18.0
 var _reload_player: AudioStreamPlayer3D
 var _reload_stream: AudioStream
-# Per-shell pump sound for per-round reloads (XM1014 etc). Stream + player
+# Per-shell pump sound for per-round reloads (SPAS-12 etc). Stream + player
 # are keyed off the current weapon so loading a shell triggers the right
 # pump for whichever shotgun is in hand.
 var _pump_streams: Dictionary = {}
@@ -1346,7 +1346,7 @@ func _setup_audio() -> void:
 		_bolt_voice.unit_size = 5.0
 		_bolt_voice.max_distance = 20.0
 		add_child(_bolt_voice)
-	# Pump-action shell-load streams (XM1014). One stream per profile that
+	# Pump-action shell-load streams (SPAS-12). One stream per profile that
 	# defines pump_reload_path; played per shell loaded.
 	for key in WEAPON_ORDER:
 		var pp: String = String(PROFILES[key].get("pump_reload_path", ""))
@@ -1381,7 +1381,7 @@ func _load_wav(res_path: String) -> AudioStream:
 	return AudioStreamOggVorbis.load_from_file(abs_path)
 
 # --- Multi-ammo support ---------------------------------------------------
-# Most weapons feed a single cartridge (profile.ammo_id). The XM1014 accepts
+# Most weapons feed a single cartridge (profile.ammo_id). The SPAS-12 accepts
 # both buckshot and slugs and the player picks via the radial reload menu.
 func get_compatible_ammo_ids() -> Array:
 	var ids: Array = _profile.get("ammo_ids", [])
@@ -1889,7 +1889,7 @@ func _fire(now: float) -> void:
 		_play_fire_sound()
 	# Casing clink disabled — too harsh when stacked under full-auto fire.
 	# Spent shell/brass impact — every weapon that registered streams in
-	# _setup_audio (XM1014 = unique shellimpact, everything else = default
+	# _setup_audio (SPAS-12 = unique shellimpact, everything else = default
 	# brass set; MGL opted out via no_shell_impact).
 	if _shell_impact_streams.has(_current_weapon):
 		_schedule_shell_impact()

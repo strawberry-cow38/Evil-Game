@@ -99,8 +99,7 @@ const STARTING_AMMO: Dictionary = {
 	"att_762nato_silencer": 1,
 	"att_fal_scope":   1,
 	"att_fal_mag_30":  1,
-	"att_xm_choke":     1,
-	"att_xm_ext_tube":  1,
+	"att_spas_choke":   1,
 	"att_lmg_bipod":    2,
 }
 
