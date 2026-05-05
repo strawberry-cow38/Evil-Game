@@ -68,6 +68,22 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 	Vector2( 0.40, 1.60),
 	Vector2(-1.25, 1.55),
 ]
+# PPSh-41: WW2 Soviet SMG. Drum-fed 900rpm bash. Mostly vertical with mild
+# horizontal wobble from the open-bolt action.
+const RECOIL_PATTERN_PPSH: Array[Vector2] = [
+	Vector2( 0.00, 0.55),
+	Vector2( 0.10, 0.65),
+	Vector2(-0.12, 0.75),
+	Vector2( 0.18, 0.80),
+	Vector2(-0.22, 0.82),
+	Vector2( 0.28, 0.82),
+	Vector2(-0.32, 0.80),
+	Vector2( 0.38, 0.78),
+	Vector2(-0.42, 0.75),
+	Vector2( 0.48, 0.72),
+	Vector2(-0.52, 0.68),
+	Vector2( 0.58, 0.65),
+]
 # Steyr AUG: bullpup 5.56, slightly flatter than M16 (shorter cyclic, balanced
 # bullpup geometry). Vertical-leaning with mild horizontal weave.
 const RECOIL_PATTERN_AUG: Array[Vector2] = [
@@ -404,6 +420,20 @@ const PROFILES := {
 		"bolt_vol_db": -4.0,
 		"pullout_time": 1.0,
 	},
+	"ppsh41": {
+		"name": "PPSh-41",
+		"mag_size": 71,
+		"rpm": 900.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_PPBizon.ogg"],
+		"fire_hold": 0.18,
+		"fire_fade": 0.26,
+		"recoil_pattern": RECOIL_PATTERN_PPSH,
+		"bloom_mult": 1.5,
+		"ammo_id": "ammo_762x25",
+		"reload_time": 4.5,
+		"pullout_time": 1.4,
+	},
 	"aug": {
 		"name": "Steyr AUG",
 		"mag_size": 30,
@@ -454,7 +484,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "ppsh41", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
