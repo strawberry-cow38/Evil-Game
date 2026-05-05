@@ -52,6 +52,12 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "g3",      "condition": 0.84, "quality": 3},  # Good Pristine
 	{"id": "m14",     "condition": 0.89, "quality": 4},  # Excellent Pristine
 	{"id": "stg57",   "condition": 0.91, "quality": 4},  # Excellent Pristine
+	{"id": "mac10",   "condition": 0.74, "quality": 2},  # Normal Worn
+	{"id": "uzi",     "condition": 0.86, "quality": 3},  # Good Pristine
+	{"id": "m1903",   "condition": 0.92, "quality": 4},  # Excellent Pristine
+	{"id": "garand",  "condition": 0.88, "quality": 3},  # Good Pristine
+	{"id": "bar",     "condition": 0.81, "quality": 3},  # Good Pristine
+	{"id": "ks23",    "condition": 0.85, "quality": 3},  # Good Pristine
 	{"id": "m249",    "condition": 0.78, "quality": 3},  # Good Worn
 	{"id": "m60",     "condition": 0.20, "quality": 0},  # Awful Ruined
 	{"id": "mgl",     "condition": 1.00, "quality": 6},  # Legendary Pristine
@@ -71,6 +77,9 @@ const STARTING_AMMO: Dictionary = {
 	"ammo_40mm":    200,
 	"ammo_12ga":    100,
 	"ammo_12ga_slug": 50,
+	"ammo_3006":    200,
+	"ammo_23x75":    40,
+	"att_m1903_scope": 1,
 	"att_ak_scope":    1,
 	"att_ak_silencer": 1,
 	"att_ak_mag_40":   1,

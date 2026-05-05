@@ -204,6 +204,64 @@ const RECOIL_PATTERN_M14: Array[Vector2] = [
 	Vector2( 0.94, 1.40),
 	Vector2(-1.02, 1.35),
 ]
+# MAC-10: tiny .45 SMG, blistering cyclic, climbs fast.
+const RECOIL_PATTERN_MAC10: Array[Vector2] = [
+	Vector2( 0.10, 0.90),
+	Vector2(-0.20, 1.05),
+	Vector2( 0.28, 1.15),
+	Vector2(-0.38, 1.20),
+	Vector2( 0.45, 1.15),
+	Vector2(-0.52, 1.10),
+	Vector2( 0.60, 1.05),
+	Vector2(-0.68, 1.00),
+	Vector2( 0.74, 0.95),
+	Vector2(-0.82, 0.92),
+]
+# Uzi: 9mm, controllable, modest climb with side-to-side drift.
+const RECOIL_PATTERN_UZI: Array[Vector2] = [
+	Vector2( 0.08, 0.55),
+	Vector2(-0.15, 0.62),
+	Vector2( 0.22, 0.68),
+	Vector2(-0.30, 0.70),
+	Vector2( 0.36, 0.68),
+	Vector2(-0.42, 0.65),
+	Vector2( 0.48, 0.62),
+	Vector2(-0.54, 0.60),
+	Vector2( 0.60, 0.58),
+	Vector2(-0.66, 0.55),
+]
+# 1903 Springfield: bolt-action, single heavy 30-06 kick.
+const RECOIL_PATTERN_M1903: Array[Vector2] = [
+	Vector2(-0.18, 3.20),
+]
+# M1 Garand: semi-auto 30-06, heavy per-shot climb.
+const RECOIL_PATTERN_GARAND: Array[Vector2] = [
+	Vector2( 0.10, 1.55),
+	Vector2(-0.22, 1.65),
+	Vector2( 0.32, 1.60),
+	Vector2(-0.42, 1.55),
+	Vector2( 0.50, 1.50),
+	Vector2(-0.60, 1.45),
+	Vector2( 0.68, 1.40),
+	Vector2(-0.78, 1.35),
+]
+# BAR: slow-cyclic 30-06 auto rifle, big sustained vertical climb.
+const RECOIL_PATTERN_BAR: Array[Vector2] = [
+	Vector2( 0.12, 1.55),
+	Vector2(-0.25, 1.75),
+	Vector2( 0.35, 1.85),
+	Vector2(-0.48, 1.85),
+	Vector2( 0.55, 1.80),
+	Vector2(-0.68, 1.75),
+	Vector2( 0.75, 1.70),
+	Vector2(-0.88, 1.65),
+	Vector2( 0.95, 1.60),
+	Vector2(-1.08, 1.55),
+]
+# KS-23: 23mm pump-action shotgun. One serious per-shell shove.
+const RECOIL_PATTERN_KS23: Array[Vector2] = [
+	Vector2(-0.30, 3.60),
+]
 # Milkor MGL: single launcher thump per pull.
 const RECOIL_PATTERN_MGL: Array[Vector2] = [
 	Vector2(-0.40, 2.80),
@@ -543,6 +601,108 @@ const PROFILES := {
 		"reload_time": 2.5,
 		"pullout_time": 0.55,
 	},
+	"mac10": {
+		"name": "MAC-10",
+		"mag_size": 30,
+		"rpm": 1100.0,
+		"modes": [FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK45ACPSMG.ogg"],
+		"fire_hold": 0.16,
+		"fire_fade": 0.24,
+		"recoil_pattern": RECOIL_PATTERN_MAC10,
+		"bloom_mult": 2.2,
+		"ammo_id": "ammo_45acp",
+		"reload_time": 2.6,
+		"pullout_time": 0.9,
+	},
+	"uzi": {
+		"name": "Uzi",
+		"mag_size": 32,
+		"rpm": 600.0,
+		"modes": [FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_PPBizon.ogg"],
+		"fire_hold": 0.18,
+		"fire_fade": 0.28,
+		"recoil_pattern": RECOIL_PATTERN_UZI,
+		"bloom_mult": 1.4,
+		"ammo_id": "ammo_9mm",
+		"reload_time": 3.0,
+		"pullout_time": 1.0,
+	},
+	"m1903": {
+		"name": "1903 Springfield",
+		"mag_size": 5,
+		"rpm": 50.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm.ogg"],
+		"fire_hold": 0.30,
+		"fire_fade": 0.45,
+		"recoil_pattern": RECOIL_PATTERN_M1903,
+		"bloom_mult": 0.7,
+		"ammo_id": "ammo_3006",
+		"reload_time": 4.5,
+		"ads_fov": 35.0,
+		"bolt_unscope_time": 0.85,
+		"bolt_sound_path": "res://assets/audio/Sub_GTEKBoltAction.ogg",
+		"bolt_delay": 0.20,
+		"bolt_pitch_min": 0.96,
+		"bolt_pitch_max": 1.04,
+		"bolt_vol_db": -4.0,
+		"pullout_time": 1.1,
+	},
+	"garand": {
+		"name": "M1 Garand",
+		"mag_size": 8,
+		"rpm": 360.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm.ogg"],
+		"fire_hold": 0.24,
+		"fire_fade": 0.36,
+		"recoil_pattern": RECOIL_PATTERN_GARAND,
+		"bloom_mult": 1.0,
+		"ammo_id": "ammo_3006",
+		"reload_time": 3.0,
+		"pullout_time": 1.2,
+	},
+	"bar": {
+		"name": "BAR",
+		"mag_size": 20,
+		"rpm": 550.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_FALA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.34,
+		"recoil_pattern": RECOIL_PATTERN_BAR,
+		"bloom_mult": 1.2,
+		"ammo_id": "ammo_3006",
+		"reload_time": 4.0,
+		"pullout_time": 1.6,
+	},
+	"ks23": {
+		"name": "KS-23",
+		"mag_size": 4,
+		"rpm": 60.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK12GaA.ogg"],
+		"fire_hold": 0.28,
+		"fire_fade": 0.42,
+		"recoil_pattern": RECOIL_PATTERN_KS23,
+		"bloom_mult": 1.3,
+		"ammo_id": "ammo_23x75",
+		"per_round_reload": true,
+		"reload_time_per_round": 1.0,
+		"shell_impact_path": "res://assets/audio/shellimpact.wav",
+		"shell_impact_delay_min": 0.50,
+		"shell_impact_delay_max": 0.85,
+		"shell_impact_pitch_min": 0.85,
+		"shell_impact_pitch_max": 1.05,
+		"shell_impact_vol_db": -16.0,
+		"pullout_time": 1.4,
+		"pump_reload_path": "res://assets/audio/Sub_GTEKShotgunPump.ogg",
+		"pump_reload_vol_db": -6.0,
+		"pump_reload_pitch_min": 0.90,
+		"pump_reload_pitch_max": 1.00,
+	},
 	"thompson": {
 		"name": "Thompson",
 		"mag_size": 30,
@@ -663,7 +823,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "aa12"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "aa12"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
