@@ -172,6 +172,38 @@ const RECOIL_PATTERN_FAL: Array[Vector2] = [
 	Vector2( 0.85, 1.35),
 	Vector2(-0.95, 1.30),
 ]
+# HK G3: roller-delayed blowback. Slightly snappier first shot than the FAL,
+# similar sustained climb but with more lateral drift on long bursts.
+const RECOIL_PATTERN_G3: Array[Vector2] = [
+	Vector2( 0.12, 1.15),
+	Vector2(-0.22, 1.35),
+	Vector2( 0.30, 1.50),
+	Vector2(-0.40, 1.55),
+	Vector2( 0.48, 1.55),
+	Vector2(-0.58, 1.50),
+	Vector2( 0.65, 1.45),
+	Vector2(-0.75, 1.40),
+	Vector2( 0.82, 1.35),
+	Vector2(-0.92, 1.30),
+	Vector2( 0.98, 1.25),
+	Vector2(-1.05, 1.20),
+]
+# M14: US service rifle. Higher cyclic than FAL/G3 means steeper climb early
+# before the recoil arc settles into the typical battle-rifle drift.
+const RECOIL_PATTERN_M14: Array[Vector2] = [
+	Vector2( 0.10, 1.30),
+	Vector2(-0.20, 1.55),
+	Vector2( 0.28, 1.70),
+	Vector2(-0.38, 1.75),
+	Vector2( 0.45, 1.70),
+	Vector2(-0.55, 1.65),
+	Vector2( 0.62, 1.60),
+	Vector2(-0.72, 1.55),
+	Vector2( 0.78, 1.50),
+	Vector2(-0.88, 1.45),
+	Vector2( 0.94, 1.40),
+	Vector2(-1.02, 1.35),
+]
 # Milkor MGL: single launcher thump per pull.
 const RECOIL_PATTERN_MGL: Array[Vector2] = [
 	Vector2(-0.40, 2.80),
@@ -569,6 +601,34 @@ const PROFILES := {
 		"reload_time": 4.0,
 		"pullout_time": 1.5,
 	},
+	"g3": {
+		"name": "HK G3",
+		"mag_size": 20,
+		"rpm": 600.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_FALA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_G3,
+		"bloom_mult": 1.05,
+		"ammo_id": "ammo_762nato",
+		"reload_time": 3.6,
+		"pullout_time": 1.2,
+	},
+	"m14": {
+		"name": "M14",
+		"mag_size": 20,
+		"rpm": 750.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_FALA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_M14,
+		"bloom_mult": 1.15,
+		"ammo_id": "ammo_762nato",
+		"reload_time": 3.6,
+		"pullout_time": 1.2,
+	},
 	"fal": {
 		"name": "FN FAL",
 		"mag_size": 20,
@@ -603,7 +663,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "stg57", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "aa12"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "aa12"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
