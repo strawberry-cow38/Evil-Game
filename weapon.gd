@@ -68,6 +68,34 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 	Vector2( 0.40, 1.60),
 	Vector2(-1.25, 1.55),
 ]
+# Colt M1911: heavy .45 ACP pistol. Sharp single-shot kick, recoil index resets
+# fast in semi so the early entries do the work.
+const RECOIL_PATTERN_M1911: Array[Vector2] = [
+	Vector2( 0.10, 1.10),
+	Vector2(-0.15, 1.20),
+	Vector2( 0.20, 1.25),
+	Vector2(-0.25, 1.20),
+	Vector2( 0.30, 1.15),
+	Vector2(-0.32, 1.10),
+	Vector2( 0.34, 1.05),
+	Vector2(-0.36, 1.00),
+]
+# Thompson: WW2 SMG firing .45 ACP. Heavy round = serious vertical climb,
+# slower cyclic than smaller-caliber SMGs.
+const RECOIL_PATTERN_THOMPSON: Array[Vector2] = [
+	Vector2( 0.15, 1.20),
+	Vector2(-0.25, 1.40),
+	Vector2( 0.35, 1.55),
+	Vector2(-0.45, 1.65),
+	Vector2( 0.55, 1.65),
+	Vector2(-0.65, 1.60),
+	Vector2( 0.75, 1.55),
+	Vector2(-0.85, 1.50),
+	Vector2( 0.95, 1.45),
+	Vector2(-1.05, 1.40),
+	Vector2( 1.15, 1.35),
+	Vector2(-1.25, 1.30),
+]
 # PPSh-41: WW2 Soviet SMG. Drum-fed 900rpm bash. Mostly vertical with mild
 # horizontal wobble from the open-bolt action.
 const RECOIL_PATTERN_PPSH: Array[Vector2] = [
@@ -420,6 +448,34 @@ const PROFILES := {
 		"bolt_vol_db": -4.0,
 		"pullout_time": 1.0,
 	},
+	"m1911": {
+		"name": "Colt M1911",
+		"mag_size": 7,
+		"rpm": 240.0,
+		"modes": [FireMode.SEMI],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK9mm_Modern.ogg"],
+		"fire_hold": 0.10,
+		"fire_fade": 0.18,
+		"recoil_pattern": RECOIL_PATTERN_M1911,
+		"bloom_mult": 1.4,
+		"ammo_id": "ammo_45acp",
+		"reload_time": 2.5,
+		"pullout_time": 0.55,
+	},
+	"thompson": {
+		"name": "Thompson",
+		"mag_size": 30,
+		"rpm": 700.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_PPBizon.ogg"],
+		"fire_hold": 0.20,
+		"fire_fade": 0.30,
+		"recoil_pattern": RECOIL_PATTERN_THOMPSON,
+		"bloom_mult": 1.6,
+		"ammo_id": "ammo_45acp",
+		"reload_time": 4.0,
+		"pullout_time": 1.5,
+	},
 	"ppsh41": {
 		"name": "PPSh-41",
 		"mag_size": 71,
@@ -484,7 +540,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "ppsh41", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "bizon", "mp5sd", "ppsh41", "thompson", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 

@@ -43,6 +43,8 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "bizon",   "condition": 0.65, "quality": 1},  # Poor Worn
 	{"id": "mp5sd",   "condition": 0.88, "quality": 4},  # Excellent Pristine
 	{"id": "ppsh41",  "condition": 0.72, "quality": 2},  # Normal Worn
+	{"id": "thompson","condition": 0.80, "quality": 3},  # Good Pristine
+	{"id": "m1911",   "condition": 0.95, "quality": 4},  # Excellent Pristine
 	{"id": "p90",     "condition": 0.91, "quality": 3},  # Good Pristine
 	{"id": "makarov", "condition": 0.42, "quality": 2},  # Normal Damaged
 	{"id": "m700",    "condition": 0.97, "quality": 5},  # Masterwork Pristine
@@ -60,6 +62,7 @@ const STARTING_AMMO: Dictionary = {
 	"ammo_9x18":    200,
 	"ammo_762nato": 200,
 	"ammo_762x25":  300,
+	"ammo_45acp":   200,
 	"ammo_40mm":    200,
 	"ammo_12ga":    100,
 	"ammo_12ga_slug": 50,
