@@ -1183,6 +1183,7 @@ func _fire(now: float) -> void:
 	var mult: float = 1.0
 	if _player.has_method("is_crouched") and _player.is_crouched():
 		mult *= CROUCH_RECOIL_MULT
+		mult *= float(_active_mods.get("recoil_crouch_mult", 1.0))
 	if not ads:
 		mult *= HIP_RECOIL_MULT
 	if _fire_mode == FireMode.BURST:
@@ -1219,7 +1220,7 @@ func _fire(now: float) -> void:
 	# top of the shared bloom cone.
 	var ammo_id := get_selected_ammo()
 	var pellets: int = max(1, Items.ammo_pellets(ammo_id))
-	var pellet_spread: float = Items.ammo_pellet_spread_deg(ammo_id)
+	var pellet_spread: float = Items.ammo_pellet_spread_deg(ammo_id) * float(_active_mods.get("pellet_spread_mult", 1.0))
 	for i in range(pellets):
 		var pdir: Vector3 = dir
 		var total_spread_deg: float = bloom_deg + pellet_spread

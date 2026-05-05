@@ -60,6 +60,14 @@ const STARTING_AMMO: Dictionary = {
 	"att_ak_silencer": 1,
 	"att_ak_mag_40":   1,
 	"att_ak_drum_75":  1,
+	"att_m16_scope":    1,
+	"att_m16_silencer": 1,
+	"att_m16_mag_40":   1,
+	"att_m16_drum_90":  1,
+	"att_762nato_silencer": 1,
+	"att_xm_choke":     1,
+	"att_xm_ext_tube":  1,
+	"att_lmg_bipod":    2,
 }
 
 # Reload-as-pie threshold: holding R longer than this opens the radial menu;
