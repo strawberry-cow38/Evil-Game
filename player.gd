@@ -63,6 +63,7 @@ const STARTING_AMMO: Dictionary = {
 	"ammo_57x28":   200,
 	"ammo_9x18":    200,
 	"ammo_762nato": 200,
+	"ammo_75x55":   200,
 	"ammo_762x25":  300,
 	"ammo_45acp":   200,
 	"ammo_40mm":    200,
