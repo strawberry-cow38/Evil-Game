@@ -604,6 +604,18 @@ var _target_yaw := 0.0
 var _target_pitch := 0.0
 var _applied_yaw := 0.0
 var _applied_pitch := 0.0
+# Recoil-control HUD telemetry. Tracks one "session" — a burst of fire bookended
+# by RECOIL_SESSION_RESET seconds of idle. Anchored to the player's view at
+# session start; per-shot history records cumulative kick (rad) and drift (rad)
+# of the camera from the anchor at shot time. Score = 1 - drift/kick.
+const RECOIL_SESSION_RESET := 0.6
+var _rec_session_active: bool = false
+var _rec_anchor_yaw: float = 0.0
+var _rec_anchor_pitch: float = 0.0
+var _rec_kick_total: Vector2 = Vector2.ZERO
+var _rec_history: Array = []
+var _rec_frozen_drift: Vector2 = Vector2.ZERO
+var _rec_frozen: bool = false
 var _current_weapon: String = "akm"
 var _equipped: bool = false   # false = empty hands; gates fire/reload/recoil decay. Player spawns unarmed.
 # Time (Time.get_ticks_msec()/1000.0) at which the current weapon
@@ -1362,6 +1374,11 @@ func _process(delta: float) -> void:
 
 	if now - _last_fire_time > RECOIL_RESET_DELAY:
 		_recoil_index = 0
+	# Once the session has been idle past the reset window, freeze the final
+	# drift sample so the HUD pin stops chasing the player's resting aim.
+	if _rec_session_active and not _rec_frozen and now - _last_fire_time > RECOIL_SESSION_RESET:
+		_rec_frozen = true
+		_rec_frozen_drift = Vector2(_player._yaw - _rec_anchor_yaw, _player._pitch - _rec_anchor_pitch)
 	_apply_smoothed_recoil(delta)
 
 func _apply_smoothed_recoil(delta: float) -> void:
@@ -1394,11 +1411,21 @@ func _spawn_projectile(origin: Vector3, dir: Vector3) -> void:
 	g.call("setup", origin + dir * 0.4, dir * muzzle_vel, ex)
 
 func _fire(now: float) -> void:
+	var prev_fire := _last_fire_time
 	_last_fire_time = now
 	if _camera == null or _player == null:
 		return
 
 	var ads: bool = _player.has_method("is_ads") and _player.is_ads()
+	# Open or continue a recoil-tracking session for the HUD panel.
+	if not _rec_session_active or now - prev_fire > RECOIL_SESSION_RESET:
+		_rec_anchor_yaw = _player._yaw
+		_rec_anchor_pitch = _player._pitch
+		_rec_kick_total = Vector2.ZERO
+		_rec_history.clear()
+		_rec_session_active = true
+		_rec_frozen = false
+		_rec_frozen_drift = Vector2.ZERO
 
 	# Bullet leaves at the *current* aim. The new kick goes into the smoothed
 	# target — camera will lerp toward it over the next few frames, so the
@@ -1415,8 +1442,17 @@ func _fire(now: float) -> void:
 		mult *= HIP_RECOIL_MULT
 	if _fire_mode == FireMode.BURST:
 		mult *= BURST_RECOIL_MULT
-	_target_yaw += deg_to_rad(pat.x + jitter_yaw) * mult
-	_target_pitch += deg_to_rad(pat.y + jitter_pitch) * mult
+	var kick_yaw_rad: float = deg_to_rad(pat.x + jitter_yaw) * mult
+	var kick_pitch_rad: float = deg_to_rad(pat.y + jitter_pitch) * mult
+	# Telemetry: capture player's drift from anchor BEFORE adding this shot's
+	# kick — that records how the player handled the *previous* shots' recoil.
+	_rec_history.append({
+		"kick": _rec_kick_total,
+		"drift": Vector2(_player._yaw - _rec_anchor_yaw, _player._pitch - _rec_anchor_pitch),
+	})
+	_rec_kick_total += Vector2(kick_yaw_rad, kick_pitch_rad)
+	_target_yaw += kick_yaw_rad
+	_target_pitch += kick_pitch_rad
 	_recoil_index += 1
 
 	_play_fire_sound()
@@ -1789,3 +1825,23 @@ func _update_laser() -> void:
 	_laser_beam_im.surface_end()
 	_laser_beam.global_transform = Transform3D.IDENTITY
 	_laser_beam.visible = true
+
+# Recoil-control HUD getters. Returns the full pattern for the equipped weapon
+# (so the panel can render the canonical climb path) and the current session
+# telemetry — cumulative kick (rad), per-shot history, and live drift.
+func get_recoil_pattern() -> Array:
+	return _profile.get("recoil_pattern", []) if _equipped else []
+
+func get_recoil_session() -> Dictionary:
+	if not _equipped or _player == null:
+		return {"active": false, "shots": 0, "kick_total": Vector2.ZERO, "drift": Vector2.ZERO, "history": []}
+	var drift: Vector2 = _rec_frozen_drift if _rec_frozen else Vector2(
+		_player._yaw - _rec_anchor_yaw, _player._pitch - _rec_anchor_pitch
+	)
+	return {
+		"active": _rec_session_active,
+		"shots": _rec_history.size(),
+		"kick_total": _rec_kick_total,
+		"drift": drift,
+		"history": _rec_history,
+	}
