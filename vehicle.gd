@@ -282,6 +282,10 @@ func _physics_process(delta: float) -> void:
 	# Driver input drives engine + steering. Brake is applied to all
 	# wheels via the VehicleBody3D `brake` property.
 	if _driver != null:
+		# Park the driver at the seat marker each tick so the in-car first-person
+		# camera (player camera) tracks the car instead of staying world-static.
+		if _driver is Node3D and not _seat_markers.is_empty():
+			(_driver as Node3D).global_transform = (_seat_markers[0] as Node3D).global_transform
 		# Gear shifts (edge-triggered). Guarded by the same enter-debounce so the
 		# E press that seated the player doesn't immediately shift to gear 2.
 		var unlocked: bool = Time.get_ticks_msec() / 1000.0 >= _enter_locked_until
@@ -552,6 +556,19 @@ func _fill_die_buffer() -> void:
 			s = (sq * 0.55 + noise * 0.45) * env * 0.45
 			_die_frames_remaining -= 1
 		_die_playback.push_frame(Vector2(s, s))
+
+# Toggle the active camera between the vehicle chase cam and the seated
+# player's own camera. Called from player.gd when H is pressed while seated.
+func toggle_camera() -> void:
+	if _driver == null:
+		return
+	var pcam: Camera3D = _find_camera(_driver)
+	if _camera.current:
+		if pcam != null:
+			pcam.current = true
+		_camera.current = false
+	else:
+		_camera.current = true
 
 func is_driver_seat_open() -> bool:
 	return _driver == null

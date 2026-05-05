@@ -10,6 +10,9 @@ const MOUSE_SENSITIVITY := 0.0025
 
 const CAMERA_HEIGHT_STAND := 0.7
 const CAMERA_HEIGHT_CROUCH := 0.3
+const TP_BACK_DIST := 4.0    # camera pull-back along +z (behind head) in third-person
+const TP_UP_BOOST := 0.5     # extra height in third-person
+const TP_BLEND_RATE := 12.0  # ease-in/out rate for the tp blend
 const CROUCH_LERP_RATE := 14.0   # exp-approach per second
 
 const FOV_HIP := 80.0
@@ -81,6 +84,7 @@ const RELOAD_HOLD_THRESHOLD := 0.20
 @export var scope_overlay_path: NodePath
 
 @onready var _camera: Camera3D = $Camera3D
+@onready var _body_mesh: MeshInstance3D = $MeshInstance3D
 @onready var _weapon: Node = get_node(weapon_path) if weapon_path != NodePath() else null
 
 var _yaw := 0.0
@@ -94,6 +98,8 @@ var _yaw_delta := 0.0
 var _pitch_delta := 0.0
 var _crouched := false
 var _ads := false
+var _third_person := false
+var _tp_blend: float = 0.0
 var _menu: Node
 var _inventory: Node
 var _pie: Node
@@ -220,6 +226,12 @@ func is_menu_open() -> bool:
 		return true
 	return false
 
+func _toggle_third_person() -> void:
+	if _vehicle != null and _vehicle.has_method("toggle_camera"):
+		_vehicle.toggle_camera()
+		return
+	_third_person = not _third_person
+
 func is_pie_open() -> bool:
 	return _pie != null and _pie.has_method("is_open") and _pie.is_open()
 
@@ -257,6 +269,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_pitch_delta -= event.relative.y * sens
 	elif event.is_action_pressed("ui_menu") and not is_menu_open():
 		_menu.toggle()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("toggle_view") and not is_menu_open():
+		_toggle_third_person()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
 		# Menu handles its own ESC when open; only the click-recapture flow runs here.
@@ -348,11 +363,17 @@ func _physics_process(delta: float) -> void:
 		_pitch_delta = 0.0
 	# Crouch height lerp lives in physics so the interpolated camera doesn't
 	# warn about transform changes outside the physics tick.
-	var target_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
+	var base_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
+	var blend_alpha: float = 1.0 - exp(-TP_BLEND_RATE * delta)
+	var tp_target: float = 1.0 if _third_person and _vehicle == null else 0.0
+	_tp_blend = lerpf(_tp_blend, tp_target, blend_alpha)
 	var crouch_alpha: float = 1.0 - exp(-CROUCH_LERP_RATE * delta)
 	var cam_pos := _camera.position
-	cam_pos.y = lerpf(cam_pos.y, target_y, crouch_alpha)
+	cam_pos.y = lerpf(cam_pos.y, base_y + TP_UP_BOOST * _tp_blend, crouch_alpha)
+	cam_pos.z = TP_BACK_DIST * _tp_blend
 	_camera.position = cam_pos
+	if _body_mesh != null:
+		_body_mesh.visible = _tp_blend > 0.05 and _vehicle == null
 	# Driving: vehicle parks us at the seat marker each frame (effectively),
 	# but we still run zero physics so we don't fall away or eat collisions.
 	if _vehicle != null:
