@@ -44,6 +44,7 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "p90",     "condition": 0.91, "quality": 3},  # Good Pristine
 	{"id": "makarov", "condition": 0.42, "quality": 2},  # Normal Damaged
 	{"id": "m700",    "condition": 0.97, "quality": 5},  # Masterwork Pristine
+	{"id": "fal",     "condition": 0.86, "quality": 3},  # Good Pristine
 	{"id": "m249",    "condition": 0.78, "quality": 3},  # Good Worn
 	{"id": "m60",     "condition": 0.20, "quality": 0},  # Awful Ruined
 	{"id": "mgl",     "condition": 1.00, "quality": 6},  # Legendary Pristine
@@ -68,6 +69,8 @@ const STARTING_AMMO: Dictionary = {
 	"att_m16_mag_40":   1,
 	"att_m16_drum_90":  1,
 	"att_762nato_silencer": 1,
+	"att_fal_scope":   1,
+	"att_fal_mag_30":  1,
 	"att_xm_choke":     1,
 	"att_xm_ext_tube":  1,
 	"att_lmg_bipod":    2,

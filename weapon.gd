@@ -68,6 +68,22 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 	Vector2( 0.40, 1.60),
 	Vector2(-1.25, 1.55),
 ]
+# FN FAL: full-power 7.62 NATO battle rifle. Heavy climb, drifts left-right
+# more than the M60 (handheld vs bipod-fed). Sits between M16 and M60.
+const RECOIL_PATTERN_FAL: Array[Vector2] = [
+	Vector2( 0.10, 1.20),
+	Vector2(-0.20, 1.40),
+	Vector2( 0.25, 1.55),
+	Vector2(-0.35, 1.65),
+	Vector2( 0.40, 1.65),
+	Vector2(-0.50, 1.60),
+	Vector2( 0.55, 1.55),
+	Vector2(-0.65, 1.50),
+	Vector2( 0.70, 1.45),
+	Vector2(-0.80, 1.40),
+	Vector2( 0.85, 1.35),
+	Vector2(-0.95, 1.30),
+]
 # Milkor MGL: single launcher thump per pull.
 const RECOIL_PATTERN_MGL: Array[Vector2] = [
 	Vector2(-0.40, 2.80),
@@ -372,6 +388,20 @@ const PROFILES := {
 		"bolt_vol_db": -4.0,
 		"pullout_time": 1.0,
 	},
+	"fal": {
+		"name": "FN FAL",
+		"mag_size": 20,
+		"rpm": 700.0,
+		"modes": [FireMode.SEMI, FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK_FALA.ogg"],
+		"fire_hold": 0.22,
+		"fire_fade": 0.32,
+		"recoil_pattern": RECOIL_PATTERN_FAL,
+		"bloom_mult": 1.1,
+		"ammo_id": "ammo_762nato",
+		"reload_time": 3.8,
+		"pullout_time": 1.2,
+	},
 	"mgl": {
 		"name": "MGL",
 		"mag_size": 6,
@@ -392,7 +422,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "fal", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
