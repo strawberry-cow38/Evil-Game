@@ -412,6 +412,12 @@ const PROFILES := {
 		"ammo_ids": ["ammo_12ga", "ammo_12ga_slug"],
 		"reload_time": 4.0,
 		"pullout_time": 1.7,
+		"shell_impact_path": "res://assets/audio/shellimpact.wav",
+		"shell_impact_delay_min": 0.30,
+		"shell_impact_delay_max": 0.55,
+		"shell_impact_pitch_min": 0.90,
+		"shell_impact_pitch_max": 1.12,
+		"shell_impact_vol_db": -18.0,
 	},
 	"shotgun_combat": {
 		"name": "XM1014",
