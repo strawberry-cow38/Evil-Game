@@ -141,6 +141,7 @@ var _prompt_label: Label
 var _rng := RandomNumberGenerator.new()
 var _reload_held: bool = false
 var _reload_press_time: float = 0.0
+var _reload_speedloader_used: bool = false
 var _pie_active: bool = false
 var _vehicle: Node = null  # set when seated as driver; suppresses movement + interact
 
@@ -538,12 +539,14 @@ func _handle_reload_input() -> void:
 		return
 	var compat: Array = _weapon.get_compatible_ammo_ids() if _weapon.has_method("get_compatible_ammo_ids") else []
 	var reloading: bool = _weapon.has_method("is_reloading") and _weapon.is_reloading()
+	var has_speed: bool = _weapon.has_method("has_speedloader") and _weapon.has_speedloader()
 
 	if Input.is_action_just_pressed("reload"):
 		_reload_held = true
 		_reload_press_time = Time.get_ticks_msec() / 1000.0
-		# Single-ammo: trigger immediately, skip the hold-detection window.
-		if compat.size() <= 1:
+		_reload_speedloader_used = false
+		# Single-ammo with no speedloader: trigger immediately (legacy behavior).
+		if compat.size() <= 1 and not has_speed:
 			if not reloading and _weapon.has_method("start_reload"):
 				_weapon.start_reload()
 			_reload_held = false
@@ -556,13 +559,22 @@ func _handle_reload_input() -> void:
 		if held >= RELOAD_HOLD_THRESHOLD:
 			_open_reload_pie(compat)
 
+	# Speedloader: hold past threshold on a single-ammo revolver-style weapon
+	# triggers the all-at-once reload. Tap-release falls through to per-round.
+	if _reload_held and has_speed and compat.size() <= 1 and not _reload_speedloader_used:
+		var held2: float = (Time.get_ticks_msec() / 1000.0) - _reload_press_time
+		if held2 >= RELOAD_HOLD_THRESHOLD:
+			if _weapon.has_method("start_reload_speedloader"):
+				_weapon.start_reload_speedloader()
+			_reload_speedloader_used = true
+
 	if Input.is_action_just_released("reload"):
 		var was_held := _reload_held
 		_reload_held = false
 		if _pie_active:
 			_close_reload_pie_and_apply()
-		elif was_held:
-			# Tap-release with multi-ammo: reload with current selection.
+		elif was_held and not _reload_speedloader_used:
+			# Tap-release: standard reload (per-round if profile says so).
 			if not reloading and _weapon.has_method("start_reload"):
 				_weapon.start_reload()
 

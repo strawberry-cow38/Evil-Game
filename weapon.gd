@@ -765,7 +765,10 @@ const PROFILES := {
 		"recoil_pattern": RECOIL_PATTERN_PYTHON,
 		"bloom_mult": 1.3,
 		"ammo_id": "ammo_357",
-		"reload_time": 3.4,
+		"per_round_reload": true,
+		"reload_time_per_round": 0.55,
+		"has_speedloader": true,
+		"speedloader_time": 2.0,
 		"pullout_time": 0.7,
 	},
 	"thompson": {
@@ -952,6 +955,7 @@ var _reloading := false
 var _reload_remaining := 0.0
 var _reload_amount := 0   # rounds queued for transfer when reload finishes
 var _reload_total := 0.0  # full-cycle time for HUD progress (per-round = window)
+var _speedloader_active := false  # true while a hold-R revolver reload is in flight
 var _audio_voices: Array[AudioStreamPlayer3D] = []
 var _audio_tweens: Array[Tween] = []
 var _audio_idx := 0
@@ -1166,6 +1170,7 @@ func _recompute_active_mods() -> void:
 		_reloading = false
 		_reload_remaining = 0.0
 		_reload_amount = 0
+		_speedloader_active = false
 		if _reload_player != null:
 			_reload_player.stop()
 		if _bolt_voice != null:
@@ -1380,6 +1385,45 @@ func get_reserve_ammo() -> int:
 # Public entry point for reload — player handles input and calls this.
 func start_reload() -> void:
 	_start_reload()
+
+func has_speedloader() -> bool:
+	return _equipped and bool(_profile.get("has_speedloader", false))
+
+# Force a full-mag batch reload, bypassing per-round behavior. Used for
+# revolver speedloaders where hold-R loads every chamber at once.
+func start_reload_speedloader() -> void:
+	if not _equipped:
+		return
+	if _reloading:
+		# Cancel any in-progress per-round chain so the speedloader takes over.
+		_reloading = false
+		_reload_remaining = 0.0
+		_reload_amount = 0
+		if _reload_player != null: _reload_player.stop()
+		if _bolt_voice != null: _bolt_voice.stop()
+	if _ammo >= get_mag_size():
+		return
+	var need: int = get_mag_size() - _ammo
+	var avail: int = get_reserve_ammo()
+	var take: int = min(need, avail)
+	if take <= 0:
+		return
+	_reload_amount = take
+	_reloading = true
+	_burst_remaining = 0
+	_reload_total = float(_profile.get("speedloader_time", 2.0))
+	_reload_remaining = _reload_total
+	# Use the bolt voice line for the speedloader click — clean, no extra asset.
+	var bolt_stream: AudioStream = _bolt_streams.get(_current_weapon, null)
+	if bolt_stream != null and _bolt_voice != null:
+		var bmin: float = float(_profile.get("bolt_pitch_min", 0.97))
+		var bmax: float = float(_profile.get("bolt_pitch_max", 1.03))
+		_bolt_voice.stop()
+		_bolt_voice.stream = bolt_stream
+		_bolt_voice.pitch_scale = _rng.randf_range(bmin, bmax)
+		_bolt_voice.volume_db = float(_profile.get("bolt_vol_db", -4.0))
+		_bolt_voice.play()
+	_speedloader_active = true
 
 func _start_reload() -> void:
 	if _reloading or _ammo >= get_mag_size():
@@ -1636,7 +1680,13 @@ func _process(delta: float) -> void:
 	if _reloading:
 		_reload_remaining -= delta
 		if _reload_remaining <= 0.0:
-			if bool(_profile.get("per_round_reload", false)):
+			if _speedloader_active:
+				# Speedloader: dump every chambered round at once, then exit.
+				_reload_remaining = 0.0
+				_reloading = false
+				_speedloader_active = false
+				_finish_reload()
+			elif bool(_profile.get("per_round_reload", false)):
 				# Transfer one round, then either start the next round's window
 				# or end the reload chain.
 				_load_one_round()
@@ -1672,6 +1722,7 @@ func _process(delta: float) -> void:
 		_reloading = false
 		_reload_remaining = 0.0
 		_reload_amount = 0
+		_speedloader_active = false
 
 	var interval: float = _fire_interval()
 	if _fire_mode == FireMode.BURST:
