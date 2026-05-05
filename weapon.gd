@@ -71,14 +71,14 @@ const RECOIL_PATTERN_M60: Array[Vector2] = [
 # AA-12 full-auto shotgun. Gas system soaks most of the kick, but 12 gauge
 # at 300 RPM still climbs steadily.
 const RECOIL_PATTERN_AA12: Array[Vector2] = [
-	Vector2( 0.10, 1.30),
-	Vector2(-0.15, 1.45),
-	Vector2( 0.20, 1.55),
-	Vector2(-0.25, 1.55),
-	Vector2( 0.30, 1.50),
-	Vector2(-0.35, 1.45),
-	Vector2( 0.40, 1.40),
-	Vector2(-0.45, 1.35),
+	Vector2( 0.20, 2.60),
+	Vector2(-0.30, 2.90),
+	Vector2( 0.40, 3.10),
+	Vector2(-0.50, 3.10),
+	Vector2( 0.60, 3.00),
+	Vector2(-0.70, 2.90),
+	Vector2( 0.80, 2.80),
+	Vector2(-0.90, 2.70),
 ]
 # Colt M1911: heavy .45 ACP pistol. Sharp single-shot kick, recoil index resets
 # fast in semi so the early entries do the work.
