@@ -1104,7 +1104,7 @@ func _process(delta: float) -> void:
 
 	var now := Time.get_ticks_msec() / 1000.0
 
-	if Input.is_action_just_pressed("cycle_fire_mode") and not _reloading:
+	if Input.is_action_just_pressed("cycle_fire_mode"):
 		var modes: Array = _available_modes()
 		var idx: int = modes.find(_fire_mode)
 		if idx < 0:
