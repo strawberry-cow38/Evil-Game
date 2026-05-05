@@ -331,6 +331,10 @@ const PROFILES := {
 		"shell_impact_pitch_max": 1.12,
 		"shell_impact_vol_db": -18.0,
 		"pullout_time": 1.6,
+		"pump_reload_path": "res://assets/audio/Sub_GTEKShotgunPump.ogg",
+		"pump_reload_vol_db": -6.0,
+		"pump_reload_pitch_min": 0.96,
+		"pump_reload_pitch_max": 1.04,
 	},
 	"p90": {
 		"name": "FN P90",
@@ -477,6 +481,11 @@ const DEFAULT_BRASS_PITCH_MAX := 1.12
 const DEFAULT_BRASS_VOL_DB := -18.0
 var _reload_player: AudioStreamPlayer3D
 var _reload_stream: AudioStream
+# Per-shell pump sound for per-round reloads (XM1014 etc). Stream + player
+# are keyed off the current weapon so loading a shell triggers the right
+# pump for whichever shotgun is in hand.
+var _pump_streams: Dictionary = {}
+var _pump_player: AudioStreamPlayer3D
 
 func _ready() -> void:
 	_rng.randomize()
@@ -704,6 +713,21 @@ func _setup_audio() -> void:
 		_bolt_voice.unit_size = 5.0
 		_bolt_voice.max_distance = 20.0
 		add_child(_bolt_voice)
+	# Pump-action shell-load streams (XM1014). One stream per profile that
+	# defines pump_reload_path; played per shell loaded.
+	for key in WEAPON_ORDER:
+		var pp: String = String(PROFILES[key].get("pump_reload_path", ""))
+		if pp == "":
+			continue
+		var ps: AudioStream = _load_wav(pp)
+		if ps != null:
+			_pump_streams[key] = ps
+	if not _pump_streams.is_empty():
+		_pump_player = AudioStreamPlayer3D.new()
+		_pump_player.bus = "Master"
+		_pump_player.unit_size = 5.0
+		_pump_player.max_distance = 20.0
+		add_child(_pump_player)
 	# Reload sound — single voice on the weapon, plays start of reload.
 	_reload_stream = _load_wav(RELOAD_SOUND_PATH)
 	_reload_player = AudioStreamPlayer3D.new()
@@ -789,6 +813,15 @@ func _start_reload() -> void:
 		if _reload_player != null and _reload_stream != null:
 			_reload_player.stop()
 			_reload_player.play()
+		var bolt_stream: AudioStream = _bolt_streams.get(_current_weapon, null)
+		if bolt_stream != null and _bolt_voice != null:
+			var bmin: float = float(_profile.get("bolt_pitch_min", 0.97))
+			var bmax: float = float(_profile.get("bolt_pitch_max", 1.03))
+			_bolt_voice.stop()
+			_bolt_voice.stream = bolt_stream
+			_bolt_voice.pitch_scale = _rng.randf_range(bmin, bmax)
+			_bolt_voice.volume_db = float(_profile.get("bolt_vol_db", -4.0))
+			_bolt_voice.play()
 
 func _finish_reload() -> void:
 	var ammo_id := get_selected_ammo()
@@ -811,6 +844,14 @@ func _load_one_round() -> void:
 	_inventory.remove(ammo_id, 1)
 	_ammo += 1
 	_reload_amount -= 1
+	var pump_stream: AudioStream = _pump_streams.get(_current_weapon, null)
+	if pump_stream != null and _pump_player != null:
+		var pmin: float = float(_profile.get("pump_reload_pitch_min", 0.97))
+		var pmax: float = float(_profile.get("pump_reload_pitch_max", 1.03))
+		_pump_player.stream = pump_stream
+		_pump_player.pitch_scale = _rng.randf_range(pmin, pmax)
+		_pump_player.volume_db = float(_profile.get("pump_reload_vol_db", -6.0))
+		_pump_player.play()
 
 # Spent shotgun shell hitting the floor — fires after a randomized delay so it
 # lands cleanly in the post-shot quiet, with pitch + delay variation per shot.
