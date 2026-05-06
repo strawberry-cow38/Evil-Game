@@ -6,10 +6,10 @@ extends Node3D
 # tool stroke. Brush operations take a world-space center + radius and
 # walk only the affected vertex window for speed.
 
-const GRID_W := 128            # vertices per side (127 quads)
-const GRID_H := 128
+const GRID_W := 256            # vertices per side (255 quads)
+const GRID_H := 256
 const VERT_SPACING := 1.0      # metres between vertices
-const ORIGIN_OFFSET := Vector3(-64.0, 0.0, -64.0)  # world pos of vertex (0,0)
+const ORIGIN_OFFSET := Vector3(-128.0, 0.0, -128.0)  # world pos of vertex (0,0)
 
 var heights: PackedFloat32Array = PackedFloat32Array()
 

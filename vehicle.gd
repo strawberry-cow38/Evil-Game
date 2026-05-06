@@ -561,6 +561,28 @@ func _physics_process(delta: float) -> void:
 		var passive_target: float = _idle_rpm if _engine_on else 0.0
 		var passive_rate: float = RPM_FOLLOW_RATE if _engine_on else RPM_OFF_DECAY
 		_rpm = lerpf(_rpm, passive_target, 1.0 - exp(-passive_rate * delta))
+	_apply_self_righting(delta)
+
+func _apply_self_righting(delta: float) -> void:
+	# Torque the chassis back toward world-up whenever it tilts.
+	# Cross product gives the rotation axis; magnitude = sin(tilt).
+	# Scale stiffness with mass so small bikes and big cars both right
+	# in roughly the same time. Damp angular velocity along that axis to
+	# stop the spring from oscillating.
+	var up: Vector3 = global_transform.basis.y
+	var tilt_axis: Vector3 = up.cross(Vector3.UP)
+	var tilt_sin: float = tilt_axis.length()
+	if tilt_sin < 0.05:
+		return
+	var stiffness: float = mass * 18.0
+	var damping: float = mass * 4.0
+	var torque: Vector3 = tilt_axis.normalized() * tilt_sin * stiffness
+	# Damp roll/pitch component, leave yaw alone (don't fight steering).
+	var ang: Vector3 = angular_velocity
+	var yaw_part: Vector3 = Vector3.UP * ang.dot(Vector3.UP)
+	var roll_pitch: Vector3 = ang - yaw_part
+	torque -= roll_pitch * damping
+	apply_torque(torque)
 
 func _process(_delta: float) -> void:
 	if _driver != null and Input.is_action_just_pressed("vehicle_exit"):
