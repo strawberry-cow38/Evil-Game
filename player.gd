@@ -145,6 +145,8 @@ var _reload_press_time: float = 0.0
 var _reload_speedloader_used: bool = false
 var _pie_active: bool = false
 var _vehicle: Node = null  # set when seated as driver; suppresses movement + interact
+var _saved_collision_layer: int = -1
+var _saved_collision_mask: int = -1
 
 const FALL_SAFETY_Y := -40.0   # below this y → fell out of the map; respawn
 
@@ -286,6 +288,18 @@ func set_in_vehicle(v: Node) -> void:
 		_container_target = null
 		if _container_hover != null:
 			_container_hover.hide_panel()
+		# Park collision while seated — capsule rubbing on chassis = violent tweak.
+		if _saved_collision_layer == -1:
+			_saved_collision_layer = collision_layer
+			_saved_collision_mask = collision_mask
+		collision_layer = 0
+		collision_mask = 0
+	else:
+		if _saved_collision_layer != -1:
+			collision_layer = _saved_collision_layer
+			collision_mask = _saved_collision_mask
+			_saved_collision_layer = -1
+			_saved_collision_mask = -1
 	visible = v == null
 
 func _unhandled_input(event: InputEvent) -> void:
