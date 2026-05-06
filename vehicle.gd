@@ -382,15 +382,29 @@ func _build_seats() -> void:
 func _build_camera() -> void:
 	var cfg: Dictionary = VARIANTS.get(variant, {})
 	var cam_offset: Vector3 = cfg.get("camera_offset", Vector3(0, 1.4, -5.5))
+	# Pivot is top_level so it ignores parent (RigidBody3D) transform inheritance,
+	# which was unreliable while physics drove the body. We manually drive the
+	# pivot's global_transform from _process to track the chassis exactly.
 	_camera_pivot = Node3D.new()
-	# Sit pivot dead-centre on the chassis so orbit yaw rotates around the car.
-	_camera_pivot.position = Vector3(0, 1.6, 0)
+	_camera_pivot.top_level = true
 	add_child(_camera_pivot)
+	_sync_camera_pivot()
 	_camera = Camera3D.new()
 	_camera.position = cam_offset
 	_camera.rotation = Vector3(deg_to_rad(-12.0), 0, 0)
 	_camera.fov = 70.0
 	_camera_pivot.add_child(_camera)
+
+func _sync_camera_pivot() -> void:
+	if _camera_pivot == null:
+		return
+	# Build basis from chassis yaw + driver look. Stripping pitch/roll keeps
+	# the chase cam steady when the car bounces; orbit yaw/pitch comes from
+	# look state, not the body.
+	var yaw_chassis: float = global_transform.basis.get_euler().y
+	var basis := Basis.from_euler(Vector3(_look_pitch, yaw_chassis + _look_yaw, 0.0))
+	var origin: Vector3 = global_transform.origin + Vector3(0, 1.6, 0)
+	_camera_pivot.global_transform = Transform3D(basis, origin)
 
 const DRIVER_LOOK_SENS := 0.0025
 const DRIVER_PITCH_MIN := -1.2
@@ -409,8 +423,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	_look_yaw -= mm.relative.x * DRIVER_LOOK_SENS
 	_look_pitch -= mm.relative.y * DRIVER_LOOK_SENS
 	_look_pitch = clampf(_look_pitch, DRIVER_PITCH_MIN, DRIVER_PITCH_MAX)
-	if _camera_pivot != null:
-		_camera_pivot.rotation = Vector3(_look_pitch, _look_yaw, 0.0)
+	# _sync_camera_pivot() applies the new look state next render frame.
 	get_viewport().set_input_as_handled()
 
 func _setup_audio() -> void:
@@ -614,6 +627,7 @@ func _process(_delta: float) -> void:
 	if _driver != null and Input.is_action_just_pressed("vehicle_exit"):
 		if Time.get_ticks_msec() / 1000.0 >= _enter_locked_until:
 			exit_driver()
+	_sync_camera_pivot()
 	_fill_engine_buffer()
 	_fill_shift_buffer()
 	_fill_crank_buffer()
@@ -786,16 +800,23 @@ func _shift_down() -> void:
 		_trigger_shift_sound()
 		_check_grind_kill(prev, _gear)
 
-const GRIND_STOP_SPEED := 1.5  # m/s; faster than this through R<->1 grinds the box
+const GRIND_STOP_SPEED := 1.5  # m/s; faster than this kills the engine on a wrong-way shift
 
-func _check_grind_kill(prev_gear: int, new_gear: int) -> void:
-	# R <-> 1 (or 1 <-> R) without coming to a stop = stalled box.
+func _check_grind_kill(_prev_gear: int, new_gear: int) -> void:
+	# Slamming the box into a gear that fights chassis motion stalls the engine.
+	# Forward velocity is the chassis's local -Z. Sign matters: forward gear
+	# while rolling backward (or reverse while rolling forward) is the kill.
 	if not _engine_on:
 		return
-	var crossed: bool = (prev_gear == -1 and new_gear == 1) or (prev_gear == 1 and new_gear == -1)
-	if not crossed:
+	if new_gear == 0:
 		return
-	if linear_velocity.length() > GRIND_STOP_SPEED:
+	var fwd_local: float = linear_velocity.dot(-global_transform.basis.z)
+	var grinding := false
+	if new_gear >= 1 and fwd_local < -GRIND_STOP_SPEED:
+		grinding = true
+	elif new_gear == -1 and fwd_local > GRIND_STOP_SPEED:
+		grinding = true
+	if grinding:
 		_engine_on = false
 		_trigger_die_sound()
 
@@ -824,8 +845,7 @@ func try_enter_driver(player: Node) -> bool:
 		player.reset_physics_interpolation()
 	_look_yaw = 0.0
 	_look_pitch = 0.0
-	if _camera_pivot != null:
-		_camera_pivot.rotation = Vector3.ZERO
+	_sync_camera_pivot()
 	_camera.current = true
 	_enter_locked_until = Time.get_ticks_msec() / 1000.0 + 0.3
 	return true
