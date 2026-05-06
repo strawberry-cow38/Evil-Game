@@ -5,11 +5,9 @@ const Items = preload("res://items.gd")
 const TAB_INVENTORY := "Inventory"
 const TABS: Array = [TAB_INVENTORY]   # extensible — add stats/map/etc here later
 
-# Category filter for the inventory list. "All" matches anything; the rest
-# match by item kind. "Misc" is the catch-all for anything not claimed by a
-# named category.
+# Category filter for the inventory list. Match by item kind. "Misc" is the
+# catch-all for anything not claimed by a named category.
 const CATEGORIES: Array = [
-	{"label": "All",       "kinds": []},
 	{"label": "Weapons",   "kinds": ["weapon"]},
 	{"label": "Ammo",      "kinds": ["ammo"]},
 	{"label": "Medical",   "kinds": ["medical", "food"]},

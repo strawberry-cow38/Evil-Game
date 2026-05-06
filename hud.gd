@@ -1,7 +1,6 @@
 extends CanvasLayer
 
 const Items = preload("res://items.gd")
-const RECOIL_HUD_SCRIPT := preload("res://recoil_hud.gd")
 
 @export var player_path: NodePath
 @export var weapon_path: NodePath
@@ -25,14 +24,6 @@ func _ready() -> void:
 	if weapon_path != NodePath():
 		_weapon = get_node(weapon_path)
 	_build_rpm_gauge()
-	_build_recoil_panel()
-
-func _build_recoil_panel() -> void:
-	var panel: Control = Control.new()
-	panel.set_script(RECOIL_HUD_SCRIPT)
-	add_child(panel)
-	if _weapon != null:
-		panel.bind_weapon(_weapon)
 
 func _build_rpm_gauge() -> void:
 	# Sits under the FPS/Speed label in the top-left. Hidden by default; shown
