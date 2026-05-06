@@ -98,8 +98,9 @@ const VARIANTS := {
 		"rpm_hard_cap": 12500.0,
 		"idle_rpm": 1300.0,
 		"stall_rpm": 850.0,
-		"engine_base_hz": 60.0,
-		"engine_top_hz": 380.0,
+		"engine_base_hz": 70.0,
+		"engine_top_hz": 480.0,
+		"engine_voice": "rasp",
 		"steer_max": 0.65,
 		"steer_max_high": 0.10,
 		"seat_offsets": [Vector3(0, 0.55, 0.05)],   # rider only
@@ -132,6 +133,7 @@ const VARIANTS := {
 		"stall_rpm": 600.0,
 		"engine_base_hz": 50.0,
 		"engine_top_hz": 320.0,
+		"engine_voice": "snarl",
 		"steer_max": 0.45,
 		"steer_max_high": 0.05,
 		"seat_offsets": [
@@ -165,6 +167,7 @@ var _rpm_hard_cap: float = RPM_HARD_CAP
 var _stall_rpm: float = STALL_RPM
 var _engine_base_hz: float = ENGINE_BASE_HZ
 var _engine_top_hz: float = ENGINE_TOP_HZ
+var _engine_voice: String = "saw"
 var _seat_offsets: Array = SEAT_OFFSETS_DEFAULT.duplicate()
 var _seat_labels: Array = SEAT_LABELS_DEFAULT.duplicate()
 var _eject_offset: Vector3 = EJECT_OFFSET_DEFAULT
@@ -244,6 +247,7 @@ func _apply_variant() -> void:
 	_stall_rpm      = float(cfg.get("stall_rpm", STALL_RPM))
 	_engine_base_hz = float(cfg.get("engine_base_hz", ENGINE_BASE_HZ))
 	_engine_top_hz  = float(cfg.get("engine_top_hz", ENGINE_TOP_HZ))
+	_engine_voice   = String(cfg.get("engine_voice", "saw"))
 	_eject_offset   = cfg.get("eject_offset", EJECT_OFFSET_DEFAULT)
 	# Seats: copy out of cfg or use defaults
 	if cfg.has("seat_offsets"):
@@ -587,7 +591,22 @@ func _fill_engine_buffer() -> void:
 			_engine_phase2 -= TAU
 		var saw1: float = (_engine_phase / PI) - 1.0
 		var saw2: float = (_engine_phase2 / PI) - 1.0
-		var s: float = (saw1 * 0.7 + saw2 * 0.3) * amp
+		var s: float = 0.0
+		match _engine_voice:
+			"rasp":
+				# Motorcycle: square fundamental + bright 2nd harmonic + noise grit.
+				var sq: float = 1.0 if sin(_engine_phase) > 0.0 else -1.0
+				var bright: float = sin(_engine_phase2 * 1.5)
+				var grit: float = (randf() * 2.0 - 1.0) * 0.20
+				s = (sq * 0.55 + bright * 0.30 + grit) * amp * 0.9
+			"snarl":
+				# V12: deep saw + sub-octave thump + rich 2nd harmonic snarl.
+				var sub: float = sin(_engine_phase * 0.5) * 0.4
+				var snarl: float = (saw2 * 0.6) + (sin(_engine_phase2) * 0.25)
+				s = (saw1 * 0.55 + sub + snarl * 0.45) * amp * 1.1
+			_:
+				# Default car: dual saw.
+				s = (saw1 * 0.7 + saw2 * 0.3) * amp
 		_engine_playback.push_frame(Vector2(s, s))
 
 func _fill_shift_buffer() -> void:
@@ -749,8 +768,12 @@ func exit_driver() -> void:
 	_driver = null
 	if player is Node3D:
 		var eject_world: Vector3 = global_transform * _eject_offset
-		(player as Node3D).global_position = eject_world
-		(player as Node3D).reset_physics_interpolation()
+		var pn: Node3D = player as Node3D
+		# Drop the flipped vehicle basis — keep player upright on yaw only.
+		var yaw: float = pn.global_transform.basis.get_euler().y
+		var upright := Basis(Vector3.UP, yaw)
+		pn.global_transform = Transform3D(upright, eject_world)
+		pn.reset_physics_interpolation()
 	if player.has_method("set_in_vehicle"):
 		player.set_in_vehicle(null)
 	var pcam: Camera3D = _find_camera(player)
