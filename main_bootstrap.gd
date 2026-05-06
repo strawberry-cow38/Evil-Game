@@ -22,6 +22,11 @@ const CORPSE_LOOT_ROLLS := 4
 
 # Fixed vehicle spawn — sits a few meters off the player spawn so it's findable.
 const VEHICLE_SPAWN_OFFSET := Vector3(6.0, 0.0, 0.0)
+const VEHICLE_SPAWNS := [
+	{"variant": "car", "name": "Vehicle", "offset": Vector3(6.0, 0.0, 0.0)},
+	{"variant": "motorcycle", "name": "Motorcycle", "offset": Vector3(6.0, 0.0, 4.0)},
+	{"variant": "countash", "name": "Countash", "offset": Vector3(10.0, 0.0, -2.0)},
+]
 
 func _ready() -> void:
 	# Apply authored sky/sun/ambient before anything else so the first
@@ -169,21 +174,23 @@ func _ready() -> void:
 					_spawn_corpse(actors_root, body.global_position, preset_color, label, drop_id, itables_by_id)
 				)
 
-	# Always-spawn vehicle. Sit it slightly off the player spawn at terrain
-	# height + clearance so it lands on the ground rather than clipping in.
-	var v := VehicleBody3D.new()
-	v.set_script(VEHICLE)
-	v.name = "Vehicle"
-	var spawn_xz: Vector3 = Vector3.ZERO
+	# Always-spawn vehicles — one per variant. Drop each near the player at
+	# terrain height + clearance so they land on the ground rather than clip in.
 	var player_node := get_node_or_null("Player")
+	var player_pos: Vector3 = Vector3.ZERO
 	if player_node != null and player_node is Node3D:
-		spawn_xz = (player_node as Node3D).global_position
-	spawn_xz += VEHICLE_SPAWN_OFFSET
-	var ground_y: float = spawn_xz.y
-	if terrain_node != null and terrain_node.has_method("sample_height"):
-		ground_y = terrain_node.sample_height(spawn_xz)
-	v.position = Vector3(spawn_xz.x, ground_y + 1.0, spawn_xz.z)
-	add_child(v)
+		player_pos = (player_node as Node3D).global_position
+	for spec in VEHICLE_SPAWNS:
+		var v := VehicleBody3D.new()
+		v.set_script(VEHICLE)
+		v.variant = String(spec.get("variant", "car"))
+		v.name = String(spec.get("name", "Vehicle"))
+		var spawn_xz: Vector3 = player_pos + (spec.get("offset", VEHICLE_SPAWN_OFFSET) as Vector3)
+		var ground_y: float = spawn_xz.y
+		if terrain_node != null and terrain_node.has_method("sample_height"):
+			ground_y = terrain_node.sample_height(spawn_xz)
+		v.position = Vector3(spawn_xz.x, ground_y + 1.0, spawn_xz.z)
+		add_child(v)
 
 func _seed_container(crate: Node3D, table: Dictionary) -> void:
 	var rolls: int = int(crate.get("roll_count"))
