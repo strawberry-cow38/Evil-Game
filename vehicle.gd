@@ -383,13 +383,35 @@ func _build_camera() -> void:
 	var cfg: Dictionary = VARIANTS.get(variant, {})
 	var cam_offset: Vector3 = cfg.get("camera_offset", Vector3(0, 1.4, -5.5))
 	_camera_pivot = Node3D.new()
-	_camera_pivot.position = Vector3(0, 1.6, -0.2)
+	# Sit pivot dead-centre on the chassis so orbit yaw rotates around the car.
+	_camera_pivot.position = Vector3(0, 1.6, 0)
 	add_child(_camera_pivot)
 	_camera = Camera3D.new()
 	_camera.position = cam_offset
 	_camera.rotation = Vector3(deg_to_rad(-12.0), 0, 0)
 	_camera.fov = 70.0
 	_camera_pivot.add_child(_camera)
+
+const DRIVER_LOOK_SENS := 0.0025
+const DRIVER_PITCH_MIN := -1.2
+const DRIVER_PITCH_MAX := 0.6
+var _look_yaw: float = 0.0
+var _look_pitch: float = 0.0
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _driver == null:
+		return
+	if not (event is InputEventMouseMotion):
+		return
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		return
+	var mm: InputEventMouseMotion = event
+	_look_yaw -= mm.relative.x * DRIVER_LOOK_SENS
+	_look_pitch -= mm.relative.y * DRIVER_LOOK_SENS
+	_look_pitch = clampf(_look_pitch, DRIVER_PITCH_MIN, DRIVER_PITCH_MAX)
+	if _camera_pivot != null:
+		_camera_pivot.rotation = Vector3(_look_pitch, _look_yaw, 0.0)
+	get_viewport().set_input_as_handled()
 
 func _setup_audio() -> void:
 	_engine_player = AudioStreamPlayer3D.new()
@@ -456,11 +478,15 @@ func _physics_process(delta: float) -> void:
 		var steer_in: float = Input.get_action_strength("move_left") - Input.get_action_strength("move_right")
 		_throttle = clampf(fwd, 0.0, 1.0)
 		# Engine start procedure. Hold N for ENGINE_START_HOLD_S; one chance to
-		# catch per press. Failed attempts lock out until release.
+		# catch per press. Failed attempts lock out until release. Tap N while
+		# already running = kill switch.
 		_crank_active = false
 		if _engine_on:
 			_start_hold = 0.0
 			_start_locked = false
+			if unlocked and Input.is_action_just_pressed("vehicle_restart"):
+				_engine_on = false
+				_trigger_die_sound()
 		else:
 			if Input.is_action_just_pressed("vehicle_restart"):
 				_start_hold = 0.0
@@ -746,15 +772,32 @@ func get_start_progress() -> float:
 
 func _shift_up() -> void:
 	if _gear < _gear_ratios.size():
+		var prev: int = _gear
 		_gear += 1
 		_shift_cooldown = SHIFT_COOLDOWN_S
 		_trigger_shift_sound()
+		_check_grind_kill(prev, _gear)
 
 func _shift_down() -> void:
 	if _gear > -1:
+		var prev: int = _gear
 		_gear -= 1
 		_shift_cooldown = SHIFT_COOLDOWN_S
 		_trigger_shift_sound()
+		_check_grind_kill(prev, _gear)
+
+const GRIND_STOP_SPEED := 1.5  # m/s; faster than this through R<->1 grinds the box
+
+func _check_grind_kill(prev_gear: int, new_gear: int) -> void:
+	# R <-> 1 (or 1 <-> R) without coming to a stop = stalled box.
+	if not _engine_on:
+		return
+	var crossed: bool = (prev_gear == -1 and new_gear == 1) or (prev_gear == 1 and new_gear == -1)
+	if not crossed:
+		return
+	if linear_velocity.length() > GRIND_STOP_SPEED:
+		_engine_on = false
+		_trigger_die_sound()
 
 func _current_ratio() -> float:
 	if _gear == 0:
@@ -779,6 +822,10 @@ func try_enter_driver(player: Node) -> bool:
 	player.global_transform = (_seat_markers[0] as Node3D).global_transform
 	if player.has_method("reset_physics_interpolation"):
 		player.reset_physics_interpolation()
+	_look_yaw = 0.0
+	_look_pitch = 0.0
+	if _camera_pivot != null:
+		_camera_pivot.rotation = Vector3.ZERO
 	_camera.current = true
 	_enter_locked_until = Time.get_ticks_msec() / 1000.0 + 0.3
 	return true

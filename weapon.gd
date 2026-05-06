@@ -2069,6 +2069,16 @@ func _apply_impact(world_pos: Vector3, normal: Vector3, material: String, collid
 	if material != "flesh":
 		_spawn_bullet_hole(world_pos, normal, material, collider)
 
+func _find_movable_host(collider: Object) -> Node3D:
+	# Walk up the tree to find a RigidBody3D / VehicleBody3D / CharacterBody3D
+	# the decal can hang under so it tracks the moving body.
+	var n := collider as Node
+	while n != null:
+		if n is RigidBody3D or n is CharacterBody3D:
+			return n as Node3D
+		n = n.get_parent()
+	return null
+
 func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, collider: Object = null) -> void:
 	var n: Vector3 = normal.normalized()
 	var quad := QuadMesh.new()
@@ -2089,11 +2099,13 @@ func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, c
 	var mi := MeshInstance3D.new()
 	mi.mesh = quad
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	# Parent the decal to the destructible (if any) so when it queue_frees the
-	# bullet holes go with it. Otherwise stick it on the scene root as before.
+	# Parent the decal to whatever the bullet actually hit so it follows
+	# moving objects (vehicles, destructibles). Falls back to scene root
+	# only when the collider can't host children.
 	var parent: Node = _find_damageable(collider)
 	if parent == null or not (parent is Node3D):
-		parent = get_tree().current_scene
+		var n_node := _find_movable_host(collider)
+		parent = n_node if n_node != null else get_tree().current_scene
 	parent.add_child(mi)
 	# Orient quad so its +Z faces along the surface normal, then nudge it
 	# slightly off the surface to avoid z-fighting.
