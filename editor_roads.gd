@@ -27,8 +27,14 @@ const NODE_RADIUS := 0.6
 const SUB_RADIUS := 0.35
 const SELECTED_COLOR := Color(1.0, 0.85, 0.2, 1.0)
 const NORMAL_COLOR := Color(0.25, 0.7, 1.0, 1.0)
-const HANDLE_IN_COLOR := Color(0.4, 1.0, 0.5, 1.0)
-const HANDLE_OUT_COLOR := Color(1.0, 0.55, 0.85, 1.0)
+# Visually green tracks the road's FORWARD direction (toward next node /
+# extends past last endpoint), pink tracks BACKWARD (toward prev / extends
+# past first endpoint). Storage layout (in_tangent / out_tangent) still
+# follows standard bezier convention: in_tangent is the back-side control
+# point at a node, out_tangent the forward-side. So the in-handle sphere
+# always wears the pink colour and the out-handle the green.
+const HANDLE_IN_COLOR := Color(1.0, 0.55, 0.85, 1.0)
+const HANDLE_OUT_COLOR := Color(0.4, 1.0, 0.5, 1.0)
 const HANDLE_LINE_COLOR := Color(0.7, 0.7, 0.75, 0.9)
 const ROAD_LINE_COLOR := Color(0.9, 0.9, 0.95, 1.0)
 const ROAD_RAISE := 0.25
@@ -792,7 +798,12 @@ func _spawn_decal_strip(a: Dictionary, b: Dictionary, decal: Dictionary) -> void
 		var tan_flat := tan
 		tan_flat.y = 0.0
 		if tan_flat.length_squared() < 0.0001:
-			tan_flat = Vector3(0, 0, -1)
+			var chord_xz: Vector3 = p3 - p0
+			chord_xz.y = 0.0
+			if chord_xz.length_squared() < 0.0001:
+				tan_flat = Vector3(0, 0, -1)
+			else:
+				tan_flat = chord_xz
 		tan_flat = tan_flat.normalized()
 		var right_v: Vector3 = tan_flat.cross(Vector3.UP).normalized()
 		var half_road: float = lerp(wa, wb, t) * 0.5
@@ -892,7 +903,16 @@ func _spawn_road_strip(a: Dictionary, b: Dictionary, mat: StandardMaterial3D) ->
 		var tan: Vector3 = _cubic_bezier_tangent(p0, p1, p2, p3, t)
 		tan.y = 0.0
 		if tan.length_squared() < 0.0001:
-			tan = Vector3(0, 0, -1)
+			# Endpoints with zero stored tangents produce a zero bezier
+			# derivative — fall back to the segment chord so the cross-
+			# section stays aligned with the road's actual direction
+			# instead of snapping to a world-axis and folding 180°.
+			var chord_xz: Vector3 = p3 - p0
+			chord_xz.y = 0.0
+			if chord_xz.length_squared() < 0.0001:
+				tan = Vector3(0, 0, -1)
+			else:
+				tan = chord_xz
 		tan = tan.normalized()
 		var right: Vector3 = tan.cross(Vector3.UP).normalized()
 		var half: float = lerp(wa, wb, t) * 0.5

@@ -74,7 +74,12 @@ func _spawn_strip(terrain: Node3D, a: Dictionary, b: Dictionary, mat: StandardMa
 		var tan: Vector3 = _cubic_tan(p0, p1, p2, p3, t)
 		tan.y = 0.0
 		if tan.length_squared() < 0.0001:
-			tan = Vector3(0, 0, -1)
+			var chord_xz: Vector3 = p3 - p0
+			chord_xz.y = 0.0
+			if chord_xz.length_squared() < 0.0001:
+				tan = Vector3(0, 0, -1)
+			else:
+				tan = chord_xz
 		tan = tan.normalized()
 		var right: Vector3 = tan.cross(Vector3.UP).normalized()
 		var half: float = lerp(wa, wb, t) * 0.5
@@ -177,7 +182,12 @@ func _spawn_decal_strip(terrain: Node3D, a: Dictionary, b: Dictionary, decal: Di
 		var tan: Vector3 = _cubic_tan(p0, p1, p2, p3, t)
 		tan.y = 0.0
 		if tan.length_squared() < 0.0001:
-			tan = Vector3(0, 0, -1)
+			var chord_xz: Vector3 = p3 - p0
+			chord_xz.y = 0.0
+			if chord_xz.length_squared() < 0.0001:
+				tan = Vector3(0, 0, -1)
+			else:
+				tan = chord_xz
 		tan = tan.normalized()
 		var right_v: Vector3 = tan.cross(Vector3.UP).normalized()
 		var half_road: float = lerp(wa, wb, t) * 0.5
