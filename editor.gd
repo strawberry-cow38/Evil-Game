@@ -26,6 +26,7 @@ const TOOL_S_ACTORS_REMOVE := "s_actors_remove"
 const TOOL_L_EFFECTS := "l_effects"
 const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
+const TOOL_E_ROADS := "e_roads"
 
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
@@ -36,6 +37,7 @@ const CONTAINER_PANEL_SCRIPT := preload("res://editor_container_panel.gd")
 const LIGHTING_PANEL_SCRIPT := preload("res://editor_lighting_panel.gd")
 const OBJECT_PROPS_PANEL_SCRIPT := preload("res://editor_object_props_panel.gd")
 const PAUSE_MENU_SCRIPT := preload("res://editor_pause_menu.gd")
+const ROADS_SCRIPT := preload("res://editor_roads.gd")
 const MAIN_MENU_SCENE := "res://main_menu.tscn"
 const OBJECTS_CATALOG := preload("res://editor_objects_catalog.gd")
 const CRATE := preload("res://crate.gd")
@@ -145,6 +147,9 @@ var _xform_clipboard: Dictionary = {}
 var _use_local_space: bool = false
 @onready var _world_env: WorldEnvironment = $WorldEnvironment
 @onready var _sun: DirectionalLight3D = $Sun
+# Road authoring node. Owns its own visuals; we proxy clicks + E into it
+# while the Environment → Roads tool is active.
+var _roads_node: Node3D = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -354,6 +359,20 @@ func _ready() -> void:
 				actor_color_by_id.get(String(sp.get("table_id", "")), Color.WHITE),
 				sp.get("pos", Vector3.ZERO),
 			)
+	# Roads node. Owns its own visuals; we proxy clicks + E while the
+	# Environment → Roads tool is active.
+	_roads_node = Node3D.new()
+	_roads_node.set_script(ROADS_SCRIPT)
+	add_child(_roads_node)
+	_roads_node.setup(_terrain)
+	if MapState.roads.size() > 0:
+		_roads_node.set_state(MapState.roads)
+	_roads_node.road_state_changed.connect(_on_roads_changed)
+
+func _on_roads_changed() -> void:
+	# Mirror the in-memory road state back to MapState so F9 + saves see
+	# the latest edits without us pushing on every keystroke from editor.gd.
+	MapState.roads = _roads_node.get_state()
 
 func _input(event: InputEvent) -> void:
 	# Esc toggles the pause menu. While it's open we swallow other shortcuts
@@ -376,9 +395,13 @@ func _input(event: InputEvent) -> void:
 		_enter_play_mode()
 		return
 	# E → place an armed effect or object at the cursor (depends on tool).
+	# Under the Roads tool, E toggles grab-mode on the selected node so the
+	# user can drag it with the cursor (LMB or another E commits).
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
 		if not _camera.is_looking() and not _is_over_ui():
-			if _active_tool == TOOL_L_EFFECTS and _armed_effect_id != "":
+			if _active_tool == TOOL_E_ROADS:
+				_roads_node.toggle_grab()
+			elif _active_tool == TOOL_L_EFFECTS and _armed_effect_id != "":
 				var hit := _raycast_cursor()
 				if not hit.is_empty():
 					_spawn_effect_at(_armed_effect_id, hit.position)
@@ -402,9 +425,11 @@ func _input(event: InputEvent) -> void:
 		if _selected_prop != null and not _camera.is_looking():
 			_gizmo.set_target(_selected_prop)
 			_gizmo.cycle_scale()
-	# Delete → remove selected effect.
+	# Delete → remove selected effect, or active road node.
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_DELETE:
-		if _selected_prop != null and not _camera.is_looking():
+		if _active_tool == TOOL_E_ROADS:
+			_roads_node.delete_selected_node()
+		elif _selected_prop != null and not _camera.is_looking():
 			_delete_selected_prop()
 	# Ctrl+C / Ctrl+X / Ctrl+V on object boxes. Effects + spawns aren't
 	# clipboard-eligible (no good "what does it mean" story for those yet).
@@ -502,6 +527,8 @@ func _snapshot_to_mapstate() -> void:
 			"table_id": String(box.table_id),
 			"pos": box.global_position,
 		})
+	if _roads_node != null:
+		MapState.roads = _roads_node.get_state()
 
 func _restore_from_mapstate() -> void:
 	# Inverse of _snapshot_to_mapstate. Wipes whatever's currently in the
@@ -590,6 +617,8 @@ func _restore_from_mapstate() -> void:
 	if not MapState.lighting.is_empty():
 		_lighting_panel.set_state(MapState.lighting)
 		_apply_lighting(MapState.lighting)
+	if _roads_node != null:
+		_roads_node.set_state(MapState.roads)
 
 func _open_pause_menu() -> void:
 	if _pause_menu == null:
@@ -661,6 +690,13 @@ func _process(delta: float) -> void:
 	if _actor_spawn_ghost != null:
 		_actor_spawn_ghost.visible = false
 	_flatten_ring.hide_ring()
+	# Roads grab-follow: if the user has E-grabbed a node, slide it under
+	# the cursor every frame so they see it tracking before they commit.
+	if _active_tool == TOOL_E_ROADS and _roads_node != null and _roads_node.is_grabbing():
+		if not _camera.is_looking() and not _is_over_ui():
+			var grab_hit := _raycast_cursor()
+			if not grab_hit.is_empty():
+				_roads_node.on_cursor_world(grab_hit.position)
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
 	if _camera.is_looking() or _active_tool == TOOL_NONE:
@@ -757,6 +793,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if not (event is InputEventMouseButton):
 		return
+	# Roads tool: RMB deselects the current road so the next LMB starts a
+	# fresh chain instead of appending to the previously-selected one.
+	if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		if _active_tool == TOOL_E_ROADS and not _is_over_ui() and not _camera.is_looking():
+			_roads_node.deselect()
+			return
 	if event.button_index != MOUSE_BUTTON_LEFT:
 		return
 	# In-progress drag always consumes the release, even over UI / look-mode.
@@ -829,6 +871,27 @@ func _unhandled_input(event: InputEvent) -> void:
 		var p3: Vector3 = hit3.position
 		p3.y = _terrain.sample_height(p3)
 		_delete_nearest_spawn(p3)
+		return
+	# Roads: LMB places a node on the active road (or selects one if the
+	# click landed on an existing node). If a grab is in progress, LMB
+	# commits the grab instead of placing.
+	if _active_tool == TOOL_E_ROADS and event.pressed:
+		if _roads_node.is_grabbing():
+			_roads_node.commit_grab()
+			return
+		var mp := get_viewport().get_mouse_position()
+		var ro := _camera.project_ray_origin(mp)
+		var rd := _camera.project_ray_normal(mp)
+		var picked: Vector2i = _roads_node.pick_node(ro, rd)
+		if picked.x >= 0:
+			_roads_node.on_click(Vector3.ZERO, picked)
+			return
+		var hit_r := _raycast_cursor()
+		if hit_r.is_empty():
+			return
+		var pr: Vector3 = hit_r.position
+		pr.y = _terrain.sample_height(pr)
+		_roads_node.on_click(pr, Vector2i(-1, -1))
 		return
 	# Effects / Objects tools: LMB picks a gizmo handle first (so dragging
 	# an arrow doesn't deselect the prop underneath). Falls through to pick

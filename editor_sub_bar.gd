@@ -18,6 +18,7 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 	],
 	"environment": [
 		{"id": "e_lighting", "label": "Lighting"},
+		{"id": "e_roads",    "label": "Roads"},
 	],
 	"spawns": [
 		{"id": "s_player_place",  "label": "Place Player Spawn"},

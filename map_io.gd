@@ -8,7 +8,7 @@ extends Node
 # saves can be rejected (or migrated) instead of silently misloading.
 
 const SAVE_DIR := "user://maps"
-const SCHEMA_VERSION := 1
+const SCHEMA_VERSION := 2
 
 func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SAVE_DIR))
@@ -130,6 +130,17 @@ func _snapshot_state() -> Dictionary:
 		if aspd.has("pos"):
 			aspd["pos"] = _v3_to_dict(aspd["pos"])
 		aspawn_pts.append(aspd)
+	var roads_out: Array = []
+	for r in MapState.roads:
+		var rd: Dictionary = {"id": String(r.get("id", "")), "nodes": []}
+		for n in r.get("nodes", []):
+			rd["nodes"].append({
+				"pos": _v3_to_dict(n.get("pos", Vector3.ZERO)),
+				"in_tangent": _v3_to_dict(n.get("in_tangent", Vector3.ZERO)),
+				"out_tangent": _v3_to_dict(n.get("out_tangent", Vector3.ZERO)),
+				"ignore_terrain": bool(n.get("ignore_terrain", false)),
+			})
+		roads_out.append(rd)
 	return {
 		"schema": SCHEMA_VERSION,
 		"heights": heights_arr,
@@ -142,6 +153,7 @@ func _snapshot_state() -> Dictionary:
 		"actor_tables": atables,
 		"actor_spawn_points": aspawn_pts,
 		"lighting": lighting,
+		"roads": roads_out,
 	}
 
 func _apply_state(data: Dictionary) -> void:
@@ -190,6 +202,16 @@ func _apply_state(data: Dictionary) -> void:
 		else:
 			out_lighting[k] = v
 	MapState.lighting = out_lighting
+	for r in data.get("roads", []):
+		var rd: Dictionary = {"id": String(r.get("id", "")), "nodes": []}
+		for n in r.get("nodes", []):
+			rd["nodes"].append({
+				"pos": _dict_to_v3(n.get("pos", {})),
+				"in_tangent": _dict_to_v3(n.get("in_tangent", {})),
+				"out_tangent": _dict_to_v3(n.get("out_tangent", {})),
+				"ignore_terrain": bool(n.get("ignore_terrain", false)),
+			})
+		MapState.roads.append(rd)
 
 # --- Type helpers ----------------------------------------------------------
 

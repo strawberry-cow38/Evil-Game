@@ -36,6 +36,11 @@ var actor_spawn_points: Array = []
 # = play scene uses main.tscn's hardcoded defaults. See
 # editor_lighting_panel.gd DEFAULTS for key list.
 var lighting: Dictionary = {}
+# Roads authored via Environment → Roads. Each entry:
+#   { "id": String, "nodes": Array[ {pos:Vector3, in_tangent:Vector3,
+#     out_tangent:Vector3, ignore_terrain:bool} ] }
+# Empty array = no roads, play scene draws nothing.
+var roads: Array = []
 
 func has_map() -> bool:
 	return heights.size() > 0 and grid_w > 0 and grid_h > 0
@@ -51,6 +56,7 @@ func clear() -> void:
 	actor_tables.clear()
 	actor_spawn_points.clear()
 	lighting.clear()
+	roads.clear()
 
 func random_player_spawn() -> Vector3:
 	if player_spawns.is_empty():
