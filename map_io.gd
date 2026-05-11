@@ -132,7 +132,7 @@ func _snapshot_state() -> Dictionary:
 		aspawn_pts.append(aspd)
 	var roads_out: Array = []
 	for r in MapState.roads:
-		var rd: Dictionary = {"id": String(r.get("id", "")), "surface": String(r.get("surface", "asphalt")), "nodes": []}
+		var rd: Dictionary = {"id": String(r.get("id", "")), "surface": String(r.get("surface", "asphalt")), "nodes": [], "decals": []}
 		for n in r.get("nodes", []):
 			rd["nodes"].append({
 				"pos": _v3_to_dict(n.get("pos", Vector3.ZERO)),
@@ -140,6 +140,14 @@ func _snapshot_state() -> Dictionary:
 				"out_tangent": _v3_to_dict(n.get("out_tangent", Vector3.ZERO)),
 				"ignore_terrain": bool(n.get("ignore_terrain", false)),
 				"width": float(n.get("width", 6.0)),
+			})
+		for d in r.get("decals", []):
+			rd["decals"].append({
+				"offset": float(d.get("offset", 0.5)),
+				"width": float(d.get("width", 0.15)),
+				"color": _color_to_dict(d.get("color", Color(1, 1, 1, 1))),
+				"dash_length": float(d.get("dash_length", 0.0)),
+				"gap_length": float(d.get("gap_length", 0.0)),
 			})
 		roads_out.append(rd)
 	return {
@@ -204,7 +212,7 @@ func _apply_state(data: Dictionary) -> void:
 			out_lighting[k] = v
 	MapState.lighting = out_lighting
 	for r in data.get("roads", []):
-		var rd: Dictionary = {"id": String(r.get("id", "")), "surface": String(r.get("surface", "asphalt")), "nodes": []}
+		var rd: Dictionary = {"id": String(r.get("id", "")), "surface": String(r.get("surface", "asphalt")), "nodes": [], "decals": []}
 		for n in r.get("nodes", []):
 			rd["nodes"].append({
 				"pos": _dict_to_v3(n.get("pos", {})),
@@ -212,6 +220,16 @@ func _apply_state(data: Dictionary) -> void:
 				"out_tangent": _dict_to_v3(n.get("out_tangent", {})),
 				"ignore_terrain": bool(n.get("ignore_terrain", false)),
 				"width": float(n.get("width", 6.0)),
+			})
+		for d in r.get("decals", []):
+			var col_raw = d.get("color", {})
+			var col: Color = _dict_to_color(col_raw) if col_raw is Dictionary else Color(1, 1, 1, 1)
+			rd["decals"].append({
+				"offset": float(d.get("offset", 0.5)),
+				"width": float(d.get("width", 0.15)),
+				"color": col,
+				"dash_length": float(d.get("dash_length", 0.0)),
+				"gap_length": float(d.get("gap_length", 0.0)),
 			})
 		MapState.roads.append(rd)
 

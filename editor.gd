@@ -381,11 +381,14 @@ func _ready() -> void:
 	_roads_panel.offset_left = -300
 	_roads_panel.offset_right = -16
 	_roads_panel.offset_top = 90
-	_roads_panel.offset_bottom = 260
+	_roads_panel.offset_bottom = 640
 	$UI.add_child(_roads_panel)
 	_roads_panel.width_changed.connect(_on_roads_panel_width)
 	_roads_panel.ignore_terrain_changed.connect(_on_roads_panel_ignore)
 	_roads_panel.surface_changed.connect(_on_roads_panel_surface)
+	_roads_panel.decal_add_request.connect(_on_roads_panel_decal_add)
+	_roads_panel.decal_remove_request.connect(_on_roads_panel_decal_remove)
+	_roads_panel.decal_change_request.connect(_on_roads_panel_decal_change)
 	var surf_entries: Array = []
 	for sid in ROADS_SCRIPT.SURFACES.keys():
 		var spec: Dictionary = ROADS_SCRIPT.SURFACES[sid]
@@ -405,9 +408,9 @@ func _refresh_roads_panel() -> void:
 		return
 	var info: Dictionary = _roads_node.selected_info()
 	if info.get("has", false):
-		_roads_panel.refresh(float(info["width"]), bool(info["ignore_terrain"]), String(info["label"]), String(info.get("surface", "")))
+		_roads_panel.refresh(float(info["width"]), bool(info["ignore_terrain"]), String(info["label"]), String(info.get("surface", "")), _roads_node.selected_road_decals())
 	else:
-		_roads_panel.refresh(-1.0, false, "Roads: nothing selected", "")
+		_roads_panel.refresh(-1.0, false, "Roads: nothing selected", "", [])
 
 func _on_roads_panel_width(v: float) -> void:
 	_roads_node.set_selected_width(v)
@@ -417,6 +420,15 @@ func _on_roads_panel_ignore(v: bool) -> void:
 
 func _on_roads_panel_surface(sid: String) -> void:
 	_roads_node.set_selected_surface(sid)
+
+func _on_roads_panel_decal_add(decal: Dictionary) -> void:
+	_roads_node.add_decal_to_selected(decal)
+
+func _on_roads_panel_decal_remove(index: int) -> void:
+	_roads_node.remove_decal_from_selected(index)
+
+func _on_roads_panel_decal_change(index: int, field: String, value) -> void:
+	_roads_node.update_decal_on_selected(index, field, value)
 
 func _input(event: InputEvent) -> void:
 	# Esc toggles the pause menu. While it's open we swallow other shortcuts

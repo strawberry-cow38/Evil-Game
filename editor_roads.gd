@@ -53,8 +53,26 @@ const SURFACES := {
 }
 const DEFAULT_SURFACE := "asphalt"
 
+# Lane-markings ride a few mm above the road slab as thin quad strips.
+# Each decal entry on a road describes one stripe: a lateral offset (u),
+# a stripe width in metres, a colour, and optional dash params. Multiple
+# decals stack so the user can compose centre-lines + edge-lines + double
+# yellows etc. Quick-add presets in editor_roads_panel.gd push canned
+# entries onto this list.
+const DECAL_LIFT := 0.012  # metres above slab top
+const DECAL_DEFAULT := {
+	"offset": 0.5,
+	"width": 0.15,
+	"color": Color(1.0, 1.0, 1.0, 1.0),
+	"dash_length": 0.0,  # 0 = solid
+	"gap_length": 0.0,
+}
+
 # Map-state shape (mirrored into MapState.roads on save):
-#   road = { "id": String, "surface": String, "nodes": Array[ node_dict ] }
+#   road = { "id": String, "surface": String, "decals": Array[decal_dict],
+#            "nodes": Array[node_dict] }
+#   decal_dict = { "offset": float (0..1), "width": float (m), "color": Color,
+#                  "dash_length": float (m, 0 = solid), "gap_length": float (m) }
 #   node_dict = {
 #     "pos": Vector3,
 #     "in_tangent":  Vector3,   # offset from pos; (0,0,0) = straight bezier
@@ -135,7 +153,11 @@ func set_state(roads: Array) -> void:
 		var sid: String = String(r.get("surface", DEFAULT_SURFACE))
 		if not SURFACES.has(sid):
 			sid = DEFAULT_SURFACE
-		_roads.append({"id": String(r.get("id", _new_id())), "surface": sid, "nodes": nodes_out})
+		var decals_in: Array = r.get("decals", [])
+		var decals_out: Array = []
+		for d in decals_in:
+			decals_out.append(_sanitise_decal(d))
+		_roads.append({"id": String(r.get("id", _new_id())), "surface": sid, "decals": decals_out, "nodes": nodes_out})
 	_selected_road = -1
 	_selected_node = -1
 	_selected_kind = KIND_NODE
@@ -172,7 +194,7 @@ func on_click(world_pos: Vector3, picked: Vector3i) -> void:
 		return
 	var pos := _snap_to_terrain(world_pos, false)
 	if _selected_road < 0:
-		_roads.append({"id": _new_id(), "surface": DEFAULT_SURFACE, "nodes": []})
+		_roads.append({"id": _new_id(), "surface": DEFAULT_SURFACE, "decals": [], "nodes": []})
 		_selected_road = _roads.size() - 1
 	var nodes: Array = _roads[_selected_road]["nodes"]
 	nodes.append({
@@ -231,6 +253,66 @@ func set_selected_surface(sid: String) -> void:
 	_roads[_selected_road]["surface"] = sid
 	_rebuild_visuals()
 	road_state_changed.emit()
+
+# Decals ---------------------------------------------------------------------
+
+func selected_road_decals() -> Array:
+	if _selected_road < 0:
+		return []
+	return _roads[_selected_road].get("decals", [])
+
+func add_decal_to_selected(decal: Dictionary = {}) -> void:
+	if _selected_road < 0:
+		return
+	var entry: Dictionary = _sanitise_decal(decal)
+	var arr: Array = _roads[_selected_road].get("decals", [])
+	arr.append(entry)
+	_roads[_selected_road]["decals"] = arr
+	_rebuild_visuals()
+	road_state_changed.emit()
+
+func remove_decal_from_selected(index: int) -> void:
+	if _selected_road < 0:
+		return
+	var arr: Array = _roads[_selected_road].get("decals", [])
+	if index < 0 or index >= arr.size():
+		return
+	arr.remove_at(index)
+	_roads[_selected_road]["decals"] = arr
+	_rebuild_visuals()
+	road_state_changed.emit()
+
+func update_decal_on_selected(index: int, field: String, value) -> void:
+	if _selected_road < 0:
+		return
+	var arr: Array = _roads[_selected_road].get("decals", [])
+	if index < 0 or index >= arr.size():
+		return
+	var d: Dictionary = arr[index]
+	d[field] = value
+	arr[index] = _sanitise_decal(d)
+	_roads[_selected_road]["decals"] = arr
+	_rebuild_visuals()
+	road_state_changed.emit()
+
+func _sanitise_decal(d: Dictionary) -> Dictionary:
+	# Coerce numbers/colours and clamp into the ranges the renderer assumes
+	# (offset in [0,1], non-negative widths/dashes). Saves the renderer from
+	# checking each frame and means hand-edited JSON imports cleanly.
+	var out: Dictionary = DECAL_DEFAULT.duplicate(true)
+	for k in out.keys():
+		if d.has(k):
+			out[k] = d[k]
+	out["offset"] = clamp(float(out.get("offset", 0.5)), 0.0, 1.0)
+	out["width"] = max(0.02, float(out.get("width", 0.15)))
+	out["dash_length"] = max(0.0, float(out.get("dash_length", 0.0)))
+	out["gap_length"] = max(0.0, float(out.get("gap_length", 0.0)))
+	var c = out.get("color", Color(1, 1, 1, 1))
+	if c is Color:
+		out["color"] = c
+	else:
+		out["color"] = Color(1, 1, 1, 1)
+	return out
 
 func set_selected_width(w: float) -> void:
 	if _selected_road < 0 or _selected_node < 0:
@@ -567,6 +649,12 @@ func _rebuild_visuals() -> void:
 		var mat: StandardMaterial3D = _surface_mats.get(sid, _surface_mats[DEFAULT_SURFACE])
 		for ni in range(nodes.size() - 1):
 			_spawn_road_strip(nodes[ni], nodes[ni + 1], mat)
+		# Lane decals — one mesh per decal layer, sharing the slab's bezier
+		# sampling but offset laterally + lifted slightly to avoid z-fight.
+		var decals: Array = _roads[ri].get("decals", [])
+		for d in decals:
+			for ni in range(nodes.size() - 1):
+				_spawn_decal_strip(nodes[ni], nodes[ni + 1], d)
 		# Centreline polyline drawn on top of the slab so the bezier shape
 		# stays readable through the surface.
 		for ni in range(nodes.size() - 1):
@@ -622,6 +710,105 @@ func _spawn_bezier_polyline(a: Dictionary, b: Dictionary) -> void:
 	mi.visible = _overlays_visible
 	add_child(mi)
 	_overlay_visuals.append(mi)
+
+func _spawn_decal_strip(a: Dictionary, b: Dictionary, decal: Dictionary) -> void:
+	# Lays a single decal stripe along one bezier segment. Offset is u in
+	# [0,1] across the road (0.5 = centre). Solid stripes emit one stitched
+	# triangle strip; dashed stripes break the strip every `dash + gap` arc
+	# metres so the gaps are visible holes, not z-fought slivers.
+	var a_pos: Vector3 = a.get("pos", Vector3.ZERO)
+	var b_pos: Vector3 = b.get("pos", Vector3.ZERO)
+	var a_out: Vector3 = a.get("out_tangent", Vector3.ZERO)
+	var b_in: Vector3 = b.get("in_tangent", Vector3.ZERO)
+	var p0 := a_pos
+	var p1 := a_pos + a_out
+	var p2 := b_pos + b_in
+	var p3 := b_pos
+	var a_ignore: bool = bool(a.get("ignore_terrain", false))
+	var b_ignore: bool = bool(b.get("ignore_terrain", false))
+	var wa: float = float(a.get("width", DEFAULT_WIDTH))
+	var wb: float = float(b.get("width", DEFAULT_WIDTH))
+	var offset_u: float = clamp(float(decal.get("offset", 0.5)), 0.0, 1.0)
+	var decal_half: float = max(0.01, float(decal.get("width", 0.15)) * 0.5)
+	var dash_len: float = float(decal.get("dash_length", 0.0))
+	var gap_len: float = float(decal.get("gap_length", 0.0))
+	var dashed: bool = dash_len > 0.001 and gap_len > 0.001
+	var col: Color = decal.get("color", Color(1, 1, 1, 1))
+	var verts: PackedVector3Array = PackedVector3Array()
+	var normals: PackedVector3Array = PackedVector3Array()
+	var uvs: PackedVector2Array = PackedVector2Array()
+	var indices: PackedInt32Array = PackedInt32Array()
+	var arc_len: float = 0.0
+	var prev_c: Vector3 = _cubic_bezier(p0, p1, p2, p3, 0.0)
+	var emit_indices_for: bool = true  # whether to stitch quad between previous and current sample
+	var pair_count: int = 0  # how many (left, right) vert pairs we've emitted so far
+	for i in range(BEZIER_STEPS + 1):
+		var t: float = float(i) / float(BEZIER_STEPS)
+		var c: Vector3 = _cubic_bezier(p0, p1, p2, p3, t)
+		var tan: Vector3 = _cubic_bezier_tangent(p0, p1, p2, p3, t)
+		var tan_flat := tan
+		tan_flat.y = 0.0
+		if tan_flat.length_squared() < 0.0001:
+			tan_flat = Vector3(0, 0, -1)
+		tan_flat = tan_flat.normalized()
+		var right_v: Vector3 = tan_flat.cross(Vector3.UP).normalized()
+		var half_road: float = lerp(wa, wb, t) * 0.5
+		var lateral: float = (offset_u - 0.5) * 2.0 * half_road
+		var centre_xz: Vector3 = c + right_v * lateral
+		var ignore: bool = a_ignore if t < 0.5 else b_ignore
+		var y: float = c.y
+		if not ignore and _terrain != null:
+			y = _terrain.sample_height(centre_xz)
+		var top_y: float = y + ROAD_RAISE + DECAL_LIFT
+		# Cumulative arc length for dash logic.
+		if i > 0:
+			arc_len += c.distance_to(prev_c)
+		prev_c = c
+		var in_dash: bool = true
+		if dashed:
+			var cycle: float = dash_len + gap_len
+			var mod_pos: float = fposmod(arc_len, cycle)
+			in_dash = mod_pos < dash_len
+		if dashed and not in_dash:
+			emit_indices_for = false
+			continue
+		var l: Vector3 = Vector3(centre_xz.x - right_v.x * decal_half, top_y, centre_xz.z - right_v.z * decal_half)
+		var r: Vector3 = Vector3(centre_xz.x + right_v.x * decal_half, top_y, centre_xz.z + right_v.z * decal_half)
+		verts.append(l)
+		verts.append(r)
+		normals.append(Vector3.UP)
+		normals.append(Vector3.UP)
+		uvs.append(Vector2(0.0, t))
+		uvs.append(Vector2(1.0, t))
+		if emit_indices_for and pair_count > 0:
+			# Stitch this pair to the previous emitted pair.
+			var a0: int = (pair_count - 1) * 2
+			var b1: int = pair_count * 2
+			indices.append(a0); indices.append(b1); indices.append(a0 + 1)
+			indices.append(a0 + 1); indices.append(b1); indices.append(b1 + 1)
+		pair_count += 1
+		emit_indices_for = true
+	if verts.size() < 4 or indices.size() < 3:
+		return
+	var arr := []
+	arr.resize(Mesh.ARRAY_MAX)
+	arr[Mesh.ARRAY_VERTEX] = verts
+	arr[Mesh.ARRAY_NORMAL] = normals
+	arr[Mesh.ARRAY_TEX_UV] = uvs
+	arr[Mesh.ARRAY_INDEX] = indices
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+	var dm := StandardMaterial3D.new()
+	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	dm.albedo_color = col
+	if col.a < 1.0:
+		dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dm.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var mi := MeshInstance3D.new()
+	mi.mesh = am
+	mi.material_override = dm
+	add_child(mi)
+	_mesh_visuals.append(mi)
 
 func _spawn_road_strip(a: Dictionary, b: Dictionary, mat: StandardMaterial3D) -> void:
 	# Extrudes a flat ribbon along the cubic bezier between two nodes.
