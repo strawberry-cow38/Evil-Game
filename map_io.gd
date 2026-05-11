@@ -132,13 +132,14 @@ func _snapshot_state() -> Dictionary:
 		aspawn_pts.append(aspd)
 	var roads_out: Array = []
 	for r in MapState.roads:
-		var rd: Dictionary = {"id": String(r.get("id", "")), "nodes": []}
+		var rd: Dictionary = {"id": String(r.get("id", "")), "surface": String(r.get("surface", "asphalt")), "nodes": []}
 		for n in r.get("nodes", []):
 			rd["nodes"].append({
 				"pos": _v3_to_dict(n.get("pos", Vector3.ZERO)),
 				"in_tangent": _v3_to_dict(n.get("in_tangent", Vector3.ZERO)),
 				"out_tangent": _v3_to_dict(n.get("out_tangent", Vector3.ZERO)),
 				"ignore_terrain": bool(n.get("ignore_terrain", false)),
+				"width": float(n.get("width", 6.0)),
 			})
 		roads_out.append(rd)
 	return {
@@ -203,13 +204,14 @@ func _apply_state(data: Dictionary) -> void:
 			out_lighting[k] = v
 	MapState.lighting = out_lighting
 	for r in data.get("roads", []):
-		var rd: Dictionary = {"id": String(r.get("id", "")), "nodes": []}
+		var rd: Dictionary = {"id": String(r.get("id", "")), "surface": String(r.get("surface", "asphalt")), "nodes": []}
 		for n in r.get("nodes", []):
 			rd["nodes"].append({
 				"pos": _dict_to_v3(n.get("pos", {})),
 				"in_tangent": _dict_to_v3(n.get("in_tangent", {})),
 				"out_tangent": _dict_to_v3(n.get("out_tangent", {})),
 				"ignore_terrain": bool(n.get("ignore_terrain", false)),
+				"width": float(n.get("width", 6.0)),
 			})
 		MapState.roads.append(rd)
 

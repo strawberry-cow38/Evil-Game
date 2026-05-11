@@ -7,6 +7,7 @@ extends Node3D
 # the menu still works.
 
 const EDITOR_TERRAIN := preload("res://editor_terrain.gd")
+const ROAD_RENDERER := preload("res://road_renderer.gd")
 const EFFECT_CATALOG := preload("res://editor_effect_catalog.gd")
 const OBJECT_CATALOG := preload("res://editor_objects_catalog.gd")
 const PICKUP := preload("res://pickup.gd")
@@ -49,6 +50,14 @@ func _ready() -> void:
 		terrain.heights = MapState.heights.duplicate()
 		terrain.rebuild()
 		terrain_node = terrain
+	# Roads — extruded slab over the authored bezier chains. Needs the
+	# terrain reference so its samples match the surface the editor previewed.
+	if not MapState.roads.is_empty():
+		var roads_root := Node3D.new()
+		roads_root.set_script(ROAD_RENDERER)
+		roads_root.name = "Roads"
+		add_child(roads_root)
+		roads_root.build(terrain_node, MapState.roads)
 	# Player spawn override: pick a random authored marker and drop the
 	# Player there. Sit them slightly above the terrain so they don't
 	# clip through the new mesh.

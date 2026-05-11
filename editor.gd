@@ -38,6 +38,7 @@ const LIGHTING_PANEL_SCRIPT := preload("res://editor_lighting_panel.gd")
 const OBJECT_PROPS_PANEL_SCRIPT := preload("res://editor_object_props_panel.gd")
 const PAUSE_MENU_SCRIPT := preload("res://editor_pause_menu.gd")
 const ROADS_SCRIPT := preload("res://editor_roads.gd")
+const ROADS_PANEL_SCRIPT := preload("res://editor_roads_panel.gd")
 const MAIN_MENU_SCENE := "res://main_menu.tscn"
 const OBJECTS_CATALOG := preload("res://editor_objects_catalog.gd")
 const CRATE := preload("res://crate.gd")
@@ -150,6 +151,7 @@ var _use_local_space: bool = false
 # Road authoring node. Owns its own visuals; we proxy clicks + E into it
 # while the Environment → Roads tool is active.
 var _roads_node: Node3D = null
+var _roads_panel: PanelContainer = null
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -368,11 +370,53 @@ func _ready() -> void:
 	if MapState.roads.size() > 0:
 		_roads_node.set_state(MapState.roads)
 	_roads_node.road_state_changed.connect(_on_roads_changed)
+	# Side panel for per-node width + ignore-terrain. Built in code so we
+	# don't have to touch the .tscn just to expose two controls.
+	_roads_panel = PanelContainer.new()
+	_roads_panel.set_script(ROADS_PANEL_SCRIPT)
+	_roads_panel.anchor_left = 1.0
+	_roads_panel.anchor_right = 1.0
+	_roads_panel.anchor_top = 0.0
+	_roads_panel.anchor_bottom = 0.0
+	_roads_panel.offset_left = -300
+	_roads_panel.offset_right = -16
+	_roads_panel.offset_top = 90
+	_roads_panel.offset_bottom = 260
+	$UI.add_child(_roads_panel)
+	_roads_panel.width_changed.connect(_on_roads_panel_width)
+	_roads_panel.ignore_terrain_changed.connect(_on_roads_panel_ignore)
+	_roads_panel.surface_changed.connect(_on_roads_panel_surface)
+	var surf_entries: Array = []
+	for sid in ROADS_SCRIPT.SURFACES.keys():
+		var spec: Dictionary = ROADS_SCRIPT.SURFACES[sid]
+		surf_entries.append({"id": sid, "label": String(spec.get("label", sid))})
+	_roads_panel.populate_surfaces(surf_entries)
 
 func _on_roads_changed() -> void:
 	# Mirror the in-memory road state back to MapState so F9 + saves see
 	# the latest edits without us pushing on every keystroke from editor.gd.
 	MapState.roads = _roads_node.get_state()
+	_refresh_roads_panel()
+
+func _refresh_roads_panel() -> void:
+	if _roads_panel == null:
+		return
+	if _active_tool != TOOL_E_ROADS:
+		return
+	var info: Dictionary = _roads_node.selected_info()
+	if info.get("has", false):
+		_roads_panel.refresh(float(info["width"]), bool(info["ignore_terrain"]), String(info["label"]), String(info.get("surface", "")))
+	else:
+		_roads_panel.refresh(-1.0, false, "Roads: nothing selected", "")
+
+func _on_roads_panel_width(v: float) -> void:
+	_roads_node.set_selected_width(v)
+
+func _on_roads_panel_ignore(v: bool) -> void:
+	_roads_node.set_selected_ignore_terrain(v)
+
+func _on_roads_panel_surface(sid: String) -> void:
+	_roads_node.set_selected_surface(sid)
 
 func _input(event: InputEvent) -> void:
 	# Esc toggles the pause menu. While it's open we swallow other shortcuts
@@ -400,7 +444,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_E:
 		if not _camera.is_looking() and not _is_over_ui():
 			if _active_tool == TOOL_E_ROADS:
-				_roads_node.toggle_grab()
+				var mp_e := get_viewport().get_mouse_position()
+				var ro_e := _camera.project_ray_origin(mp_e)
+				var rd_e := _camera.project_ray_normal(mp_e)
+				_roads_node.toggle_grab_at_cursor(ro_e, rd_e)
 			elif _active_tool == TOOL_L_EFFECTS and _armed_effect_id != "":
 				var hit := _raycast_cursor()
 				if not hit.is_empty():
@@ -431,6 +478,16 @@ func _input(event: InputEvent) -> void:
 			_roads_node.delete_selected_node()
 		elif _selected_prop != null and not _camera.is_looking():
 			_delete_selected_prop()
+	# [ / ] → adjust width of the active road node (per-node).
+	if event is InputEventKey and event.pressed and not event.echo and _active_tool == TOOL_E_ROADS and not _camera.is_looking() and not _is_over_ui():
+		if event.keycode == KEY_BRACKETLEFT:
+			_roads_node.adjust_selected_width(-0.5)
+		elif event.keycode == KEY_BRACKETRIGHT:
+			_roads_node.adjust_selected_width(0.5)
+	# F1 → toggle road overlay visibility (spheres + handles). Mesh stays.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
+		if _roads_node != null:
+			_roads_node.set_overlays_visible(not _roads_node.overlays_visible())
 	# Ctrl+C / Ctrl+X / Ctrl+V on object boxes. Effects + spawns aren't
 	# clipboard-eligible (no good "what does it mean" story for those yet).
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed:
@@ -882,7 +939,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mp := get_viewport().get_mouse_position()
 		var ro := _camera.project_ray_origin(mp)
 		var rd := _camera.project_ray_normal(mp)
-		var picked: Vector2i = _roads_node.pick_node(ro, rd)
+		var picked: Vector3i = _roads_node.pick_node(ro, rd)
 		if picked.x >= 0:
 			_roads_node.on_click(Vector3.ZERO, picked)
 			return
@@ -891,7 +948,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		var pr: Vector3 = hit_r.position
 		pr.y = _terrain.sample_height(pr)
-		_roads_node.on_click(pr, Vector2i(-1, -1))
+		_roads_node.on_click(pr, Vector3i(-1, -1, -1))
 		return
 	# Effects / Objects tools: LMB picks a gizmo handle first (so dragging
 	# an arrow doesn't deselect the prop underneath). Falls through to pick
@@ -962,6 +1019,13 @@ func _on_category_picked(category: String) -> void:
 
 func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
+	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE
+	_radius_widget.visible = is_brush_tool
+	_space_toggle.visible = tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS
+	if _roads_panel != null:
+		_roads_panel.visible = (tool_id == TOOL_E_ROADS)
+		if tool_id == TOOL_E_ROADS:
+			_refresh_roads_panel()
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
 	_objects_panel.visible = (tool_id == TOOL_O_OBJECTS)
 	_item_tables_panel.visible = (tool_id == TOOL_S_ITEMS)
