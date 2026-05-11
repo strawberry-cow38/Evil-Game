@@ -197,12 +197,20 @@ func on_click(world_pos: Vector3, picked: Vector3i) -> void:
 		_roads.append({"id": _new_id(), "surface": DEFAULT_SURFACE, "decals": [], "nodes": []})
 		_selected_road = _roads.size() - 1
 	var nodes: Array = _roads[_selected_road]["nodes"]
+	# Inherit width from the chain end so extending a wide road past its
+	# tip doesn't reset back to DEFAULT_WIDTH. The end we're extending from
+	# depends on which node is currently selected (or last node if none).
+	var inherit_width: float = DEFAULT_WIDTH
+	if not nodes.is_empty():
+		var src_idx: int = _selected_node if _selected_node >= 0 else nodes.size() - 1
+		src_idx = clamp(src_idx, 0, nodes.size() - 1)
+		inherit_width = float(nodes[src_idx].get("width", DEFAULT_WIDTH))
 	nodes.append({
 		"pos": pos,
 		"in_tangent": Vector3.ZERO,
 		"out_tangent": Vector3.ZERO,
 		"ignore_terrain": false,
-		"width": DEFAULT_WIDTH,
+		"width": inherit_width,
 	})
 	_selected_node = nodes.size() - 1
 	_selected_kind = KIND_NODE
@@ -447,8 +455,8 @@ func pick_node(ray_origin: Vector3, ray_dir: Vector3) -> Vector3i:
 			if t > 0.0 and t < best_t:
 				best_t = t
 				best = Vector3i(ri, ni, KIND_NODE)
-			var hi: Vector3 = c + _effective_tangent(n, KIND_IN)
-			var ho: Vector3 = c + _effective_tangent(n, KIND_OUT)
+			var hi: Vector3 = c + _effective_tangent_at(nodes, ni, KIND_IN)
+			var ho: Vector3 = c + _effective_tangent_at(nodes, ni, KIND_OUT)
 			var ti: float = _ray_sphere(ray_origin, ray_dir, hi, SUB_RADIUS * 1.6)
 			if ti > 0.0 and ti < best_t:
 				best_t = ti
@@ -528,7 +536,7 @@ func _extend_past_endpoint(road_i: int, node_i: int, kind: int) -> void:
 	var nodes: Array = _roads[road_i]["nodes"]
 	var n: Dictionary = nodes[node_i]
 	var here: Vector3 = n.get("pos", Vector3.ZERO)
-	var offset: Vector3 = _effective_tangent(n, kind)
+	var offset: Vector3 = _effective_tangent_at(nodes, node_i, kind)
 	var new_pos: Vector3 = _snap_to_terrain(here + offset, false)
 	var new_node: Dictionary = {
 		"pos": new_pos,
@@ -569,11 +577,46 @@ func _seed_tangent_if_zero() -> void:
 	n[key] = dir.normalized() * DEFAULT_TANGENT_LEN
 	nodes[_selected_node] = n
 
+func _effective_tangent_at(nodes: Array, ni: int, kind: int) -> Vector3:
+	# Tangent used for visuals + handle-picking. If the stored tangent is
+	# zero we still expose the handle slightly off the node so a future
+	# click can grab it. Fallback direction is derived from chord-to-
+	# neighbours so the in-handle always sits along the road behind the
+	# node and the out-handle ahead of it — independent of which way the
+	# road runs in world space.
+	var n: Dictionary = nodes[ni]
+	var key: String = "in_tangent" if kind == KIND_IN else "out_tangent"
+	var t: Vector3 = n.get(key, Vector3.ZERO)
+	if t.length_squared() > 0.0001:
+		return t
+	var here: Vector3 = n.get("pos", Vector3.ZERO)
+	var dir := Vector3.ZERO
+	if kind == KIND_IN:
+		if ni > 0:
+			dir = nodes[ni - 1].get("pos", here) - here
+		elif ni < nodes.size() - 1:
+			# First node with no prev: project the in-handle BACKWARD past
+			# the start by mirroring the chord to the next node.
+			dir = here - nodes[ni + 1].get("pos", here)
+		else:
+			dir = Vector3.LEFT
+	else:
+		if ni < nodes.size() - 1:
+			dir = nodes[ni + 1].get("pos", here) - here
+		elif ni > 0:
+			# Last node with no next: project FORWARD past the end by
+			# mirroring the chord from the previous node.
+			dir = here - nodes[ni - 1].get("pos", here)
+		else:
+			dir = Vector3.RIGHT
+	dir.y = 0.0
+	if dir.length_squared() < 0.0001:
+		dir = Vector3.RIGHT if kind == KIND_OUT else Vector3.LEFT
+	return dir.normalized() * (DEFAULT_TANGENT_LEN * 0.5)
+
 func _effective_tangent(n: Dictionary, kind: int) -> Vector3:
-	# Tangent used for visuals + handle-picking. If stored is zero we draw
-	# nothing in the polyline (straight line) but still expose the handle
-	# slightly off the node so a future click can grab it. Returning ZERO
-	# here would stack the handle on top of the node sphere.
+	# Legacy single-node form kept for sites that don't have an index handy.
+	# Falls back to a world-axis direction; prefer _effective_tangent_at.
 	var key: String = "in_tangent" if kind == KIND_IN else "out_tangent"
 	var t: Vector3 = n.get(key, Vector3.ZERO)
 	if t.length_squared() > 0.0001:
@@ -634,8 +677,8 @@ func _rebuild_visuals() -> void:
 			_spawn_sphere(_node_mesh, p, _node_mat_selected if is_node_sel else _node_mat_normal)
 			# Handles render for every road so a stale selection doesn't hide
 			# the click targets that insert new nodes / drag tangents.
-			var in_off: Vector3 = _effective_tangent(n, KIND_IN)
-			var out_off: Vector3 = _effective_tangent(n, KIND_OUT)
+			var in_off: Vector3 = _effective_tangent_at(nodes, ni, KIND_IN)
+			var out_off: Vector3 = _effective_tangent_at(nodes, ni, KIND_OUT)
 			var hi: Vector3 = p + in_off
 			var ho: Vector3 = p + out_off
 			var is_in_sel: bool = (road_is_selected and ni == _selected_node and _selected_kind == KIND_IN)
