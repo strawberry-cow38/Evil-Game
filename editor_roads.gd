@@ -181,22 +181,27 @@ func clear_all() -> void:
 # --- Input-driven actions (called by editor.gd) ----------------------------
 
 # Click on terrain at world_pos. If a sphere (node or handle) was hit,
-# pick.x >= 0 and the click selects it. Otherwise appends a new node to
-# the selected road, or starts a new road if none selected.
+# pick.x >= 0 and the click selects it.
+#
+# Subhandle interaction: clicking a handle SELECTS it (highlights). The
+# next terrain click while a handle is selected then places a new node
+# along the road line — extending past the endpoint for the off-end
+# handle of an end node, or splitting the adjacent segment otherwise.
+# E starts cursor-follow drag on the selected handle.
 func on_click(world_pos: Vector3, picked: Vector3i) -> void:
 	if picked.x >= 0:
-		if picked.z == KIND_NODE:
-			_selected_road = picked.x
-			_selected_node = picked.y
-			_selected_kind = KIND_NODE
-			_grab_active = false
-			_rebuild_visuals()
-			road_state_changed.emit()
-			return
-		# Handle click → insert a new node at the handle's world position,
-		# splitting the segment to that neighbour. Handle picking for drag
-		# happens via hover + E instead.
-		_insert_at_handle(picked.x, picked.y, picked.z)
+		_selected_road = picked.x
+		_selected_node = picked.y
+		_selected_kind = picked.z
+		_grab_active = false
+		_rebuild_visuals()
+		road_state_changed.emit()
+		return
+	# Empty-terrain click with a subhandle selected → place a new node
+	# along the road via that handle's role (extend past endpoint or split
+	# the adjacent segment, landing the new node at the click location).
+	if _selected_road >= 0 and _selected_node >= 0 and _selected_kind != KIND_NODE:
+		_place_via_selected_handle(world_pos)
 		return
 	var pos := _snap_to_terrain(world_pos, false)
 	if _selected_road < 0:
@@ -475,85 +480,29 @@ func pick_node(ray_origin: Vector3, ray_dir: Vector3) -> Vector3i:
 
 # --- Internals -------------------------------------------------------------
 
-func _insert_at_handle(road_i: int, node_i: int, kind: int) -> void:
-	# Splits the bezier segment on the handle's side via de Casteljau at
-	# t=0.5. The resulting two segments together reproduce the original
-	# curve exactly, so the inserted node lands ON the curve and the road
-	# shape stays continuous. The new node's tangents inherit the split
-	# control points so the curve doesn't visually change until the user
-	# bends them.
-	#
-	# Edge case: clicking the in-handle of the first node (or out-handle
-	# of the last) has no segment to split — we fall back to extending
-	# the road past that endpoint at the handle's world position.
+func _place_via_selected_handle(world_pos: Vector3) -> void:
+	# With a subhandle currently selected, an empty-terrain click inserts a
+	# new node at the click location and threads it into the chain on the
+	# handle's side: in-handle inserts BEFORE the selected node, out-handle
+	# inserts AFTER. Endpoint extends fall out of this rule for free — the
+	# in-handle of node 0 inserts at index 0 (prepend), the out-handle of
+	# the last node inserts at size (append). Tangents stay zero so the
+	# curve doesn't develop a kink until the user grabs a handle.
+	var road_i: int = _selected_road
+	var node_i: int = _selected_node
+	var kind: int = _selected_kind
 	var nodes: Array = _roads[road_i]["nodes"]
-	var seg_start_idx: int
-	if kind == KIND_OUT:
-		seg_start_idx = node_i
-	else:
-		seg_start_idx = node_i - 1
-	if seg_start_idx < 0 or seg_start_idx + 1 >= nodes.size():
-		_extend_past_endpoint(road_i, node_i, kind)
-		return
-	var a: Dictionary = nodes[seg_start_idx]
-	var b: Dictionary = nodes[seg_start_idx + 1]
-	var a_pos: Vector3 = a.get("pos", Vector3.ZERO)
-	var b_pos: Vector3 = b.get("pos", Vector3.ZERO)
-	var a_out: Vector3 = a.get("out_tangent", Vector3.ZERO)
-	var b_in: Vector3 = b.get("in_tangent", Vector3.ZERO)
-	var p0: Vector3 = a_pos
-	var p1: Vector3 = a_pos + a_out
-	var p2: Vector3 = b_pos + b_in
-	var p3: Vector3 = b_pos
-	var t: float = 0.5
-	var sa: Vector3 = p0.lerp(p1, t)
-	var sb: Vector3 = p1.lerp(p2, t)
-	var sc: Vector3 = p2.lerp(p3, t)
-	var sd: Vector3 = sa.lerp(sb, t)
-	var se: Vector3 = sb.lerp(sc, t)
-	var sf: Vector3 = sd.lerp(se, t)
-	# Update outer nodes' tangents to the split control points.
-	a["out_tangent"] = sa - p0
-	b["in_tangent"] = sc - p3
-	nodes[seg_start_idx] = a
-	nodes[seg_start_idx + 1] = b
-	var new_pos: Vector3 = _snap_to_terrain(sf, false)
-	var new_node: Dictionary = {
-		"pos": new_pos,
-		"in_tangent": sd - sf,
-		"out_tangent": se - sf,
-		"ignore_terrain": false,
-		"width": lerp(float(a.get("width", DEFAULT_WIDTH)), float(b.get("width", DEFAULT_WIDTH)), t),
-	}
-	var insert_at: int = seg_start_idx + 1
-	nodes.insert(insert_at, new_node)
-	_selected_road = road_i
-	_selected_node = insert_at
-	_selected_kind = KIND_NODE
-	_grab_active = false
-	_rebuild_visuals()
-	road_state_changed.emit()
-
-func _extend_past_endpoint(road_i: int, node_i: int, kind: int) -> void:
-	# Clicked in-handle of first node, or out-handle of last node. There's
-	# no segment to split, so we extend the road past that end. New node
-	# lands at the clicked handle's effective world position with zero
-	# tangents.
-	var nodes: Array = _roads[road_i]["nodes"]
-	var n: Dictionary = nodes[node_i]
-	var here: Vector3 = n.get("pos", Vector3.ZERO)
-	var offset: Vector3 = _effective_tangent_at(nodes, node_i, kind)
-	var new_pos: Vector3 = _snap_to_terrain(here + offset, false)
+	var src: Dictionary = nodes[node_i]
+	var new_pos: Vector3 = _snap_to_terrain(world_pos, false)
 	var new_node: Dictionary = {
 		"pos": new_pos,
 		"in_tangent": Vector3.ZERO,
 		"out_tangent": Vector3.ZERO,
 		"ignore_terrain": false,
-		"width": float(n.get("width", DEFAULT_WIDTH)),
+		"width": float(src.get("width", DEFAULT_WIDTH)),
 	}
-	var insert_at: int = 0 if kind == KIND_IN else nodes.size()
+	var insert_at: int = node_i if kind == KIND_IN else node_i + 1
 	nodes.insert(insert_at, new_node)
-	_selected_road = road_i
 	_selected_node = insert_at
 	_selected_kind = KIND_NODE
 	_grab_active = false

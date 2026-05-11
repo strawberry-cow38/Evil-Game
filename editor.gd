@@ -862,10 +862,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if not (event is InputEventMouseButton):
 		return
-	# Roads tool: RMB deselects the current road so the next LMB starts a
-	# fresh chain instead of appending to the previously-selected one.
-	if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		if _active_tool == TOOL_E_ROADS and not _is_over_ui() and not _camera.is_looking():
+	# Roads tool: a quick RMB tap (press+release with no significant motion)
+	# deselects the current road. A held RMB drag is camera look — handled
+	# by editor_camera. We sample the tap state on RMB release.
+	if event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
+		if _active_tool == TOOL_E_ROADS and not _is_over_ui() and _camera.consume_tap():
 			_roads_node.deselect()
 			return
 	if event.button_index != MOUSE_BUTTON_LEFT:
