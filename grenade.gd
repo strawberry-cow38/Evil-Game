@@ -37,6 +37,7 @@ func _ready() -> void:
 	mesh.radial_segments = 10
 	mesh.rings = 5
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.albedo_color = Color(0.45, 0.35, 0.10)
 	mat.metallic = 0.6
 	mat.roughness = 0.5
@@ -84,6 +85,7 @@ func _explode(world_pos: Vector3, normal: Vector3) -> void:
 	pmesh.radial_segments = 6
 	pmesh.rings = 3
 	var pmat := StandardMaterial3D.new()
+	pmat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	pmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	pmat.albedo_color = Color(1.0, 0.55, 0.10)
 	pmat.disable_receive_shadows = true

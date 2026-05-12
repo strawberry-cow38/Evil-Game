@@ -30,6 +30,7 @@ func _build_visual() -> void:
 	cap.height = CORPSE_SIZE.z * 0.8
 	body_mi.mesh = cap
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.albedo_color = corpse_color
 	mat.roughness = 0.85
 	body_mi.material_override = mat
@@ -44,6 +45,7 @@ func _build_visual() -> void:
 	sph.height = 0.36
 	head_mi.mesh = sph
 	var head_mat := StandardMaterial3D.new()
+	head_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	head_mat.albedo_color = corpse_color.lerp(Color(0.95, 0.7, 0.4, 1), 0.5)
 	head_mat.roughness = 0.85
 	head_mi.material_override = head_mat

@@ -27,6 +27,7 @@ func build(terrain: Node3D, roads: Array) -> void:
 	for sid in SURFACES.keys():
 		var spec: Dictionary = SURFACES[sid]
 		var m := StandardMaterial3D.new()
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 		m.albedo_color = spec.get("color", Color(0.12, 0.12, 0.13))
 		m.roughness = float(spec.get("roughness", 0.9))
 		m.metallic = 0.0
@@ -233,6 +234,7 @@ func _spawn_decal_strip(terrain: Node3D, a: Dictionary, b: Dictionary, decal: Di
 	var am := ArrayMesh.new()
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	var dm := StandardMaterial3D.new()
+	dm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	dm.albedo_color = col
 	if col.a < 1.0:

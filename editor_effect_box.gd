@@ -25,6 +25,7 @@ func _ready() -> void:
 	if prop_id == "":
 		prop_id = "pr_%d_%d" % [Time.get_ticks_usec(), randi()]
 	_material = StandardMaterial3D.new()
+	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_material.albedo_color = COLOR_NORMAL
 	_material.no_depth_test = true

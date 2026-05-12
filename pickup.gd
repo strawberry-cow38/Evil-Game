@@ -28,6 +28,7 @@ func _ready() -> void:
 	mesh.radial_segments = 16
 	mesh.rings = 8
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.albedo_color = color
 	mat.roughness = 0.5
 	mat.metallic = 0.0

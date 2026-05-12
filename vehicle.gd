@@ -272,6 +272,7 @@ func _build_body_and_visuals() -> void:
 	bm.size = body_size
 	body_mesh.mesh = bm
 	var body_mat := StandardMaterial3D.new()
+	body_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	body_mat.albedo_color = body_color
 	body_mat.roughness = 0.4
 	body_mat.metallic = 0.6
@@ -287,6 +288,7 @@ func _build_body_and_visuals() -> void:
 	cm.size = cabin_size
 	cabin.mesh = cm
 	var cabin_mat := StandardMaterial3D.new()
+	cabin_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	cabin_mat.albedo_color = cabin_color
 	cabin_mat.metallic = 0.2
 	cabin_mat.roughness = 0.35
@@ -297,6 +299,7 @@ func _build_body_and_visuals() -> void:
 	# angle. Smaller/red on the bike so it doesn't dwarf the body.
 	var arrow_color: Color = cfg.get("arrow_color", Color(1.0, 0.95, 0.1))
 	var arrow_mat := StandardMaterial3D.new()
+	arrow_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	arrow_mat.albedo_color = arrow_color
 	arrow_mat.emission_enabled = true
 	arrow_mat.emission = arrow_color
@@ -364,6 +367,7 @@ func _build_wheels() -> void:
 		wm.mesh = wmesh
 		wm.rotation = Vector3(0, 0, PI / 2.0)
 		var wmat := StandardMaterial3D.new()
+		wmat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 		wmat.albedo_color = Color(0.08, 0.08, 0.08)
 		wmat.roughness = 0.95
 		wm.material_override = wmat

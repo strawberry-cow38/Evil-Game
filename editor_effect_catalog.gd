@@ -22,6 +22,7 @@ static func _build_demo_cube() -> Node3D:
 	bm.size = Vector3(1.0, 1.0, 1.0)
 	mi.mesh = bm
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.albedo_color = Color(0.8, 0.45, 0.95, 1.0)
 	mat.roughness = 0.55
 	mi.material_override = mat

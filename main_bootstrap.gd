@@ -338,6 +338,7 @@ func _build_actor(actor_id: String, preset: Dictionary) -> Node3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = cap_mesh
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.albedo_color = preset.get("color", Color(0.85, 0.55, 0.25, 1))
 	mat.roughness = 0.7
 	mi.material_override = mat
@@ -358,6 +359,7 @@ func _build_actor(actor_id: String, preset: Dictionary) -> Node3D:
 	var head_mi := MeshInstance3D.new()
 	head_mi.mesh = head_mesh
 	var head_mat := StandardMaterial3D.new()
+	head_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	head_mat.albedo_color = Color(0.95, 0.7, 0.4, 1)
 	head_mat.roughness = 0.7
 	head_mi.material_override = head_mat

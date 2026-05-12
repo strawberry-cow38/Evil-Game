@@ -71,6 +71,7 @@ var _mat: StandardMaterial3D
 
 func _ready() -> void:
 	_mat = StandardMaterial3D.new()
+	_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat.no_depth_test = true
 	_mat.vertex_color_use_as_albedo = true

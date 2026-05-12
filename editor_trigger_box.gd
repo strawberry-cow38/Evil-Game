@@ -41,6 +41,7 @@ func _ready() -> void:
 	if trigger_id == "":
 		trigger_id = "tr_%d_%d" % [Time.get_ticks_usec(), randi()]
 	_mat = StandardMaterial3D.new()
+	_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -56,6 +57,7 @@ func _ready() -> void:
 	_mi.position = Vector3(0, _size.y * 0.5, 0)
 	add_child(_mi)
 	_wire_mat = StandardMaterial3D.new()
+	_wire_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_wire_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_wire_mat.albedo_color = COLOR_WIRE_NORMAL
 	_wire_mat.no_depth_test = true

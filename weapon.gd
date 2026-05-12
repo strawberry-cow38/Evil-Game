@@ -2021,6 +2021,7 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 	mi.mesh = mesh
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color(1.0, 0.85, 0.4, 1.0)
 	mat.disable_receive_shadows = true
@@ -2084,6 +2085,7 @@ func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, c
 	var quad := QuadMesh.new()
 	quad.size = Vector2(BULLET_HOLE_SIZE, BULLET_HOLE_SIZE)
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -2137,6 +2139,7 @@ func _play_impact_sound(world_pos: Vector3, material: String) -> void:
 
 func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: String) -> void:
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.disable_receive_shadows = true
 	match material:
@@ -2192,6 +2195,7 @@ func _setup_laser() -> void:
 	dot_mesh.radial_segments = 12
 	dot_mesh.rings = 6
 	var dot_mat := StandardMaterial3D.new()
+	dot_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	dot_mat.albedo_color = Color(1.0, 0.05, 0.05, 1.0)
 	dot_mat.emission_enabled = true
@@ -2214,6 +2218,7 @@ func _setup_laser() -> void:
 	# each frame in _update_laser since endpoints move.
 	_laser_beam_im = ImmediateMesh.new()
 	_laser_beam_mat = StandardMaterial3D.new()
+	_laser_beam_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_laser_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_laser_beam_mat.albedo_color = Color(1.0, 0.0, 0.0, 0.55)
 	_laser_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

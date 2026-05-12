@@ -40,6 +40,7 @@ func _build_visual() -> void:
 	bm.size = size
 	mi.mesh = bm
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.albedo_color = ALBEDO
 	mat.roughness = 0.85
 	mi.material_override = mat
@@ -53,6 +54,7 @@ func _build_visual() -> void:
 		bbm.size = Vector3(size.x * 1.01, size.y * 0.08, 0.04)
 		band.mesh = bbm
 		var bmat := StandardMaterial3D.new()
+		bmat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 		bmat.albedo_color = BAND_ALBEDO
 		bmat.roughness = 0.7
 		band.material_override = bmat

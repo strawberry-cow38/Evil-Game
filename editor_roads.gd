@@ -126,6 +126,7 @@ func setup(terrain: Node3D) -> void:
 	for sid in SURFACES.keys():
 		var spec: Dictionary = SURFACES[sid]
 		var m := StandardMaterial3D.new()
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 		m.albedo_color = spec.get("color", ASPHALT_COLOR)
 		m.roughness = float(spec.get("roughness", 0.9))
 		m.metallic = 0.0
@@ -603,6 +604,7 @@ func _new_id() -> String:
 
 func _unshaded(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = c
 	if c.a < 1.0:
@@ -802,6 +804,7 @@ func _spawn_decal_strip(a: Dictionary, b: Dictionary, decal: Dictionary) -> void
 	var am := ArrayMesh.new()
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	var dm := StandardMaterial3D.new()
+	dm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	dm.albedo_color = col
 	if col.a < 1.0:

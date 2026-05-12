@@ -226,6 +226,7 @@ func _ready() -> void:
 	add_child(_spawn_ghost)
 	# Item-spawn ghost: translucent cube tinted to active table color.
 	_item_spawn_ghost_mat = StandardMaterial3D.new()
+	_item_spawn_ghost_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_item_spawn_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_item_spawn_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_item_spawn_ghost_mat.albedo_color = Color(1, 1, 1, 0.45)
@@ -239,6 +240,7 @@ func _ready() -> void:
 	# Actor-spawn ghost: same idea as the item-spawn ghost but taller so
 	# the user can tell them apart at a glance.
 	_actor_spawn_ghost_mat = StandardMaterial3D.new()
+	_actor_spawn_ghost_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_actor_spawn_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_actor_spawn_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_actor_spawn_ghost_mat.albedo_color = Color(1, 1, 1, 0.45)
@@ -1367,6 +1369,7 @@ func _build_marker_node(material: StandardMaterial3D) -> Node3D:
 func _get_marker_material() -> StandardMaterial3D:
 	if _spawn_marker_mat == null:
 		_spawn_marker_mat = StandardMaterial3D.new()
+		_spawn_marker_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 		_spawn_marker_mat.albedo_color = Color(0.25, 0.95, 1.0, 1.0)
 		_spawn_marker_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	return _spawn_marker_mat
@@ -1374,6 +1377,7 @@ func _get_marker_material() -> StandardMaterial3D:
 func _get_ghost_material() -> StandardMaterial3D:
 	if _spawn_ghost_mat == null:
 		_spawn_ghost_mat = StandardMaterial3D.new()
+		_spawn_ghost_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 		_spawn_ghost_mat.albedo_color = Color(0.25, 0.95, 1.0, 0.45)
 		_spawn_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_spawn_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA

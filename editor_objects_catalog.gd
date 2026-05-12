@@ -48,6 +48,7 @@ static func _build_demo_crate() -> Node3D:
 	bm.size = Vector3(1.4, 1.2, 1.4)
 	mi.mesh = bm
 	var mat := StandardMaterial3D.new()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.albedo_color = Color(0.55, 0.38, 0.22, 1.0)
 	mat.roughness = 0.85
 	mi.material_override = mat

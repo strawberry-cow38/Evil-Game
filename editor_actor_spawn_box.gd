@@ -21,6 +21,7 @@ func _ready() -> void:
 	if prop_id == "":
 		prop_id = "pr_%d_%d" % [Time.get_ticks_usec(), randi()]
 	_mat = StandardMaterial3D.new()
+	_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat.albedo_color = color
 	var bm := BoxMesh.new()
@@ -31,6 +32,7 @@ func _ready() -> void:
 	_mi.position = Vector3(0, SIZE.y * 0.5, 0)
 	add_child(_mi)
 	_wire_mat = StandardMaterial3D.new()
+	_wire_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_wire_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_wire_mat.albedo_color = SELECTED_TINT
 	_wire_mat.no_depth_test = true

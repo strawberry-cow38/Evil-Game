@@ -21,6 +21,7 @@ var _flat_y: float = 0.0
 
 func _ready() -> void:
 	_material = StandardMaterial3D.new()
+	_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_material.albedo_color = color
 	_material.no_depth_test = true
