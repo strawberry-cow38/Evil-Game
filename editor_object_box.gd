@@ -14,6 +14,9 @@ const PAD := 0.0  # strict fit — wireframe sits exactly on the content's AABB
 const FALLBACK_SIZE := Vector3(2.0, 2.0, 2.0)
 
 var object_id: String = ""
+# Stable per-placement id. Auto-generated at _ready if not pre-set by
+# load/paste. Used by the events/triggers system to target this prop.
+var prop_id: String = ""
 # Container objects (crates) read this at play-mode bootstrap to roll
 # their starting loot. Empty string = no table = empty crate.
 var loot_table_id: String = ""
@@ -36,6 +39,8 @@ var _material: StandardMaterial3D
 var _selected: bool = false
 
 func _ready() -> void:
+	if prop_id == "":
+		prop_id = "pr_%d_%d" % [Time.get_ticks_usec(), randi()]
 	_material = StandardMaterial3D.new()
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_material.albedo_color = COLOR_NORMAL

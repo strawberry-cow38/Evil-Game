@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://dev_trigger_ss.gd" id="1"]
+
+[node name="DevTriggerSS" type="Node"]
+script = ExtResource("1")

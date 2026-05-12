@@ -10,6 +10,7 @@ const SELECTED_TINT := Color(1.0, 0.95, 0.35, 1.0)
 
 var table_id: String = ""
 var color: Color = Color(1, 1, 1, 1)
+var prop_id: String = ""
 
 var _mi: MeshInstance3D
 var _wire: MeshInstance3D
@@ -18,6 +19,8 @@ var _wire_mat: StandardMaterial3D
 var _selected: bool = false
 
 func _ready() -> void:
+	if prop_id == "":
+		prop_id = "pr_%d_%d" % [Time.get_ticks_usec(), randi()]
 	_mat = StandardMaterial3D.new()
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_mat.albedo_color = color

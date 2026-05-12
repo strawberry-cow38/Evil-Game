@@ -9,11 +9,16 @@ extends PanelContainer
 signal no_collide_changed(value: bool)
 signal destructible_changed(value: bool)
 signal hp_changed(value: int)
+# Emitted when the user picks one of the named-events from the dropdown.
+# event_id "" means the "(none)" entry — useful for jumping focus to the
+# global events panel from here.
+signal event_focused(event_id: String)
 
 var _title: Label
 var _no_collide_chk: CheckBox
 var _destructible_chk: CheckBox
 var _hp_spin: SpinBox
+var _events_btn: OptionButton
 var _suppress: bool = false
 
 func _ready() -> void:
@@ -56,12 +61,38 @@ func _ready() -> void:
 			hp_changed.emit(int(v)))
 	hp_row.add_child(_hp_spin)
 	vb.add_child(hp_row)
+	var ev_row := HBoxContainer.new()
+	var ev_lbl := Label.new()
+	ev_lbl.text = "Events"
+	ev_lbl.custom_minimum_size = Vector2(80, 0)
+	ev_row.add_child(ev_lbl)
+	_events_btn = OptionButton.new()
+	_events_btn.custom_minimum_size = Vector2(160, 0)
+	_events_btn.item_selected.connect(func(idx: int):
+		if _suppress:
+			return
+		event_focused.emit(String(_events_btn.get_item_metadata(idx))))
+	ev_row.add_child(_events_btn)
+	vb.add_child(ev_row)
 
-func bind(label_text: String, no_collide: bool, destructible: bool, hp: int) -> void:
+func bind(label_text: String, no_collide: bool, destructible: bool, hp: int, events: Array = []) -> void:
 	_suppress = true
 	_title.text = label_text
 	_no_collide_chk.button_pressed = no_collide
 	_destructible_chk.button_pressed = destructible
 	_hp_spin.value = hp
 	_hp_spin.editable = destructible
+	_events_btn.clear()
+	if events.is_empty():
+		_events_btn.add_item("(no events target this prop)")
+		_events_btn.set_item_metadata(0, "")
+		_events_btn.disabled = true
+	else:
+		_events_btn.disabled = false
+		_events_btn.add_item("(%d event%s)" % [events.size(), "s" if events.size() != 1 else ""])
+		_events_btn.set_item_metadata(0, "")
+		for ev in events:
+			_events_btn.add_item(String(ev.get("name", "?")))
+			_events_btn.set_item_metadata(_events_btn.item_count - 1, String(ev.get("id", "")))
+		_events_btn.select(0)
 	_suppress = false

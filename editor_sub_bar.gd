@@ -19,6 +19,7 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 	"environment": [
 		{"id": "e_lighting", "label": "Lighting"},
 		{"id": "e_roads",    "label": "Roads"},
+		{"id": "e_paint",    "label": "Paint"},
 	],
 	"spawns": [
 		{"id": "s_player_place",  "label": "Place Player Spawn"},
@@ -32,7 +33,8 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 		{"id": "o_objects", "label": "Objects"},
 	],
 	"level": [
-		{"id": "l_effects", "label": "Effects"},
+		{"id": "l_effects",  "label": "Effects"},
+		{"id": "l_triggers", "label": "Triggers"},
 	],
 }
 

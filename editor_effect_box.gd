@@ -14,6 +14,7 @@ const PAD := 0.0  # strict fit — wireframe sits exactly on the content's AABB
 const FALLBACK_SIZE := Vector3(2.0, 2.0, 2.0)  # used if catalog has no mesh
 
 var effect_id: String = ""
+var prop_id: String = ""
 var _local_aabb: AABB = AABB(-FALLBACK_SIZE * 0.5, FALLBACK_SIZE)
 
 var _mesh_instance: MeshInstance3D
@@ -21,6 +22,8 @@ var _material: StandardMaterial3D
 var _selected: bool = false
 
 func _ready() -> void:
+	if prop_id == "":
+		prop_id = "pr_%d_%d" % [Time.get_ticks_usec(), randi()]
 	_material = StandardMaterial3D.new()
 	_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_material.albedo_color = COLOR_NORMAL

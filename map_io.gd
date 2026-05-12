@@ -8,7 +8,7 @@ extends Node
 # saves can be rejected (or migrated) instead of silently misloading.
 
 const SAVE_DIR := "user://maps"
-const SCHEMA_VERSION := 2
+const SCHEMA_VERSION := 4
 
 func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SAVE_DIR))
@@ -90,6 +90,17 @@ func _snapshot_state() -> Dictionary:
 	heights_arr.resize(MapState.heights.size())
 	for i in range(MapState.heights.size()):
 		heights_arr[i] = MapState.heights[i]
+	# Paint serialised as flat float quads (r,g,b,a per vertex) so the JSON
+	# stays plain numbers; Godot's PackedColorArray can't survive JSON.stringify
+	# without a per-element helper anyway.
+	var paint_arr: Array = []
+	paint_arr.resize(MapState.terrain_paint.size() * 4)
+	for i in range(MapState.terrain_paint.size()):
+		var c: Color = MapState.terrain_paint[i]
+		paint_arr[i * 4    ] = c.r
+		paint_arr[i * 4 + 1] = c.g
+		paint_arr[i * 4 + 2] = c.b
+		paint_arr[i * 4 + 3] = c.a
 	var spawns: Array = []
 	for sp in MapState.player_spawns:
 		spawns.append(_v3_to_dict(sp))
@@ -150,9 +161,19 @@ func _snapshot_state() -> Dictionary:
 				"gap_length": float(d.get("gap_length", 0.0)),
 			})
 		roads_out.append(rd)
+	var triggers_out: Array = []
+	for tr in MapState.placed_triggers:
+		var tdup: Dictionary = tr.duplicate(true)
+		if tdup.has("xform"):
+			tdup["xform"] = _xform_to_dict(tdup["xform"])
+		triggers_out.append(tdup)
+	var events_out: Array = []
+	for ev in MapState.map_events:
+		events_out.append(ev.duplicate(true))
 	return {
 		"schema": SCHEMA_VERSION,
 		"heights": heights_arr,
+		"terrain_paint": paint_arr,
 		"grid_w": MapState.grid_w,
 		"grid_h": MapState.grid_h,
 		"player_spawns": spawns,
@@ -163,6 +184,8 @@ func _snapshot_state() -> Dictionary:
 		"actor_spawn_points": aspawn_pts,
 		"lighting": lighting,
 		"roads": roads_out,
+		"placed_triggers": triggers_out,
+		"map_events": events_out,
 	}
 
 func _apply_state(data: Dictionary) -> void:
@@ -173,6 +196,18 @@ func _apply_state(data: Dictionary) -> void:
 	for i in range(heights_arr.size()):
 		packed[i] = float(heights_arr[i])
 	MapState.heights = packed
+	var paint_arr: Array = data.get("terrain_paint", [])
+	var paint_packed: PackedColorArray = PackedColorArray()
+	var paint_count: int = paint_arr.size() / 4
+	paint_packed.resize(paint_count)
+	for i in range(paint_count):
+		paint_packed[i] = Color(
+			float(paint_arr[i * 4    ]),
+			float(paint_arr[i * 4 + 1]),
+			float(paint_arr[i * 4 + 2]),
+			float(paint_arr[i * 4 + 3]),
+		)
+	MapState.terrain_paint = paint_packed
 	MapState.grid_w = int(data.get("grid_w", 0))
 	MapState.grid_h = int(data.get("grid_h", 0))
 	for sp in data.get("player_spawns", []):
@@ -232,6 +267,13 @@ func _apply_state(data: Dictionary) -> void:
 				"gap_length": float(d.get("gap_length", 0.0)),
 			})
 		MapState.roads.append(rd)
+	for tr in data.get("placed_triggers", []):
+		var tdup: Dictionary = tr.duplicate(true)
+		if tdup.has("xform"):
+			tdup["xform"] = _dict_to_xform(tdup["xform"])
+		MapState.placed_triggers.append(tdup)
+	for ev in data.get("map_events", []):
+		MapState.map_events.append(ev.duplicate(true))
 
 # --- Type helpers ----------------------------------------------------------
 

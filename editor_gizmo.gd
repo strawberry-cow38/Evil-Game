@@ -26,6 +26,8 @@ const HANDLE_SCALE_Z := "sz"
 const HANDLE_NSCALE_X := "-sx"
 const HANDLE_NSCALE_Y := "-sy"
 const HANDLE_NSCALE_Z := "-sz"
+const HANDLE_SCALE_UNIFORM := "su"
+const UNIFORM_HANDLE_RADIUS := 0.32
 
 const RING_RADIUS := 1.6
 const RING_THICKNESS := 0.18
@@ -144,6 +146,7 @@ func _rebuild() -> void:
 		_scale_handle(im, Vector3.RIGHT, COLOR_X, HANDLE_SCALE_X)
 		_scale_handle(im, Vector3.UP, COLOR_Y, HANDLE_SCALE_Y)
 		_scale_handle(im, Vector3.BACK, COLOR_Z, HANDLE_SCALE_Z)
+		_uniform_scale_handle(im)
 	elif mode == MODE_SCALE_6:
 		_scale_handle(im, Vector3.RIGHT, COLOR_X, HANDLE_SCALE_X)
 		_scale_handle(im, Vector3.LEFT, COLOR_X, HANDLE_NSCALE_X)
@@ -151,6 +154,7 @@ func _rebuild() -> void:
 		_scale_handle(im, Vector3.DOWN, COLOR_Y, HANDLE_NSCALE_Y)
 		_scale_handle(im, Vector3.BACK, COLOR_Z, HANDLE_SCALE_Z)
 		_scale_handle(im, Vector3.FORWARD, COLOR_Z, HANDLE_NSCALE_Z)
+		_uniform_scale_handle(im)
 	_mesh.mesh = im
 
 func _axis_arrow(im: ImmediateMesh, dir: Vector3, color: Color, handle_id: String) -> void:
@@ -219,6 +223,28 @@ func _scale_handle(im: ImmediateMesh, dir: Vector3, color: Color, handle_id: Str
 		im.surface_add_vertex(corners[e[0]])
 		im.surface_add_vertex(corners[e[1]])
 	im.surface_end()
+
+func _uniform_scale_handle(im: ImmediateMesh) -> void:
+	# Central wireframe sphere drag-handle for uniform 3-axis scaling.
+	var c: Color = COLOR_HOVER if hover_handle == HANDLE_SCALE_UNIFORM else Color(0.9, 0.9, 0.9, 1.0)
+	var r: float = UNIFORM_HANDLE_RADIUS
+	# Three orthogonal great circles — cheap visual cue + readable from any
+	# camera angle.
+	var rings: Array = [
+		[Vector3.RIGHT, Vector3.UP],
+		[Vector3.UP, Vector3.BACK],
+		[Vector3.RIGHT, Vector3.BACK],
+	]
+	for ring in rings:
+		var u: Vector3 = ring[0]
+		var v: Vector3 = ring[1]
+		im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, _mat)
+		im.surface_set_color(c)
+		var segs: int = 24
+		for k in range(segs + 1):
+			var ang: float = (float(k) / float(segs)) * TAU
+			im.surface_add_vertex((u * cos(ang) + v * sin(ang)) * r)
+		im.surface_end()
 
 func _plane_quad(im: ImmediateMesh, a: Vector3, b: Vector3, color: Color, handle_id: String) -> void:
 	# Quad with corner at origin, extending PLANE_SIZE along each of (a, b).
@@ -297,6 +323,13 @@ func pick_handle(from: Vector3, dir: Vector3) -> Dictionary:
 			best_t = t
 			best_handle = name
 			best_axis = ax
+	# Uniform-scale ball at origin — pick if ray passes within sphere radius.
+	if mode == MODE_SCALE or mode == MODE_SCALE_6:
+		var t_u: float = _ray_sphere_t(from, dir, origin, UNIFORM_HANDLE_RADIUS)
+		if t_u >= 0.0 and t_u < best_t:
+			best_t = t_u
+			best_handle = HANDLE_SCALE_UNIFORM
+			best_axis = Vector3.ZERO
 	# Plane drag handles (only in axes-mode).
 	if mode == MODE_TRANSLATE_AXES:
 		var planes: Array = [
@@ -383,6 +416,17 @@ func _ray_segment_dist(ro: Vector3, rd: Vector3, a: Vector3, b: Vector3) -> floa
 	if pa.distance_to(pb) > HIT_RADIUS:
 		return -1.0
 	return tc
+
+func _ray_sphere_t(ro: Vector3, rd: Vector3, c: Vector3, r: float) -> float:
+	var oc: Vector3 = ro - c
+	var b: float = oc.dot(rd)
+	var disc: float = b * b - (oc.dot(oc) - r * r)
+	if disc < 0.0:
+		return -1.0
+	var t: float = -b - sqrt(disc)
+	if t < 0.0:
+		t = -b + sqrt(disc)
+	return t
 
 func _ray_plane_hit(ro: Vector3, rd: Vector3, p: Vector3, n: Vector3) -> Dictionary:
 	var denom: float = rd.dot(n)

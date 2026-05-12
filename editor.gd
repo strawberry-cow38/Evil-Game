@@ -24,14 +24,17 @@ const TOOL_S_ITEMS_REMOVE := "s_items_remove"
 const TOOL_S_ACTORS := "s_actors"
 const TOOL_S_ACTORS_REMOVE := "s_actors_remove"
 const TOOL_L_EFFECTS := "l_effects"
+const TOOL_L_TRIGGERS := "l_triggers"
 const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
 const TOOL_E_ROADS := "e_roads"
+const TOOL_E_PAINT := "e_paint"
 
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
 const ITEM_SPAWN_BOX_SCRIPT := preload("res://editor_item_spawn_box.gd")
 const ACTOR_SPAWN_BOX_SCRIPT := preload("res://editor_actor_spawn_box.gd")
+const TRIGGER_BOX_SCRIPT := preload("res://editor_trigger_box.gd")
 const GIZMO_SCRIPT := preload("res://editor_gizmo.gd")
 const CONTAINER_PANEL_SCRIPT := preload("res://editor_container_panel.gd")
 const LIGHTING_PANEL_SCRIPT := preload("res://editor_lighting_panel.gd")
@@ -39,6 +42,10 @@ const OBJECT_PROPS_PANEL_SCRIPT := preload("res://editor_object_props_panel.gd")
 const PAUSE_MENU_SCRIPT := preload("res://editor_pause_menu.gd")
 const ROADS_SCRIPT := preload("res://editor_roads.gd")
 const ROADS_PANEL_SCRIPT := preload("res://editor_roads_panel.gd")
+const PAINT_PANEL_SCRIPT := preload("res://editor_terrain_paint_panel.gd")
+const SNAP_WIDGET_SCRIPT := preload("res://editor_snap_widget.gd")
+const EVENTS_PANEL_SCRIPT := preload("res://editor_events_panel.gd")
+const TRIGGER_PANEL_SCRIPT := preload("res://editor_trigger_panel.gd")
 const MAIN_MENU_SCENE := "res://main_menu.tscn"
 const OBJECTS_CATALOG := preload("res://editor_objects_catalog.gd")
 const CRATE := preload("res://crate.gd")
@@ -152,12 +159,30 @@ var _use_local_space: bool = false
 # while the Environment → Roads tool is active.
 var _roads_node: Node3D = null
 var _roads_panel: PanelContainer = null
+# Terrain Paint panel — runtime-built same as the roads panel.
+var _paint_panel: PanelContainer = null
+var _paint_material_id: int = 1   # 1 = grass
+var _paint_shape: String = "circle"
+# Snap settings panel — bottom-left, shown while placement tools are active.
+var _snap_widget: PanelContainer = null
+var _rotation_snap_deg: float = 15.0
+# Uniform-scale drag — captured on press, applied each motion frame.
+var _drag_uniform_start_dist: float = 1.0
+# Triggers + events. Triggers piggyback on _placed_props for picking and
+# gizmo binding (they expose set_selected + get_aabb_local). The events
+# panel owns the master list; we mirror to MapState on snapshot.
+var _trigger_panel: PanelContainer = null
+var _events_panel: PanelContainer = null
+var _eyedropper_event_id: String = ""
+var _hover_event_id: String = ""
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	# Restore previously-edited heights if we're coming back from F9 play.
 	if MapState.has_map() and MapState.heights.size() == _terrain.heights.size():
 		_terrain.heights = MapState.heights.duplicate()
+		if MapState.terrain_paint.size() == _terrain.paint.size():
+			_terrain.paint = MapState.terrain_paint.duplicate()
 		_terrain.rebuild()
 	_brush_ring.terrain = _terrain
 	_brush_ring.set_radius(_brush_radius)
@@ -274,6 +299,22 @@ func _ready() -> void:
 	_object_props_panel.no_collide_changed.connect(_on_no_collide_changed)
 	_object_props_panel.destructible_changed.connect(_on_destructible_changed)
 	_object_props_panel.hp_changed.connect(_on_hp_changed)
+	# Snap widget — sits in the bottom-left corner, just above the brush
+	# widget. Visible while a placement tool is active.
+	_snap_widget = PanelContainer.new()
+	_snap_widget.set_script(SNAP_WIDGET_SCRIPT)
+	_snap_widget.anchor_left = 0.0
+	_snap_widget.anchor_right = 0.0
+	_snap_widget.anchor_top = 1.0
+	_snap_widget.anchor_bottom = 1.0
+	_snap_widget.offset_left = 8
+	_snap_widget.offset_right = 240
+	_snap_widget.offset_top = -190
+	_snap_widget.offset_bottom = -100
+	_snap_widget.visible = false
+	$UI.add_child(_snap_widget)
+	_snap_widget.rotation_snap_changed.connect(_on_rotation_snap_changed)
+	_rotation_snap_deg = _snap_widget.get_rotation_snap_deg()
 	# Pause menu — built last so it overlays everything else. Anchored
 	# centre-screen via a CenterContainer wrapper so it sits in the middle
 	# regardless of viewport size.
@@ -320,6 +361,8 @@ func _ready() -> void:
 				box.object_id = id
 			else:
 				continue
+			if entry.has("prop_id") and String(entry.get("prop_id", "")) != "":
+				box.prop_id = String(entry.get("prop_id"))
 			add_child(box)
 			box.global_transform = xform
 			if kind == "object":
@@ -394,6 +437,85 @@ func _ready() -> void:
 		var spec: Dictionary = ROADS_SCRIPT.SURFACES[sid]
 		surf_entries.append({"id": sid, "label": String(spec.get("label", sid))})
 	_roads_panel.populate_surfaces(surf_entries)
+	# Paint panel — runtime-built like the roads panel. Anchored to the
+	# right edge under the sub-bar.
+	_paint_panel = PanelContainer.new()
+	_paint_panel.set_script(PAINT_PANEL_SCRIPT)
+	_paint_panel.anchor_left = 1.0
+	_paint_panel.anchor_right = 1.0
+	_paint_panel.anchor_top = 0.0
+	_paint_panel.anchor_bottom = 0.0
+	_paint_panel.offset_left = -260
+	_paint_panel.offset_right = -16
+	_paint_panel.offset_top = 90
+	_paint_panel.offset_bottom = 330
+	$UI.add_child(_paint_panel)
+	_paint_panel.material_changed.connect(_on_paint_material)
+	_paint_panel.shape_changed.connect(_on_paint_shape)
+	# Events panel (left rail) — global named-events list with eyedropper.
+	_events_panel = PanelContainer.new()
+	_events_panel.set_script(EVENTS_PANEL_SCRIPT)
+	_events_panel.anchor_left = 0.0
+	_events_panel.anchor_right = 0.0
+	_events_panel.anchor_top = 0.0
+	_events_panel.anchor_bottom = 0.0
+	_events_panel.offset_left = 8
+	_events_panel.offset_right = 340
+	_events_panel.offset_top = 90
+	_events_panel.offset_bottom = 540
+	_events_panel.visible = false
+	$UI.add_child(_events_panel)
+	_events_panel.eyedropper_armed.connect(_on_eyedropper_armed)
+	_events_panel.eyedropper_disarmed.connect(_on_eyedropper_disarmed)
+	_events_panel.target_hover.connect(_on_event_hover)
+	_events_panel.target_unhover.connect(_on_event_unhover)
+	_events_panel.events_changed.connect(_on_events_changed)
+	# Trigger panel (right rail) — per-trigger settings.
+	_trigger_panel = PanelContainer.new()
+	_trigger_panel.set_script(TRIGGER_PANEL_SCRIPT)
+	_trigger_panel.anchor_left = 1.0
+	_trigger_panel.anchor_right = 1.0
+	_trigger_panel.anchor_top = 0.0
+	_trigger_panel.anchor_bottom = 0.0
+	_trigger_panel.offset_left = -340
+	_trigger_panel.offset_right = -8
+	_trigger_panel.offset_top = 90
+	_trigger_panel.offset_bottom = 630
+	_trigger_panel.visible = false
+	$UI.add_child(_trigger_panel)
+	_trigger_panel.set_events_source(_events_panel)
+	_trigger_panel.trigger_changed.connect(_on_trigger_changed)
+	# Object props panel gains a Focus-Event hook into the events panel.
+	_object_props_panel.event_focused.connect(_on_object_event_focused)
+	# Hydrate events + triggers from MapState (round-trip from F9 / load).
+	if MapState.map_events.size() > 0:
+		_events_panel.set_events(MapState.map_events)
+	for entry in MapState.placed_triggers:
+		var tb: Node3D = Node3D.new()
+		tb.set_script(TRIGGER_BOX_SCRIPT)
+		tb.prop_id = String(entry.get("prop_id", ""))
+		tb.trigger_id = String(entry.get("trigger_id", ""))
+		tb.conditions = (entry.get("conditions", []) as Array).duplicate(true)
+		tb.logic_op = String(entry.get("logic_op", "and"))
+		tb.fire_event_ids = (entry.get("fire_event_ids", []) as Array).duplicate()
+		tb.delay = float(entry.get("delay", 0.0))
+		tb.inter_event_delay = float(entry.get("inter_event_delay", 0.0))
+		tb.repeat_mode = String(entry.get("repeat_mode", "once"))
+		tb.repeat_count = int(entry.get("repeat_count", 1))
+		tb.repeat_cooldown = float(entry.get("repeat_cooldown", 1.0))
+		add_child(tb)
+		tb.global_transform = entry.get("xform", Transform3D.IDENTITY)
+		_placed_props.append(tb)
+
+func _on_rotation_snap_changed(deg: float) -> void:
+	_rotation_snap_deg = deg
+
+func _on_paint_material(mat_id: int) -> void:
+	_paint_material_id = mat_id
+
+func _on_paint_shape(s: String) -> void:
+	_paint_shape = s
+	_brush_ring.set_shape(s)
 
 func _on_roads_changed() -> void:
 	# Mirror the in-memory road state back to MapState so F9 + saves see
@@ -468,6 +590,10 @@ func _input(event: InputEvent) -> void:
 				var hit2 := _raycast_cursor()
 				if not hit2.is_empty():
 					_spawn_object_at(_armed_object_id, hit2.position)
+			elif _active_tool == TOOL_L_TRIGGERS:
+				var hit3 := _raycast_cursor()
+				if not hit3.is_empty():
+					_spawn_trigger_at(hit3.position)
 	# Q → translate gizmo. Only when an effect is selected and the
 	# camera isn't grabbing the key for fly-down (camera only consumes
 	# Q while MMB is held).
@@ -523,6 +649,7 @@ func _snapshot_to_mapstate() -> void:
 	# so it survives a scene swap (F9 → play, or Main Menu return) and so
 	# MapIO can serialize it to disk for save-to-file.
 	MapState.heights = _terrain.heights.duplicate()
+	MapState.terrain_paint = _terrain.paint.duplicate()
 	MapState.grid_w = _terrain.GRID_W
 	MapState.grid_h = _terrain.GRID_H
 	MapState.placed_props.clear()
@@ -531,6 +658,9 @@ func _snapshot_to_mapstate() -> void:
 			continue
 		var kind: String = ""
 		var id: String = ""
+		if "trigger_id" in box:
+			# Triggers serialise separately — skip the placed_props pass.
+			continue
 		if "effect_id" in box and String(box.effect_id) != "":
 			kind = "effect"
 			id = String(box.effect_id)
@@ -542,6 +672,7 @@ func _snapshot_to_mapstate() -> void:
 		var entry: Dictionary = {
 			"kind": kind,
 			"id": id,
+			"prop_id": String(box.get("prop_id")),
 			"xform": box.global_transform,
 		}
 		# Container objects carry their assigned loot table forward so the
@@ -556,6 +687,28 @@ func _snapshot_to_mapstate() -> void:
 			entry["destructible"] = bool(box.destructible)
 			entry["hp_max"] = int(box.hp_max)
 		MapState.placed_props.append(entry)
+	# Triggers + named events snapshot.
+	MapState.placed_triggers.clear()
+	for box in _placed_props:
+		if not is_instance_valid(box) or not "trigger_id" in box:
+			continue
+		MapState.placed_triggers.append({
+			"prop_id":           String(box.prop_id),
+			"trigger_id":        String(box.trigger_id),
+			"xform":             box.global_transform,
+			"conditions":        (box.conditions as Array).duplicate(true),
+			"logic_op":          String(box.logic_op),
+			"fire_event_ids":    (box.fire_event_ids as Array).duplicate(),
+			"delay":             float(box.delay),
+			"inter_event_delay": float(box.inter_event_delay),
+			"repeat_mode":       String(box.repeat_mode),
+			"repeat_count":      int(box.repeat_count),
+			"repeat_cooldown":   float(box.repeat_cooldown),
+		})
+	MapState.map_events.clear()
+	if _events_panel != null:
+		for ev in _events_panel.events:
+			MapState.map_events.append(ev.duplicate(true))
 	# Snapshot item-spawn tables + placed cubes. Tables are deep-duped so
 	# the play scene never aliases editor state (color edits in a future
 	# F9 session won't retro-affect a baked map).
@@ -607,6 +760,8 @@ func _restore_from_mapstate() -> void:
 	# means a foreign map and we'd rather skip than crash.
 	if MapState.has_map() and MapState.heights.size() == _terrain.heights.size():
 		_terrain.heights = MapState.heights.duplicate()
+		if MapState.terrain_paint.size() == _terrain.paint.size():
+			_terrain.paint = MapState.terrain_paint.duplicate()
 		_terrain.rebuild()
 	# Clear placed visuals.
 	for box in _placed_props:
@@ -646,6 +801,8 @@ func _restore_from_mapstate() -> void:
 			box.object_id = id
 		else:
 			continue
+		if entry.has("prop_id") and String(entry.get("prop_id", "")) != "":
+			box.prop_id = String(entry.get("prop_id"))
 		add_child(box)
 		box.global_transform = xform
 		if kind == "object":
@@ -660,6 +817,25 @@ func _restore_from_mapstate() -> void:
 			if entry.has("hp_max"):
 				box.hp_max = int(entry["hp_max"])
 		_placed_props.append(box)
+	# Triggers + events (round-trip from F9 / load).
+	if _events_panel != null:
+		_events_panel.set_events(MapState.map_events)
+	for tentry in MapState.placed_triggers:
+		var tb: Node3D = Node3D.new()
+		tb.set_script(TRIGGER_BOX_SCRIPT)
+		tb.prop_id = String(tentry.get("prop_id", ""))
+		tb.trigger_id = String(tentry.get("trigger_id", ""))
+		tb.conditions = (tentry.get("conditions", []) as Array).duplicate(true)
+		tb.logic_op = String(tentry.get("logic_op", "and"))
+		tb.fire_event_ids = (tentry.get("fire_event_ids", []) as Array).duplicate()
+		tb.delay = float(tentry.get("delay", 0.0))
+		tb.inter_event_delay = float(tentry.get("inter_event_delay", 0.0))
+		tb.repeat_mode = String(tentry.get("repeat_mode", "once"))
+		tb.repeat_count = int(tentry.get("repeat_count", 1))
+		tb.repeat_cooldown = float(tentry.get("repeat_cooldown", 1.0))
+		add_child(tb)
+		tb.global_transform = tentry.get("xform", Transform3D.IDENTITY)
+		_placed_props.append(tb)
 	# Item-spawn cubes — colour comes from the matching table.
 	var color_by_id: Dictionary = {}
 	for t in MapState.item_tables:
@@ -825,7 +1001,7 @@ func _process(delta: float) -> void:
 		return
 	# Brush ring only makes sense for terrain brushes; spawn tools use
 	# pinpoint clicks.
-	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE, TOOL_S_ACTORS_REMOVE]
+	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE, TOOL_S_ACTORS_REMOVE, TOOL_E_PAINT]
 	if not is_brush_tool:
 		_brush_ring.hide_ring()
 		return
@@ -963,11 +1139,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		pr.y = _terrain.sample_height(pr)
 		_roads_node.on_click(pr, Vector3i(-1, -1, -1))
 		return
-	# Effects / Objects tools: LMB picks a gizmo handle first (so dragging
-	# an arrow doesn't deselect the prop underneath). Falls through to pick
-	# the box itself if no handle was hit. Release ends the drag.
-	if _active_tool == TOOL_L_EFFECTS or _active_tool == TOOL_O_OBJECTS:
+	# Effects / Objects / Triggers tools: LMB picks a gizmo handle first
+	# (so dragging an arrow doesn't deselect the prop underneath). Falls
+	# through to pick the box itself if no handle was hit. Release ends
+	# the drag. When the events-panel eyedropper is armed, the LMB pick
+	# instead routes the prop_id back to the armed event.
+	if _active_tool == TOOL_L_EFFECTS or _active_tool == TOOL_O_OBJECTS or _active_tool == TOOL_L_TRIGGERS:
 		if event.pressed:
+			if _eyedropper_event_id != "":
+				_handle_eyedropper_click()
+				return
 			if _try_start_gizmo_drag():
 				return
 			_pick_prop_under_cursor()
@@ -989,6 +1170,8 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 			_remove_item_spawns_in_radius(world_pos, _brush_radius)
 		TOOL_S_ACTORS_REMOVE:
 			_remove_actor_spawns_in_radius(world_pos, _brush_radius)
+		TOOL_E_PAINT:
+			_terrain.paint_brush(world_pos, _brush_radius, 4.0 * s, delta, _paint_material_id, _paint_shape)
 
 func _raycast_cursor() -> Dictionary:
 	# Two cursor modes:
@@ -999,7 +1182,7 @@ func _raycast_cursor() -> Dictionary:
 	var mouse := get_viewport().get_mouse_position()
 	var from := _camera.project_ray_origin(mouse)
 	var dir := _camera.project_ray_normal(mouse)
-	var is_terrain_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP]
+	var is_terrain_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_E_PAINT]
 	if is_terrain_tool:
 		if absf(dir.y) < 0.0001:
 			return {}
@@ -1014,7 +1197,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _actor_tables_panel, _clothing_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _actor_tables_panel, _clothing_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel, _paint_panel, _roads_panel, _snap_widget, _events_panel, _trigger_panel]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -1032,9 +1215,23 @@ func _on_category_picked(category: String) -> void:
 
 func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
-	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE
+	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE or tool_id == TOOL_E_PAINT
 	_radius_widget.visible = is_brush_tool
-	_space_toggle.visible = tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS
+	if _paint_panel != null:
+		_paint_panel.visible = (tool_id == TOOL_E_PAINT)
+		if tool_id == TOOL_E_PAINT:
+			_brush_ring.set_shape(_paint_shape)
+		else:
+			_brush_ring.set_shape("circle")
+	_space_toggle.visible = tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS or tool_id == TOOL_L_TRIGGERS
+	if _snap_widget != null:
+		_snap_widget.visible = tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS or tool_id == TOOL_L_TRIGGERS
+	if _events_panel != null:
+		_events_panel.visible = (tool_id == TOOL_L_TRIGGERS)
+		if tool_id == TOOL_L_TRIGGERS:
+			_events_panel.set_events(_events_panel.events)  # refresh row UI
+			_trigger_panel.set_item_tables(_item_tables_panel.tables)
+			_trigger_panel.set_actor_tables(_actor_tables_panel.tables)
 	if _roads_panel != null:
 		_roads_panel.visible = (tool_id == TOOL_E_ROADS)
 		if tool_id == TOOL_E_ROADS:
@@ -1055,11 +1252,14 @@ func _on_tool_picked(tool_id: String) -> void:
 		_lighting_panel.visible = (tool_id == TOOL_E_LIGHTING)
 	# Gizmo only matters while a placement tool is active.
 	if _gizmo != null:
-		if tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS:
+		if tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS or tool_id == TOOL_L_TRIGGERS:
 			_gizmo.set_target(_selected_prop)
 		else:
 			_gizmo.set_target(null)
 			_drag_handle = ""
+	# Trigger panel only relevant while triggers tool is active AND the
+	# current selection is a trigger box.
+	_refresh_trigger_panel()
 
 func _on_effect_picked(id: String) -> void:
 	_armed_effect_id = id
@@ -1255,6 +1455,7 @@ func _select_prop(box: Node3D) -> void:
 			_gizmo.set_mode(_gizmo.MODE_TRANSLATE_AXES)
 	_refresh_container_panel()
 	_refresh_object_props_panel()
+	_refresh_trigger_panel()
 
 # Show + bind the loot-table picker iff the current selection is a crate;
 # hide it otherwise. Called from _select_prop and from the table-list
@@ -1301,13 +1502,113 @@ func _refresh_object_props_panel() -> void:
 		_object_props_panel.visible = false
 		return
 	var oid: String = String(_selected_prop.object_id)
+	var events: Array = []
+	if _events_panel != null and "prop_id" in _selected_prop:
+		events = _events_panel.events_for_prop(String(_selected_prop.prop_id))
 	_object_props_panel.bind(
 		"Object: %s" % oid,
 		bool(_selected_prop.get("no_collide")),
 		bool(_selected_prop.get("destructible")),
 		int(_selected_prop.get("hp_max")),
+		events,
 	)
 	_object_props_panel.visible = true
+
+func _refresh_trigger_panel() -> void:
+	if _trigger_panel == null:
+		return
+	var is_trigger: bool = _selected_prop != null and "trigger_id" in _selected_prop
+	if not is_trigger or _active_tool != TOOL_L_TRIGGERS:
+		_trigger_panel.visible = false
+		return
+	_trigger_panel.set_item_tables(_item_tables_panel.tables)
+	_trigger_panel.set_actor_tables(_actor_tables_panel.tables)
+	_trigger_panel.bind(_selected_prop)
+	_trigger_panel.visible = true
+
+func _spawn_trigger_at(world_pos: Vector3) -> void:
+	var tb: Node3D = Node3D.new()
+	tb.set_script(TRIGGER_BOX_SCRIPT)
+	add_child(tb)
+	tb.global_position = world_pos
+	_placed_props.append(tb)
+	_select_prop(tb)
+
+func _on_eyedropper_armed(event_id: String) -> void:
+	_eyedropper_event_id = event_id
+
+func _on_eyedropper_disarmed() -> void:
+	_eyedropper_event_id = ""
+
+func _on_event_hover(event_id: String) -> void:
+	_hover_event_id = event_id
+	_apply_event_hover_tint()
+
+func _on_event_unhover() -> void:
+	_hover_event_id = ""
+	_apply_event_hover_tint()
+
+func _on_events_changed() -> void:
+	_refresh_trigger_panel()
+	_refresh_object_props_panel()
+	if _trigger_panel != null:
+		_trigger_panel.refresh_events()
+
+func _on_trigger_changed() -> void:
+	pass  # values already mirrored onto selected trigger box by the panel
+
+func _on_object_event_focused(event_id: String) -> void:
+	# Jump the user to the events panel + arm hover so the targeted prop
+	# set is highlighted.
+	if event_id == "":
+		return
+	_hover_event_id = event_id
+	_apply_event_hover_tint()
+
+func _handle_eyedropper_click() -> void:
+	# Pick a prop under the cursor and add its prop_id to the armed event.
+	var mouse := get_viewport().get_mouse_position()
+	var from := _camera.project_ray_origin(mouse)
+	var dir := _camera.project_ray_normal(mouse)
+	var best: Node3D = null
+	var best_t: float = INF
+	for box in _placed_props:
+		if not is_instance_valid(box):
+			continue
+		if not "prop_id" in box:
+			continue
+		var inv: Transform3D = box.global_transform.affine_inverse()
+		var lo: Vector3 = inv * from
+		var ld: Vector3 = inv.basis * dir
+		var aabb: AABB = box.get_aabb_local()
+		var t: float = _ray_aabb(lo, ld, aabb)
+		if t >= 0.0 and t < best_t:
+			best_t = t
+			best = box
+	if best != null and _events_panel != null:
+		_events_panel.add_target_to_armed(String(best.prop_id))
+		_apply_event_hover_tint()
+
+func _apply_event_hover_tint() -> void:
+	# Reset all prop selection visuals to their non-hover state. The
+	# tint here piggybacks on set_selected — props highlighted as event
+	# targets render in their selected color.
+	if _events_panel == null:
+		return
+	var hover_ids: Array = []
+	if _hover_event_id != "":
+		for ev in _events_panel.events:
+			if String(ev.get("id", "")) == _hover_event_id:
+				hover_ids = ev.get("targets", [])
+				break
+	for box in _placed_props:
+		if not is_instance_valid(box) or not "prop_id" in box:
+			continue
+		if box == _selected_prop:
+			continue  # leave selection visual alone
+		var on: bool = hover_ids.has(String(box.prop_id))
+		if box.has_method("set_selected"):
+			box.set_selected(on)
 
 func _on_no_collide_changed(v: bool) -> void:
 	if _selected_prop == null or not "no_collide" in _selected_prop:
@@ -1515,6 +1816,10 @@ func _try_start_gizmo_drag() -> bool:
 	# Resolve the constraint (axis or plane) and capture the grab offset
 	# in world space so the cursor anchor doesn't snap on first motion.
 	_drag_anchor = _selected_prop.global_position
+	# Capture basis + scale for every drag type — used by ctrl-snap to
+	# compute the object's world-space extent on the drag axis.
+	_drag_start_basis = _selected_prop.global_transform.basis
+	_drag_start_scale = _selected_prop.scale
 	if handle.begins_with("r"):
 		# Rotate ring drag — capture start basis + initial cursor angle on
 		# the ring plane. Motion computes delta angle and applies
@@ -1534,6 +1839,21 @@ func _try_start_gizmo_drag() -> bool:
 			return false
 		var local_r: Vector3 = hit_r.point - _drag_anchor
 		_drag_start_angle = atan2(local_r.dot(v), local_r.dot(u))
+	elif handle == "su":
+		# Uniform-scale drag — distance from cursor to gizmo origin (on the
+		# plane perpendicular to the camera through the anchor) is the
+		# scale ratio reference. Symmetric around origin, so no pivot logic.
+		_drag_start_scale = _selected_prop.scale
+		_drag_start_basis = _selected_prop.global_transform.basis
+		var n_u: Vector3 = -_camera.global_transform.basis.z
+		var hit_u: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, n_u)
+		if hit_u.is_empty():
+			_drag_handle = ""
+			return false
+		var d_u: float = (hit_u.point - _drag_anchor).length()
+		if d_u < 0.05:
+			d_u = 0.05
+		_drag_uniform_start_dist = d_u
 	elif handle in ["sx", "sy", "sz", "-sx", "-sy", "-sz"]:
 		# Scale axis drag — captures start scale + signed projection along
 		# the axis, plus a pivot point at the OPPOSITE face of the box so
@@ -1580,6 +1900,7 @@ func _continue_gizmo_drag() -> void:
 	var mouse := get_viewport().get_mouse_position()
 	var from := _camera.project_ray_origin(mouse)
 	var dir := _camera.project_ray_normal(mouse)
+	var snap: bool = Input.is_key_pressed(KEY_CTRL)
 	if _drag_handle.begins_with("r"):
 		var hit_r: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_axis)
 		if hit_r.is_empty():
@@ -1587,17 +1908,36 @@ func _continue_gizmo_drag() -> void:
 		var local_r: Vector3 = hit_r.point - _drag_anchor
 		var ang: float = atan2(local_r.dot(_drag_axis_v), local_r.dot(_drag_axis_u))
 		var delta: float = ang - _drag_start_angle
+		if snap and _rotation_snap_deg > 0.0:
+			var step: float = deg_to_rad(_rotation_snap_deg)
+			delta = round(delta / step) * step
 		var new_basis: Basis = Basis(_drag_axis, delta) * _drag_start_basis
 		var t: Transform3D = _selected_prop.global_transform
 		t.basis = new_basis
 		_selected_prop.global_transform = t
+	elif _drag_handle == "su":
+		var n_u: Vector3 = -_camera.global_transform.basis.z
+		var hit_u: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, n_u)
+		if hit_u.is_empty():
+			return
+		var d_u: float = (hit_u.point - _drag_anchor).length()
+		var ratio_u: float = d_u / _drag_uniform_start_dist
+		if snap:
+			ratio_u = max(1.0, round(ratio_u))
+		elif ratio_u < 0.05:
+			ratio_u = 0.05
+		_selected_prop.scale = _drag_start_scale * ratio_u
 	elif _drag_handle in ["sx", "sy", "sz", "-sx", "-sy", "-sz"]:
 		var ap_s: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
 		var dist_s: float = (ap_s - _drag_anchor).dot(_drag_axis)
 		var ratio: float = dist_s / _drag_start_dist
-		# Clamp absurdly tiny/negative ratios so the box doesn't collapse
-		# or invert (negative scale silently flips winding everywhere).
-		if ratio < 0.05:
+		if snap:
+			# Snap ratio to nearest integer ≥1 — so multipliers go 1x, 2x, 3x
+			# from the start scale rather than landing on arbitrary fractions.
+			ratio = max(1.0, round(ratio))
+		elif ratio < 0.05:
+			# Clamp absurdly tiny/negative ratios so the box doesn't collapse
+			# or invert (negative scale silently flips winding everywhere).
 			ratio = 0.05
 		var idx: int = _drag_scale_index
 		var new_axis_scale: float = _drag_start_scale[idx] * ratio
@@ -1617,10 +1957,70 @@ func _continue_gizmo_drag() -> void:
 		var hit_p: Dictionary = _ray_plane_hit_world(from, dir, _drag_anchor, _drag_normal)
 		if hit_p.is_empty():
 			return
-		_selected_prop.global_position = hit_p.point + _drag_offset
+		var new_pos_p: Vector3 = hit_p.point + _drag_offset
+		if snap:
+			new_pos_p = _snap_translate_plane(new_pos_p)
+		_selected_prop.global_position = new_pos_p
 	else:
 		var ap: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
-		_selected_prop.global_position = ap + _drag_offset
+		var new_pos: Vector3 = ap + _drag_offset
+		if snap:
+			new_pos = _snap_translate_axis(new_pos, _drag_axis)
+		_selected_prop.global_position = new_pos
+
+func _snap_translate_axis(new_pos: Vector3, axis: Vector3) -> Vector3:
+	# Snap motion to multiples of the object's world-space width along `axis`.
+	# Other axes pass through unchanged. Anchor = drag start position.
+	var w: float = _object_world_width_on_axis(axis)
+	if w <= 0.0001:
+		return new_pos
+	var delta: Vector3 = new_pos - _drag_anchor
+	var proj: float = delta.dot(axis)
+	var snapped: float = round(proj / w) * w
+	return _drag_anchor + axis * snapped + (delta - axis * proj)
+
+func _snap_translate_plane(new_pos: Vector3) -> Vector3:
+	# Snap on each of the plane's two in-plane axes independently. Plane axes
+	# are derived from _drag_normal (world-space) — pick any two orthogonal
+	# vectors in the plane that line up with the object's frame.
+	var n: Vector3 = _drag_normal.normalized()
+	var b: Basis = _drag_start_basis
+	# Plane axes = the two basis cols whose normal is the plane normal.
+	# Approximate by picking the two cols closest to the in-plane direction.
+	var cols: Array = [b.x, b.y, b.z]
+	var in_plane: Array = []
+	for c in cols:
+		var cn: Vector3 = c.normalized()
+		if absf(cn.dot(n)) < 0.95:
+			in_plane.append(cn)
+	if in_plane.size() < 2:
+		return new_pos
+	var u: Vector3 = in_plane[0]
+	var v: Vector3 = in_plane[1]
+	var w_u: float = _object_world_width_on_axis(u)
+	var w_v: float = _object_world_width_on_axis(v)
+	var delta: Vector3 = new_pos - _drag_anchor
+	var proj_u: float = delta.dot(u)
+	var proj_v: float = delta.dot(v)
+	var snapped_u: float = (round(proj_u / w_u) * w_u) if w_u > 0.0001 else proj_u
+	var snapped_v: float = (round(proj_v / w_v) * w_v) if w_v > 0.0001 else proj_v
+	var residual: Vector3 = delta - u * proj_u - v * proj_v
+	return _drag_anchor + u * snapped_u + v * snapped_v + residual
+
+func _object_world_width_on_axis(axis: Vector3) -> float:
+	# AABB extent along a world-space axis = sum of |axis · (basis_col * scale)|
+	# over the three local cols. This handles arbitrarily rotated objects.
+	if _selected_prop == null:
+		return 1.0
+	var aabb: AABB = AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2))
+	if _selected_prop.has_method("get_aabb_local"):
+		aabb = _selected_prop.get_aabb_local()
+	var b: Basis = _drag_start_basis
+	var s: Vector3 = _drag_start_scale
+	var sx: float = absf((b.x * s.x).dot(axis)) * aabb.size.x
+	var sy: float = absf((b.y * s.y).dot(axis)) * aabb.size.y
+	var sz: float = absf((b.z * s.z).dot(axis)) * aabb.size.z
+	return sx + sy + sz
 
 func _closest_point_on_axis(ro: Vector3, rd: Vector3, ap: Vector3, ax: Vector3) -> Vector3:
 	# Closest point on the infinite line (ap, ax) to the ray (ro, rd).

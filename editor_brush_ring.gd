@@ -9,6 +9,7 @@ const SEGMENTS := 48
 var radius := 4.0
 var terrain: Node = null
 var color := Color(1.0, 0.9, 0.2, 1.0)
+var shape: String = "circle"  # "circle" or "square"
 
 var _mesh_instance: MeshInstance3D
 var _material: StandardMaterial3D
@@ -29,6 +30,9 @@ func _ready() -> void:
 
 func set_radius(r: float) -> void:
 	radius = max(0.25, r)
+
+func set_shape(s: String) -> void:
+	shape = s
 
 func set_color(c: Color) -> void:
 	color = c
@@ -56,11 +60,20 @@ func _rebuild() -> void:
 		return
 	var im := ImmediateMesh.new()
 	im.surface_begin(Mesh.PRIMITIVE_LINES, _material)
-	for i in range(SEGMENTS):
-		var a0: float = (float(i)     / float(SEGMENTS)) * TAU
-		var a1: float = (float(i + 1) / float(SEGMENTS)) * TAU
-		var p0 := Vector3(cos(a0) * radius, 0.0, sin(a0) * radius)
-		var p1 := Vector3(cos(a1) * radius, 0.0, sin(a1) * radius)
+	# Sampling 4*N points around the square's perimeter keeps the outline
+	# hugging the terrain at the same resolution as the circle path.
+	var segs: int = SEGMENTS
+	for i in range(segs):
+		var p0: Vector3
+		var p1: Vector3
+		if shape == "square":
+			p0 = _square_point(i, segs)
+			p1 = _square_point(i + 1, segs)
+		else:
+			var a0: float = (float(i)     / float(segs)) * TAU
+			var a1: float = (float(i + 1) / float(segs)) * TAU
+			p0 = Vector3(cos(a0) * radius, 0.0, sin(a0) * radius)
+			p1 = Vector3(cos(a1) * radius, 0.0, sin(a1) * radius)
 		if _mode_flat:
 			p0.y = _flat_y - global_position.y
 			p1.y = _flat_y - global_position.y
@@ -71,3 +84,16 @@ func _rebuild() -> void:
 		im.surface_add_vertex(p1)
 	im.surface_end()
 	_mesh_instance.mesh = im
+
+func _square_point(i: int, segs: int) -> Vector3:
+	# Walk perimeter of an axis-aligned square of side 2*radius. Each edge
+	# gets segs/4 samples so the corners are sharp.
+	var per_side: int = max(1, segs / 4)
+	var side: int = (i / per_side) % 4
+	var t: float = float(i % per_side) / float(per_side)
+	var s: float = radius
+	match side:
+		0: return Vector3(-s + 2.0 * s * t, 0.0, -s)
+		1: return Vector3( s, 0.0, -s + 2.0 * s * t)
+		2: return Vector3( s - 2.0 * s * t, 0.0,  s)
+		_: return Vector3(-s, 0.0,  s - 2.0 * s * t)

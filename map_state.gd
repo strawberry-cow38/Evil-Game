@@ -8,6 +8,10 @@ extends Node
 var heights: PackedFloat32Array = PackedFloat32Array()
 var grid_w: int = 0
 var grid_h: int = 0
+# Per-vertex terrain paint weights — rgba = (dirt, grass, stone, sand).
+# Sum normalised to 1 in the shader. Empty array = play scene falls back
+# to flat grass.
+var terrain_paint: PackedColorArray = PackedColorArray()
 # Player spawn points authored in the editor. Empty = play scene falls
 # back to its hardcoded spawn.
 var player_spawns: Array[Vector3] = []
@@ -41,6 +45,14 @@ var lighting: Dictionary = {}
 #     out_tangent:Vector3, ignore_terrain:bool} ] }
 # Empty array = no roads, play scene draws nothing.
 var roads: Array = []
+# Trigger volumes authored via Level → Triggers. Each entry mirrors
+# editor_trigger_box's persisted fields (prop_id, trigger_id, xform,
+# conditions, logic_op, fire_event_ids, delay, inter_event_delay,
+# repeat_mode, repeat_count, repeat_cooldown).
+var placed_triggers: Array = []
+# Named events authored in the Events panel. Each entry:
+#   { "id": String, "name": String, "kind": String, "targets": Array[String of prop_ids] }
+var map_events: Array = []
 
 func has_map() -> bool:
 	return heights.size() > 0 and grid_w > 0 and grid_h > 0
@@ -49,6 +61,7 @@ func clear() -> void:
 	heights = PackedFloat32Array()
 	grid_w = 0
 	grid_h = 0
+	terrain_paint = PackedColorArray()
 	player_spawns.clear()
 	placed_props.clear()
 	item_tables.clear()
@@ -57,6 +70,8 @@ func clear() -> void:
 	actor_spawn_points.clear()
 	lighting.clear()
 	roads.clear()
+	placed_triggers.clear()
+	map_events.clear()
 
 func random_player_spawn() -> Vector3:
 	if player_spawns.is_empty():

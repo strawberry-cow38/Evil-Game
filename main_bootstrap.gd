@@ -16,6 +16,7 @@ const EDITOR_SCRIPT := preload("res://editor.gd")
 const DUMMY_SCRIPT := preload("res://dummy.gd")
 const DUMMY_HEAD_SCRIPT := preload("res://dummy_head.gd")
 const CORPSE_SCRIPT := preload("res://corpse.gd")
+const TRIGGER_RUNTIME := preload("res://trigger_runtime.gd")
 const NOTHING_ITEM_ID := "nothing"
 # Loot rolls per actor death — drop_table_id is rolled this many times
 # and each non-nothing result is shoved into the corpse container.
@@ -48,6 +49,8 @@ func _ready() -> void:
 		# editor_terrain._ready already created the mesh from a zeroed
 		# array; overwrite + rebuild with the real heights.
 		terrain.heights = MapState.heights.duplicate()
+		if MapState.terrain_paint.size() == terrain.paint.size():
+			terrain.paint = MapState.terrain_paint.duplicate()
 		terrain.rebuild()
 		terrain_node = terrain
 	# Roads — extruded slab over the authored bezier chains. Needs the
@@ -95,6 +98,11 @@ func _ready() -> void:
 				continue
 			props_root.add_child(content)
 			content.global_transform = xform
+			# Stamp prop_id so trigger_runtime can target this spawned
+			# content with named events (e.g. "destroy this prop_id").
+			var pid: String = String(entry.get("prop_id", ""))
+			if pid != "":
+				content.set_meta("prop_id", pid)
 			# Per-placement object settings: disable collision shapes,
 			# stamp HP metadata for downstream damage code to consume.
 			if kind == "object":
@@ -189,6 +197,20 @@ func _ready() -> void:
 	var player_pos: Vector3 = Vector3.ZERO
 	if player_node != null and player_node is Node3D:
 		player_pos = (player_node as Node3D).global_position
+	# Trigger runtime — spawned once, watches placed triggers, applies
+	# their events at fire time. Indexed by prop_id so Destroy events
+	# can resolve their target nodes from the live scene tree.
+	if not MapState.placed_triggers.is_empty():
+		var props_by_id: Dictionary = {}
+		if props_root != null:
+			for c in props_root.get_children():
+				if c.has_meta("prop_id"):
+					props_by_id[String(c.get_meta("prop_id"))] = c
+		var triggers_root := Node.new()
+		triggers_root.name = "TriggerRuntime"
+		triggers_root.set_script(TRIGGER_RUNTIME)
+		add_child(triggers_root)
+		triggers_root.setup(MapState.placed_triggers, MapState.map_events, props_by_id)
 	for spec in VEHICLE_SPAWNS:
 		var v := VehicleBody3D.new()
 		v.set_script(VEHICLE)
