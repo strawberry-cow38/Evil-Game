@@ -553,7 +553,7 @@ const PROFILES := {
 		"fire_hold": 0.06,
 		"fire_fade": 0.16,
 		"recoil_pattern": RECOIL_PATTERN_MINIGUN,
-		"bloom_mult": 3.5,
+		"bloom_mult": 1.3,
 		"ammo_id": "ammo_762nato",
 		"reload_time": 12.0,
 		"pullout_time": 2.5,

@@ -17,6 +17,13 @@ var _rpm_fill: ColorRect
 var _rpm_redline_tick: ColorRect
 const RPM_BAR_W := 220.0
 const RPM_BAR_H := 10.0
+# Minigun spin-up bar. Shown only when minigun equipped; fill 0→1 tracks
+# spin progress, color shifts orange → green at ready.
+var _mg_bg: ColorRect
+var _mg_fill: ColorRect
+var _mg_label: Label
+const MG_BAR_W := 180.0
+const MG_BAR_H := 12.0
 
 func _ready() -> void:
 	if player_path != NodePath():
@@ -24,6 +31,7 @@ func _ready() -> void:
 	if weapon_path != NodePath():
 		_weapon = get_node(weapon_path)
 	_build_rpm_gauge()
+	_build_minigun_gauge()
 
 func _build_rpm_gauge() -> void:
 	# Sits under the FPS/Speed label in the top-left. Hidden by default; shown
@@ -47,6 +55,37 @@ func _build_rpm_gauge() -> void:
 	_rpm_redline_tick.size = Vector2(2, RPM_BAR_H)
 	_rpm_redline_tick.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rpm_bg.add_child(_rpm_redline_tick)
+
+func _build_minigun_gauge() -> void:
+	# Anchored bottom-center above the ammo readout. Hidden unless the
+	# minigun is equipped.
+	_mg_bg = ColorRect.new()
+	_mg_bg.color = Color(0, 0, 0, 0.6)
+	_mg_bg.size = Vector2(MG_BAR_W, MG_BAR_H)
+	_mg_bg.anchor_left = 0.5
+	_mg_bg.anchor_right = 0.5
+	_mg_bg.anchor_top = 1.0
+	_mg_bg.anchor_bottom = 1.0
+	_mg_bg.offset_left = -MG_BAR_W * 0.5
+	_mg_bg.offset_right = MG_BAR_W * 0.5
+	_mg_bg.offset_top = -110.0
+	_mg_bg.offset_bottom = -110.0 + MG_BAR_H
+	_mg_bg.visible = false
+	_mg_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_mg_bg)
+	_mg_fill = ColorRect.new()
+	_mg_fill.color = Color(1.0, 0.45, 0.1, 1.0)
+	_mg_fill.position = Vector2(0, 0)
+	_mg_fill.size = Vector2(0, MG_BAR_H)
+	_mg_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mg_bg.add_child(_mg_fill)
+	_mg_label = Label.new()
+	_mg_label.text = "SPIN"
+	_mg_label.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
+	_mg_label.add_theme_font_size_override("font_size", 10)
+	_mg_label.position = Vector2(4, -2)
+	_mg_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mg_bg.add_child(_mg_label)
 
 func _process(delta: float) -> void:
 	var fps := Engine.get_frames_per_second()
@@ -129,6 +168,26 @@ func _process(delta: float) -> void:
 		else:
 			_ammo_label.text = "%s  [%s]\n%d / %d   (%d)%s" % [name, mode, ammo, mag, reserve, ammo_line]
 		_update_low_ammo_flash(delta, ammo, mag, reloading)
+	_update_minigun_gauge()
+
+func _update_minigun_gauge() -> void:
+	if _mg_bg == null:
+		return
+	var show: bool = _weapon != null and _weapon.has_method("is_minigun_equipped") and _weapon.is_minigun_equipped()
+	_mg_bg.visible = show
+	if not show:
+		return
+	var spin: float = _weapon.get_minigun_spin() if _weapon.has_method("get_minigun_spin") else 0.0
+	spin = clampf(spin, 0.0, 1.0)
+	_mg_fill.size.x = MG_BAR_W * spin
+	# Orange while spinning, flips green at full spin (ready to fire).
+	if spin >= 1.0:
+		var pulse: float = 0.5 + 0.5 * sin(Time.get_ticks_msec() / 90.0)
+		_mg_fill.color = Color(0.2, 0.9, 0.3).lerp(Color(0.6, 1.0, 0.6), pulse * 0.4)
+		_mg_label.text = "READY"
+	else:
+		_mg_fill.color = Color(1.0, 0.45, 0.1).lerp(Color(1.0, 0.85, 0.2), spin)
+		_mg_label.text = "SPIN %d%%" % int(round(spin * 100.0))
 
 func _update_rpm_gauge(rpm: float, redline: float, rev_limited: bool) -> void:
 	if _rpm_bg == null:
