@@ -322,6 +322,23 @@ const RECOIL_PATTERN_M249: Array[Vector2] = [
 	Vector2( 0.40, 1.35),
 	Vector2(-1.15, 1.30),
 ]
+# M134 Minigun: rotary action distributes impulse so per-round kick is
+# tiny, but accuracy is shot to hell by barrel walk + spin precession —
+# real recoil is in the bloom, not the climb.
+const RECOIL_PATTERN_MINIGUN: Array[Vector2] = [
+	Vector2(-0.08, 0.30),
+	Vector2(-0.14, 0.36),
+	Vector2(-0.04, 0.40),
+	Vector2(-0.18, 0.42),
+	Vector2( 0.04, 0.42),
+	Vector2(-0.22, 0.40),
+	Vector2( 0.08, 0.38),
+	Vector2(-0.26, 0.36),
+	Vector2( 0.10, 0.34),
+	Vector2(-0.30, 0.32),
+	Vector2( 0.12, 0.30),
+	Vector2(-0.32, 0.28),
+]
 # PM Makarov: small pistol, light upward kick, mild drift.
 const RECOIL_PATTERN_MAKAROV: Array[Vector2] = [
 	Vector2( 0.05, 0.55),
@@ -529,14 +546,14 @@ const PROFILES := {
 	},
 	"minigun": {
 		"name": "M134 Minigun",
-		"mag_size": 1500,
-		"rpm": 3000.0,
+		"mag_size": 300,
+		"rpm": 1500.0,
 		"modes": [FireMode.AUTO],
 		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm_BeltA.ogg"],
 		"fire_hold": 0.06,
 		"fire_fade": 0.16,
-		"recoil_pattern": RECOIL_PATTERN_M249,
-		"bloom_mult": 2.5,
+		"recoil_pattern": RECOIL_PATTERN_MINIGUN,
+		"bloom_mult": 3.5,
 		"ammo_id": "ammo_762nato",
 		"reload_time": 12.0,
 		"pullout_time": 2.5,
