@@ -193,7 +193,10 @@ var _foliage_density: int = 12
 var _foliage_shape: String = "circle"
 var _foliage_mat_filter: int = 1     # -1 = any
 var _foliage_mode: String = "spray"  # "spray" or "exact"
+var _foliage_preset: String = "short_green"
 var _foliage_ghost: MeshInstance3D = null
+var _foliage_ghost_mat: StandardMaterial3D = null
+var _foliage_ghost_quad: QuadMesh = null
 # Snap settings panel — bottom-left, shown while placement tools are active.
 var _snap_widget: PanelContainer = null
 var _rotation_snap_deg: float = 15.0
@@ -508,22 +511,22 @@ func _ready() -> void:
 	_foliage_panel.material_filter_changed.connect(_on_foliage_mat_filter)
 	_foliage_panel.mode_changed.connect(_on_foliage_mode)
 	_foliage_panel.wind_changed.connect(_on_foliage_wind)
+	_foliage_panel.preset_changed.connect(_on_foliage_preset)
 	# Exact-mode ghost: a single translucent grass quad that follows the
-	# cursor so the user can preview placement before committing.
+	# cursor so the user can preview placement before committing. Geometry
+	# + tint are re-synced from the active preset whenever it changes.
 	_foliage_ghost = MeshInstance3D.new()
-	var fg_qm := QuadMesh.new()
-	fg_qm.size = Vector2(0.6, 0.7)
-	fg_qm.center_offset = Vector3(0, 0.35, 0)
-	var fg_mat := StandardMaterial3D.new()
-	fg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	fg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	fg_mat.albedo_color = Color(0.5, 1.0, 0.55, 0.55)
-	fg_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
-	fg_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	fg_qm.material = fg_mat
-	_foliage_ghost.mesh = fg_qm
+	_foliage_ghost_quad = QuadMesh.new()
+	_foliage_ghost_mat = StandardMaterial3D.new()
+	_foliage_ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_foliage_ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_foliage_ghost_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
+	_foliage_ghost_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_foliage_ghost_quad.material = _foliage_ghost_mat
+	_foliage_ghost.mesh = _foliage_ghost_quad
 	_foliage_ghost.visible = false
 	add_child(_foliage_ghost)
+	_refresh_foliage_ghost_visual()
 	# Events panel (left rail) — global named-events list with eyedropper.
 	_events_panel = PanelContainer.new()
 	_events_panel.set_script(EVENTS_PANEL_SCRIPT)
@@ -1523,6 +1526,24 @@ func _on_foliage_wind(dir: Vector2, lo: float, hi: float, speed: float) -> void:
 	if _foliage_node != null:
 		_foliage_node.set_wind(dir, lo, hi, speed)
 
+func _on_foliage_preset(pid: String) -> void:
+	_foliage_preset = pid
+	_refresh_foliage_ghost_visual()
+
+func _refresh_foliage_ghost_visual() -> void:
+	# Mirror the active preset's height + tint on the exact-mode ghost so
+	# the preview matches whatever blade the next click would drop.
+	if _foliage_ghost_quad == null or _foliage_ghost_mat == null:
+		return
+	var h: float = 0.4
+	var tint: Color = Color(0.5, 1.0, 0.55, 1.0)
+	if _foliage_node != null and _foliage_node.has_method("get_preset_height"):
+		h = _foliage_node.get_preset_height(_foliage_preset)
+		tint = _foliage_node.get_preset_tint(_foliage_preset)
+	_foliage_ghost_quad.size = Vector2(0.6, h)
+	_foliage_ghost_quad.center_offset = Vector3(0, h * 0.5, 0)
+	_foliage_ghost_mat.albedo_color = Color(tint.r, tint.g, tint.b, 0.55)
+
 func _apply_foliage_wind_from_state() -> void:
 	# Push MapState.foliage_wind into both the live foliage node and the
 	# panel so the persisted feel is what the user sees on open.
@@ -1593,7 +1614,7 @@ func _foliage_spray(world_pos: Vector3) -> void:
 		if not _foliage_mat_passes(sample):
 			continue
 		sample.y = _terrain.sample_height(sample)
-		_foliage_node.add_instance(sample, randf_range(0.85, 1.15), randf_range(0.0, TAU))
+		_foliage_node.add_instance(_foliage_preset, sample, randf_range(0.85, 1.15), randf_range(0.0, TAU))
 
 func _foliage_try_place(world_pos: Vector3) -> void:
 	# Exact-mode single placement. Honours the material lock so the user
@@ -1604,7 +1625,7 @@ func _foliage_try_place(world_pos: Vector3) -> void:
 		return
 	var p: Vector3 = world_pos
 	p.y = _terrain.sample_height(p)
-	_foliage_node.add_instance(p, randf_range(0.9, 1.1), randf_range(0.0, TAU))
+	_foliage_node.add_instance(_foliage_preset, p, randf_range(0.9, 1.1), randf_range(0.0, TAU))
 
 # Spawn-marker visual: vertical pillar with a flag on top, tinted
 # cyan. Used both for committed markers and the placement ghost

@@ -1,83 +1,94 @@
 extends Node3D
 
-# Foliage authoring + runtime. Owns a single MultiMeshInstance3D that
-# holds every placed grass billboard. Each instance is a Y-billboarded
-# quad with a procedural alpha-blade texture, so density is cheap (one
-# draw call regardless of count). Backing data is a plain Array of dicts
-# so it round-trips through MapState as JSON without extra glue. Used by
-# both the editor (live edit) and main_bootstrap (play scene rebuild).
+# Foliage authoring + runtime. Owns one MultiMeshInstance3D per preset so
+# each variant (different blade height + tint) keeps its own batched draw
+# call. Per-instance state is { preset, pos, scale, rot_y } and round-trips
+# through MapState as plain JSON. Used by both the editor and
+# main_bootstrap.
 
-const BLADE_W: float = 0.6   # billboard quad width (metres)
-const BLADE_H: float = 0.4   # billboard quad height
-const TEX_SIZE: int = 32     # procedural texture resolution
+const TEX_SIZE: int = 32
 const GRASS_SHADER := preload("res://grass.gdshader")
+const DEFAULT_PRESET: String = "short_green"
 
-# Per-instance authored state.
-#   { pos: Vector3, scale: float, rot_y: float }
-# scale = uniform multiplier on the base quad; rot_y is mostly cosmetic
-# (Y-billboards auto-face the camera) but lets us jitter blade-look.
-var _instances: Array = []
+# Preset table. Each preset is one MultiMesh bucket — same shader/texture
+# but its own quad height + tint uniform. Tints picked to read against the
+# terrain paint colours (grass = green, dirt = dry/brown, sand = pale).
+const PRESETS: Array = [
+	{"id": "short_green", "label": "Short Green", "height": 0.4, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
+	{"id": "long_green",  "label": "Long Green",  "height": 0.7, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
+	{"id": "short_brown", "label": "Short Brown", "height": 0.4, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
+	{"id": "long_brown",  "label": "Long Brown",  "height": 0.7, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
+	{"id": "short_sand",  "label": "Short Sand",  "height": 0.4, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
+	{"id": "long_sand",   "label": "Long Sand",   "height": 0.7, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
+]
 
-var _mmi: MultiMeshInstance3D = null
-var _multimesh: MultiMesh = null
+# Per-instance state keyed by preset id:
+#   _instances[preset_id] = [ { pos: Vector3, scale: float, rot_y: float }, ... ]
+var _instances: Dictionary = {}
+var _mmis: Dictionary = {}
+var _multimeshes: Dictionary = {}
+var _materials: Dictionary = {}
 var _dirty: bool = false
-var _material: ShaderMaterial = null
 
-# Wind state. Apply via set_wind(); the shader reads them every frame so
-# updating mid-session doesn't need a rebuild.
+# Shared procedural blade texture (height comes from the mesh, not the
+# texture, so one bitmap fits every preset).
+var _shared_blade_tex: ImageTexture = null
+
 var _wind_dir: Vector2 = Vector2(1.0, 0.0)
 var _wind_min: float = 0.04
 var _wind_max: float = 0.18
 var _wind_speed: float = 1.8
 
 func _ready() -> void:
-	_multimesh = MultiMesh.new()
-	_multimesh.transform_format = MultiMesh.TRANSFORM_3D
-	_multimesh.use_colors = false
-	_multimesh.use_custom_data = false
-	_multimesh.mesh = _build_blade_mesh()
-	_mmi = MultiMeshInstance3D.new()
-	_mmi.multimesh = _multimesh
-	_mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(_mmi)
-	_rebuild_multimesh()
+	_shared_blade_tex = _build_blade_texture()
+	for p in PRESETS:
+		_init_preset(p)
+	_rebuild_all()
 
 func _process(_delta: float) -> void:
 	if _dirty:
-		_rebuild_multimesh()
+		_rebuild_all()
 		_dirty = false
 
-func _build_blade_mesh() -> Mesh:
-	# Y-billboarded quad shared by every blade. Custom shader (grass.gdshader)
-	# does the camera-facing rotation AND adds per-vertex wind sway in
-	# world space so a global wind direction looks coherent across the field.
+func _init_preset(p: Dictionary) -> void:
+	var pid: String = String(p.id)
+	_instances[pid] = []
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = false
+	mm.use_custom_data = false
+	mm.mesh = _build_blade_mesh(p)
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
+	_multimeshes[pid] = mm
+	_mmis[pid] = mmi
+
+func _build_blade_mesh(p: Dictionary) -> Mesh:
+	var w: float = float(p.width)
+	var h: float = float(p.height)
 	var qm := QuadMesh.new()
-	qm.size = Vector2(BLADE_W, BLADE_H)
-	# Centre vertically at the half-height so the blade sits ON the
-	# terrain hit point with its root at ground level.
-	qm.center_offset = Vector3(0, BLADE_H * 0.5, 0)
-	_material = ShaderMaterial.new()
-	_material.shader = GRASS_SHADER
-	_material.set_shader_parameter("albedo_tex", _build_blade_texture())
-	_material.set_shader_parameter("albedo_tint", Color(0.7, 1.0, 0.7, 1.0))
-	_material.set_shader_parameter("alpha_scissor", 0.5)
-	_apply_wind_uniforms()
-	qm.material = _material
+	qm.size = Vector2(w, h)
+	qm.center_offset = Vector3(0, h * 0.5, 0)
+	var mat := ShaderMaterial.new()
+	mat.shader = GRASS_SHADER
+	mat.set_shader_parameter("albedo_tex", _shared_blade_tex)
+	mat.set_shader_parameter("albedo_tint", p.tint)
+	mat.set_shader_parameter("alpha_scissor", 0.5)
+	_materials[String(p.id)] = mat
+	_apply_wind_uniforms_to(mat)
+	qm.material = mat
 	return qm
 
 func _build_blade_texture() -> ImageTexture:
-	# Three vertical blade silhouettes side-by-side on a 32x32 canvas.
-	# Alpha-scissored so the silhouette stays crisp under any rotation.
 	var img := Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	for x in range(TEX_SIZE):
 		for y in range(TEX_SIZE):
 			var u: float = float(x) / float(TEX_SIZE - 1)
 			var v: float = float(y) / float(TEX_SIZE - 1)
-			# Three blade columns with slight curvature; widest at the base.
-			# QuadMesh UV has V=0 at the top edge of the quad (tip, away
-			# from terrain), V=1 at the bottom (root, on ground), so the
-			# thickness/shade gradients are anchored to V=1 = root.
+			# QuadMesh UV V=0 = top edge (tip), V=1 = bottom (root).
 			var blade_centre_a: float = 0.18 + 0.03 * sin(v * PI)
 			var blade_centre_b: float = 0.5  + 0.05 * cos(v * PI * 0.8)
 			var blade_centre_c: float = 0.82 - 0.03 * sin(v * PI)
@@ -87,99 +98,144 @@ func _build_blade_texture() -> ImageTexture:
 			var d_c: float = absf(u - blade_centre_c)
 			var on: bool = d_a < thickness or d_b < thickness or d_c < thickness
 			if on:
-				# Darker green at the base, brighter tip — sells depth on
-				# packed billboards.
+				# Grayscale silhouette — the shader multiplies by the preset
+				# tint, so baking colour into the bitmap here would lock every
+				# preset to green. Shade still rolls darker→tip to sell depth.
 				var shade: float = lerp(0.55, 0.95, 1.0 - v)
-				img.set_pixel(x, y, Color(0.25 * shade, 0.65 * shade, 0.20 * shade, 1.0))
+				img.set_pixel(x, y, Color(shade, shade, shade, 1.0))
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
 
-func _rebuild_multimesh() -> void:
-	_multimesh.instance_count = _instances.size()
-	for i in range(_instances.size()):
-		var inst: Dictionary = _instances[i]
-		var pos: Vector3 = inst.get("pos", Vector3.ZERO)
-		var s: float = float(inst.get("scale", 1.0))
-		var ry: float = float(inst.get("rot_y", 0.0))
-		var t: Transform3D = Transform3D(Basis(Vector3.UP, ry).scaled(Vector3.ONE * s), pos)
-		_multimesh.set_instance_transform(i, t)
+func _rebuild_all() -> void:
+	for pid in _instances.keys():
+		var mm: MultiMesh = _multimeshes[pid]
+		var list: Array = _instances[pid]
+		mm.instance_count = list.size()
+		for i in range(list.size()):
+			var inst: Dictionary = list[i]
+			var pos: Vector3 = inst.get("pos", Vector3.ZERO)
+			var s: float = float(inst.get("scale", 1.0))
+			var ry: float = float(inst.get("rot_y", 0.0))
+			var t: Transform3D = Transform3D(Basis(Vector3.UP, ry).scaled(Vector3.ONE * s), pos)
+			mm.set_instance_transform(i, t)
 
-func add_instance(world_pos: Vector3, scale: float, rot_y: float) -> void:
-	_instances.append({"pos": world_pos, "scale": scale, "rot_y": rot_y})
+func _resolve_preset(preset_id: String) -> String:
+	# Unknown preset ids fall back to the default so a stale save can still
+	# load without dropping instances.
+	if _instances.has(preset_id):
+		return preset_id
+	return DEFAULT_PRESET
+
+func get_preset_height(preset_id: String) -> float:
+	for p in PRESETS:
+		if String(p.id) == preset_id:
+			return float(p.height)
+	return float(PRESETS[0].height)
+
+func get_preset_tint(preset_id: String) -> Color:
+	for p in PRESETS:
+		if String(p.id) == preset_id:
+			return p.tint
+	return Color.WHITE
+
+func add_instance(preset_id: String, world_pos: Vector3, scale: float, rot_y: float) -> void:
+	var pid: String = _resolve_preset(preset_id)
+	_instances[pid].append({"pos": world_pos, "scale": scale, "rot_y": rot_y})
 	_dirty = true
 
 func remove_in_radius(world_pos: Vector3, radius: float, shape: String) -> int:
-	# Returns number removed. Square uses an L∞ ball; circle uses L2 on
-	# the xz plane so vertical foliage on cliffs still drops cleanly.
-	var keep: Array = []
+	# Cross-preset removal: brush erases every variant within the footprint.
 	var dropped: int = 0
 	var r2: float = radius * radius
-	for inst in _instances:
-		var p: Vector3 = inst.get("pos", Vector3.ZERO)
-		var dx: float = p.x - world_pos.x
-		var dz: float = p.z - world_pos.z
-		var inside: bool = false
-		if shape == "square":
-			inside = absf(dx) <= radius and absf(dz) <= radius
-		else:
-			inside = dx * dx + dz * dz <= r2
-		if inside:
-			dropped += 1
-		else:
-			keep.append(inst)
-	if dropped > 0:
-		_instances = keep
-		_dirty = true
+	for pid in _instances.keys():
+		var keep: Array = []
+		for inst in _instances[pid]:
+			var p: Vector3 = inst.get("pos", Vector3.ZERO)
+			var dx: float = p.x - world_pos.x
+			var dz: float = p.z - world_pos.z
+			var inside: bool = false
+			if shape == "square":
+				inside = absf(dx) <= radius and absf(dz) <= radius
+			else:
+				inside = dx * dx + dz * dz <= r2
+			if inside:
+				dropped += 1
+			else:
+				keep.append(inst)
+		if keep.size() != _instances[pid].size():
+			_instances[pid] = keep
+			_dirty = true
 	return dropped
 
 func count_in_radius(world_pos: Vector3, radius: float, shape: String) -> int:
-	# Used by the spray brush to throttle density without re-scanning the
-	# whole list on every tick.
 	var hits: int = 0
 	var r2: float = radius * radius
-	for inst in _instances:
-		var p: Vector3 = inst.get("pos", Vector3.ZERO)
-		var dx: float = p.x - world_pos.x
-		var dz: float = p.z - world_pos.z
-		var inside: bool = false
-		if shape == "square":
-			inside = absf(dx) <= radius and absf(dz) <= radius
-		else:
-			inside = dx * dx + dz * dz <= r2
-		if inside:
-			hits += 1
+	for pid in _instances.keys():
+		for inst in _instances[pid]:
+			var p: Vector3 = inst.get("pos", Vector3.ZERO)
+			var dx: float = p.x - world_pos.x
+			var dz: float = p.z - world_pos.z
+			var inside: bool = false
+			if shape == "square":
+				inside = absf(dx) <= radius and absf(dz) <= radius
+			else:
+				inside = dx * dx + dz * dz <= r2
+			if inside:
+				hits += 1
 	return hits
 
 func instance_count() -> int:
-	return _instances.size()
+	var total: int = 0
+	for pid in _instances.keys():
+		total += (_instances[pid] as Array).size()
+	return total
 
 func clear_all() -> void:
-	_instances.clear()
+	for pid in _instances.keys():
+		_instances[pid] = []
 	_dirty = true
 
 func get_state() -> Array:
-	# Returns a deep copy so callers can't mutate the live list.
+	# Flattened list — one dict per instance with preset id, so loaders can
+	# restore each into the right bucket without knowing about MultiMeshes.
 	var out: Array = []
-	for inst in _instances:
-		out.append({
+	for pid in _instances.keys():
+		for inst in _instances[pid]:
+			out.append({
+				"preset": pid,
+				"pos":   inst.get("pos", Vector3.ZERO),
+				"scale": float(inst.get("scale", 1.0)),
+				"rot_y": float(inst.get("rot_y", 0.0)),
+			})
+	return out
+
+func set_state(state: Array) -> void:
+	for pid in _instances.keys():
+		_instances[pid] = []
+	for inst in state:
+		if not inst is Dictionary:
+			continue
+		var pid: String = _resolve_preset(String(inst.get("preset", DEFAULT_PRESET)))
+		_instances[pid].append({
 			"pos":   inst.get("pos", Vector3.ZERO),
 			"scale": float(inst.get("scale", 1.0)),
 			"rot_y": float(inst.get("rot_y", 0.0)),
 		})
-	return out
+	_dirty = true
+
+func _apply_wind_uniforms_to(mat: ShaderMaterial) -> void:
+	if mat == null:
+		return
+	mat.set_shader_parameter("wind_dir", _wind_dir.normalized() if _wind_dir.length() > 0.0001 else Vector2(1, 0))
+	mat.set_shader_parameter("wind_min", _wind_min)
+	mat.set_shader_parameter("wind_max", _wind_max)
+	mat.set_shader_parameter("wind_speed", _wind_speed)
 
 func _apply_wind_uniforms() -> void:
-	if _material == null:
-		return
-	_material.set_shader_parameter("wind_dir", _wind_dir.normalized() if _wind_dir.length() > 0.0001 else Vector2(1, 0))
-	_material.set_shader_parameter("wind_min", _wind_min)
-	_material.set_shader_parameter("wind_max", _wind_max)
-	_material.set_shader_parameter("wind_speed", _wind_speed)
+	for pid in _materials.keys():
+		_apply_wind_uniforms_to(_materials[pid])
 
 func set_wind(dir: Vector2, lo: float, hi: float, speed: float) -> void:
-	# Public hook for the editor panel + main_bootstrap to push the global
-	# wind feel. Stored locally so a panel poke doesn't need to know about
-	# the material; we re-push every change.
 	_wind_dir = dir
 	_wind_min = max(0.0, lo)
 	_wind_max = max(_wind_min, hi)
@@ -194,15 +250,3 @@ func get_wind() -> Dictionary:
 		"max": _wind_max,
 		"speed": _wind_speed,
 	}
-
-func set_state(state: Array) -> void:
-	_instances.clear()
-	for inst in state:
-		if not inst is Dictionary:
-			continue
-		_instances.append({
-			"pos":   inst.get("pos", Vector3.ZERO),
-			"scale": float(inst.get("scale", 1.0)),
-			"rot_y": float(inst.get("rot_y", 0.0)),
-		})
-	_dirty = true

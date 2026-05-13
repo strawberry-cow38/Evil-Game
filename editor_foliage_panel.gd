@@ -10,6 +10,7 @@ signal shape_changed(shape: String)
 signal material_filter_changed(mat_id: int)  # -1 = any, 0..3 = paint channel
 signal mode_changed(mode: String)            # "spray" or "exact"
 signal wind_changed(dir: Vector2, lo: float, hi: float, speed: float)
+signal preset_changed(preset_id: String)
 
 const MATERIALS: Array = [
 	{"id": -1, "label": "Any",   "color": Color(0.40, 0.40, 0.40, 1.0)},
@@ -19,12 +20,25 @@ const MATERIALS: Array = [
 	{"id":  3, "label": "Sand",  "color": Color(0.84, 0.78, 0.55, 1.0)},
 ]
 
+# Preset list mirrors editor_foliage.gd PRESETS. Tile colour drives the
+# button background so the picker reads at a glance.
+const PRESETS: Array = [
+	{"id": "short_green", "label": "Short Green", "color": Color(0.45, 0.70, 0.30, 1.0)},
+	{"id": "long_green",  "label": "Long Green",  "color": Color(0.35, 0.60, 0.22, 1.0)},
+	{"id": "short_brown", "label": "Short Brown", "color": Color(0.65, 0.50, 0.28, 1.0)},
+	{"id": "long_brown",  "label": "Long Brown",  "color": Color(0.55, 0.40, 0.20, 1.0)},
+	{"id": "short_sand",  "label": "Short Sand",  "color": Color(0.85, 0.78, 0.55, 1.0)},
+	{"id": "long_sand",   "label": "Long Sand",   "color": Color(0.75, 0.68, 0.45, 1.0)},
+]
+
 var _mat_buttons: Array[Button] = []
+var _preset_buttons: Array[Button] = []
 var _shape_buttons: Dictionary = {}
 var _mode_buttons: Dictionary = {}
 var _density_slider: HSlider = null
 var _density_label: Label = null
 var _selected_mat: int = 1     # grass by default
+var _selected_preset: String = "short_green"
 var _selected_shape: String = "circle"
 var _selected_mode: String = "spray"
 var _density: int = 12
@@ -53,6 +67,38 @@ func _ready() -> void:
 	var hdr := Label.new()
 	hdr.text = "Foliage"
 	vb.add_child(hdr)
+
+	# Preset picker — height + tint per blade. Each preset is its own
+	# MultiMesh bucket on the foliage node, so saved maps remember which
+	# variant was placed where.
+	var p_lbl := Label.new()
+	p_lbl.text = "Preset"
+	p_lbl.modulate = Color(1, 1, 1, 0.7)
+	vb.add_child(p_lbl)
+	var p_grid := GridContainer.new()
+	p_grid.columns = 2
+	p_grid.add_theme_constant_override("h_separation", 4)
+	p_grid.add_theme_constant_override("v_separation", 4)
+	vb.add_child(p_grid)
+	for p in PRESETS:
+		var pb := Button.new()
+		pb.text = p.label
+		pb.custom_minimum_size = Vector2(108, 28)
+		var sbp := StyleBoxFlat.new()
+		sbp.bg_color = p.color
+		sbp.border_width_left = 2
+		sbp.border_width_right = 2
+		sbp.border_width_top = 2
+		sbp.border_width_bottom = 2
+		sbp.border_color = Color(0, 0, 0, 0.6)
+		pb.add_theme_stylebox_override("normal", sbp)
+		pb.add_theme_stylebox_override("hover", sbp)
+		pb.add_theme_stylebox_override("pressed", sbp)
+		pb.add_theme_color_override("font_color", Color(1, 1, 1, 1) if _luminance(p.color) < 0.55 else Color(0, 0, 0, 1))
+		var pid: String = String(p.id)
+		pb.pressed.connect(func(): _on_preset_picked(pid))
+		p_grid.add_child(pb)
+		_preset_buttons.append(pb)
 
 	# Mode toggle: spray (R) / exact (W). Keys mirror the gizmo letters
 	# users already know from the prop tools.
@@ -256,6 +302,18 @@ func _on_mat_picked(mat_id: int) -> void:
 	_refresh_highlight()
 	material_filter_changed.emit(mat_id)
 
+func _on_preset_picked(pid: String) -> void:
+	_selected_preset = pid
+	_refresh_highlight()
+	preset_changed.emit(pid)
+
+func get_preset() -> String:
+	return _selected_preset
+
+func set_preset(pid: String) -> void:
+	_selected_preset = pid
+	_refresh_highlight()
+
 func _on_shape_picked(s: String) -> void:
 	_selected_shape = s
 	_refresh_highlight()
@@ -283,6 +341,9 @@ func _refresh_highlight() -> void:
 	for i in range(_mat_buttons.size()):
 		var want_id: int = int(MATERIALS[i].id)
 		_mat_buttons[i].modulate = Color(1, 1, 1, 1) if want_id == _selected_mat else Color(0.7, 0.7, 0.7, 1)
+	for i in range(_preset_buttons.size()):
+		var want_pid: String = String(PRESETS[i].id)
+		_preset_buttons[i].modulate = Color(1, 1, 1, 1) if want_pid == _selected_preset else Color(0.65, 0.65, 0.65, 1)
 	for k in _shape_buttons.keys():
 		var btn: Button = _shape_buttons[k]
 		btn.modulate = Color(1, 1, 1, 1) if k == _selected_shape else Color(0.7, 0.7, 0.7, 1)
