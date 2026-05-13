@@ -8,7 +8,7 @@ extends Node3D
 # both the editor (live edit) and main_bootstrap (play scene rebuild).
 
 const BLADE_W: float = 0.6   # billboard quad width (metres)
-const BLADE_H: float = 0.7   # billboard quad height
+const BLADE_H: float = 0.4   # billboard quad height
 const TEX_SIZE: int = 32     # procedural texture resolution
 const GRASS_SHADER := preload("res://grass.gdshader")
 
