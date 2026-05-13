@@ -507,6 +507,7 @@ func _ready() -> void:
 	_foliage_panel.shape_changed.connect(_on_foliage_shape)
 	_foliage_panel.material_filter_changed.connect(_on_foliage_mat_filter)
 	_foliage_panel.mode_changed.connect(_on_foliage_mode)
+	_foliage_panel.wind_changed.connect(_on_foliage_wind)
 	# Exact-mode ghost: a single translucent grass quad that follows the
 	# cursor so the user can preview placement before committing.
 	_foliage_ghost = MeshInstance3D.new()
@@ -582,6 +583,8 @@ func _ready() -> void:
 	# Foliage rehydrate (F9 round-trip or fresh editor open w/ persisted state).
 	if _foliage_node != null and MapState.foliage_instances.size() > 0:
 		_foliage_node.set_state(MapState.foliage_instances)
+	if _foliage_node != null:
+		_apply_foliage_wind_from_state()
 
 func _on_rotation_snap_changed(deg: float) -> void:
 	_rotation_snap_deg = deg
@@ -852,8 +855,10 @@ func _snapshot_to_mapstate() -> void:
 	# Foliage — copy the live instance list out so play / save catches it.
 	if _foliage_node != null:
 		MapState.foliage_instances = _foliage_node.get_state()
+		MapState.foliage_wind = _foliage_node.get_wind()
 	else:
 		MapState.foliage_instances = []
+		MapState.foliage_wind = {}
 
 func _restore_from_mapstate() -> void:
 	# Inverse of _snapshot_to_mapstate. Wipes whatever's currently in the
@@ -976,6 +981,7 @@ func _restore_from_mapstate() -> void:
 	# Foliage rehydrate — wipe + replay the persisted instance list.
 	if _foliage_node != null:
 		_foliage_node.set_state(MapState.foliage_instances)
+		_apply_foliage_wind_from_state()
 
 func _open_pause_menu() -> void:
 	if _pause_menu == null:
@@ -1512,6 +1518,25 @@ func _on_foliage_mat_filter(mat_id: int) -> void:
 func _on_foliage_mode(m: String) -> void:
 	_foliage_mode = m
 	_update_foliage_ghost_visibility()
+
+func _on_foliage_wind(dir: Vector2, lo: float, hi: float, speed: float) -> void:
+	if _foliage_node != null:
+		_foliage_node.set_wind(dir, lo, hi, speed)
+
+func _apply_foliage_wind_from_state() -> void:
+	# Push MapState.foliage_wind into both the live foliage node and the
+	# panel so the persisted feel is what the user sees on open.
+	var w: Dictionary = MapState.foliage_wind
+	if w.is_empty():
+		return
+	var dir := Vector2(float(w.get("dir_x", 1.0)), float(w.get("dir_y", 0.0)))
+	var lo: float = float(w.get("min", 0.04))
+	var hi: float = float(w.get("max", 0.18))
+	var sp: float = float(w.get("speed", 1.8))
+	if _foliage_node != null:
+		_foliage_node.set_wind(dir, lo, hi, sp)
+	if _foliage_panel != null and _foliage_panel.has_method("set_wind"):
+		_foliage_panel.set_wind(dir, lo, hi, sp)
 
 func _update_foliage_ghost_visibility() -> void:
 	# Ghost is exact-mode-only; spray mode shows the brush ring instead.

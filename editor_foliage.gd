@@ -10,6 +10,7 @@ extends Node3D
 const BLADE_W: float = 0.6   # billboard quad width (metres)
 const BLADE_H: float = 0.7   # billboard quad height
 const TEX_SIZE: int = 32     # procedural texture resolution
+const GRASS_SHADER := preload("res://grass.gdshader")
 
 # Per-instance authored state.
 #   { pos: Vector3, scale: float, rot_y: float }
@@ -20,6 +21,14 @@ var _instances: Array = []
 var _mmi: MultiMeshInstance3D = null
 var _multimesh: MultiMesh = null
 var _dirty: bool = false
+var _material: ShaderMaterial = null
+
+# Wind state. Apply via set_wind(); the shader reads them every frame so
+# updating mid-session doesn't need a rebuild.
+var _wind_dir: Vector2 = Vector2(1.0, 0.0)
+var _wind_min: float = 0.04
+var _wind_max: float = 0.18
+var _wind_speed: float = 1.8
 
 func _ready() -> void:
 	_multimesh = MultiMesh.new()
@@ -39,27 +48,21 @@ func _process(_delta: float) -> void:
 		_dirty = false
 
 func _build_blade_mesh() -> Mesh:
-	# Y-billboarded quad shared by every blade. The material's billboard
-	# mode handles the camera-facing rotation per frame, so the mesh
-	# itself is just a centred upright quad.
+	# Y-billboarded quad shared by every blade. Custom shader (grass.gdshader)
+	# does the camera-facing rotation AND adds per-vertex wind sway in
+	# world space so a global wind direction looks coherent across the field.
 	var qm := QuadMesh.new()
 	qm.size = Vector2(BLADE_W, BLADE_H)
 	# Centre vertically at the half-height so the blade sits ON the
 	# terrain hit point with its root at ground level.
 	qm.center_offset = Vector3(0, BLADE_H * 0.5, 0)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_texture = _build_blade_texture()
-	mat.albedo_color = Color(0.7, 1.0, 0.7, 1.0)  # tint the green texture lighter
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-	mat.alpha_scissor_threshold = 0.5
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
-	mat.billboard_keep_scale = true
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
-	# Make grass slightly emissive so dim lighting doesn't kill the whole
-	# carpet visually — bias toward green so it stays grass-coloured.
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-	qm.material = mat
+	_material = ShaderMaterial.new()
+	_material.shader = GRASS_SHADER
+	_material.set_shader_parameter("albedo_tex", _build_blade_texture())
+	_material.set_shader_parameter("albedo_tint", Color(0.7, 1.0, 0.7, 1.0))
+	_material.set_shader_parameter("alpha_scissor", 0.5)
+	_apply_wind_uniforms()
+	qm.material = _material
 	return qm
 
 func _build_blade_texture() -> ImageTexture:
@@ -164,6 +167,33 @@ func get_state() -> Array:
 			"rot_y": float(inst.get("rot_y", 0.0)),
 		})
 	return out
+
+func _apply_wind_uniforms() -> void:
+	if _material == null:
+		return
+	_material.set_shader_parameter("wind_dir", _wind_dir.normalized() if _wind_dir.length() > 0.0001 else Vector2(1, 0))
+	_material.set_shader_parameter("wind_min", _wind_min)
+	_material.set_shader_parameter("wind_max", _wind_max)
+	_material.set_shader_parameter("wind_speed", _wind_speed)
+
+func set_wind(dir: Vector2, lo: float, hi: float, speed: float) -> void:
+	# Public hook for the editor panel + main_bootstrap to push the global
+	# wind feel. Stored locally so a panel poke doesn't need to know about
+	# the material; we re-push every change.
+	_wind_dir = dir
+	_wind_min = max(0.0, lo)
+	_wind_max = max(_wind_min, hi)
+	_wind_speed = max(0.0, speed)
+	_apply_wind_uniforms()
+
+func get_wind() -> Dictionary:
+	return {
+		"dir_x": _wind_dir.x,
+		"dir_y": _wind_dir.y,
+		"min": _wind_min,
+		"max": _wind_max,
+		"speed": _wind_speed,
+	}
 
 func set_state(state: Array) -> void:
 	_instances.clear()

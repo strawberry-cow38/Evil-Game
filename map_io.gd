@@ -195,6 +195,7 @@ func _snapshot_state() -> Dictionary:
 		"placed_triggers": triggers_out,
 		"map_events": events_out,
 		"foliage_instances": foliage_out,
+		"foliage_wind": MapState.foliage_wind.duplicate(),
 	}
 
 func _apply_state(data: Dictionary) -> void:
@@ -289,6 +290,9 @@ func _apply_state(data: Dictionary) -> void:
 			"scale": float(inst.get("scale", 1.0)),
 			"rot_y": float(inst.get("rot_y", 0.0)),
 		})
+	var wind: Dictionary = data.get("foliage_wind", {})
+	if wind is Dictionary:
+		MapState.foliage_wind = wind.duplicate()
 
 # --- Type helpers ----------------------------------------------------------
 

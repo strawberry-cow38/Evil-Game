@@ -57,6 +57,10 @@ var map_events: Array = []
 # editor_foliage.gd's internal shape: { pos: Vector3, scale: float, rot_y: float }.
 # Play scene rebuilds the MultiMesh from this list.
 var foliage_instances: Array = []
+# Global wind feel — drives the grass shader's sway uniforms. Empty dict
+# = play scene uses the shader defaults.
+#   { dir_x, dir_y, min, max, speed }
+var foliage_wind: Dictionary = {}
 
 func has_map() -> bool:
 	return heights.size() > 0 and grid_w > 0 and grid_h > 0
@@ -77,6 +81,7 @@ func clear() -> void:
 	placed_triggers.clear()
 	map_events.clear()
 	foliage_instances.clear()
+	foliage_wind.clear()
 
 func random_player_spawn() -> Vector3:
 	if player_spawns.is_empty():

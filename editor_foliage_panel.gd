@@ -9,6 +9,7 @@ signal density_changed(per_tick: int)
 signal shape_changed(shape: String)
 signal material_filter_changed(mat_id: int)  # -1 = any, 0..3 = paint channel
 signal mode_changed(mode: String)            # "spray" or "exact"
+signal wind_changed(dir: Vector2, lo: float, hi: float, speed: float)
 
 const MATERIALS: Array = [
 	{"id": -1, "label": "Any",   "color": Color(0.40, 0.40, 0.40, 1.0)},
@@ -27,6 +28,20 @@ var _selected_mat: int = 1     # grass by default
 var _selected_shape: String = "circle"
 var _selected_mode: String = "spray"
 var _density: int = 12
+# Wind controls — driven by the bottom section of the panel. Sliders push
+# wind_changed on every value tick so the field reacts live.
+var _wind_dir_deg: float = 0.0
+var _wind_min: float = 0.04
+var _wind_max: float = 0.18
+var _wind_speed: float = 1.8
+var _wind_dir_slider: HSlider = null
+var _wind_min_slider: HSlider = null
+var _wind_max_slider: HSlider = null
+var _wind_speed_slider: HSlider = null
+var _wind_dir_label: Label = null
+var _wind_min_label: Label = null
+var _wind_max_label: Label = null
+var _wind_speed_label: Label = null
 
 func _ready() -> void:
 	visible = false
@@ -122,6 +137,116 @@ func _ready() -> void:
 		grid.add_child(b2)
 		_mat_buttons.append(b2)
 	_refresh_highlight()
+
+	# Wind section. Global feel — once tuned, the same numbers carry into
+	# the play scene via MapState, so authoring + preview match.
+	var wind_hdr := Label.new()
+	wind_hdr.text = "Wind"
+	wind_hdr.modulate = Color(1, 1, 0.7, 1.0)
+	vb.add_child(wind_hdr)
+
+	_wind_dir_label = Label.new()
+	_wind_dir_label.modulate = Color(1, 1, 1, 0.7)
+	vb.add_child(_wind_dir_label)
+	_wind_dir_slider = HSlider.new()
+	_wind_dir_slider.min_value = 0.0
+	_wind_dir_slider.max_value = 360.0
+	_wind_dir_slider.step = 1.0
+	_wind_dir_slider.value = _wind_dir_deg
+	_wind_dir_slider.value_changed.connect(_on_wind_dir)
+	vb.add_child(_wind_dir_slider)
+
+	_wind_min_label = Label.new()
+	_wind_min_label.modulate = Color(1, 1, 1, 0.7)
+	vb.add_child(_wind_min_label)
+	_wind_min_slider = HSlider.new()
+	_wind_min_slider.min_value = 0.0
+	_wind_min_slider.max_value = 1.0
+	_wind_min_slider.step = 0.01
+	_wind_min_slider.value = _wind_min
+	_wind_min_slider.value_changed.connect(_on_wind_min)
+	vb.add_child(_wind_min_slider)
+
+	_wind_max_label = Label.new()
+	_wind_max_label.modulate = Color(1, 1, 1, 0.7)
+	vb.add_child(_wind_max_label)
+	_wind_max_slider = HSlider.new()
+	_wind_max_slider.min_value = 0.0
+	_wind_max_slider.max_value = 2.0
+	_wind_max_slider.step = 0.01
+	_wind_max_slider.value = _wind_max
+	_wind_max_slider.value_changed.connect(_on_wind_max)
+	vb.add_child(_wind_max_slider)
+
+	_wind_speed_label = Label.new()
+	_wind_speed_label.modulate = Color(1, 1, 1, 0.7)
+	vb.add_child(_wind_speed_label)
+	_wind_speed_slider = HSlider.new()
+	_wind_speed_slider.min_value = 0.0
+	_wind_speed_slider.max_value = 8.0
+	_wind_speed_slider.step = 0.1
+	_wind_speed_slider.value = _wind_speed
+	_wind_speed_slider.value_changed.connect(_on_wind_speed)
+	vb.add_child(_wind_speed_slider)
+	_refresh_wind_labels()
+
+func _refresh_wind_labels() -> void:
+	if _wind_dir_label != null:
+		_wind_dir_label.text = "Dir: %d°" % int(round(_wind_dir_deg))
+	if _wind_min_label != null:
+		_wind_min_label.text = "Calm sway: %.2f" % _wind_min
+	if _wind_max_label != null:
+		_wind_max_label.text = "Gust sway: %.2f" % _wind_max
+	if _wind_speed_label != null:
+		_wind_speed_label.text = "Speed: %.1f" % _wind_speed
+
+func _on_wind_dir(v: float) -> void:
+	_wind_dir_deg = v
+	_refresh_wind_labels()
+	_emit_wind()
+
+func _on_wind_min(v: float) -> void:
+	_wind_min = v
+	# Keep max >= min so the lerp never inverts.
+	if _wind_max < _wind_min:
+		_wind_max = _wind_min
+		if _wind_max_slider != null:
+			_wind_max_slider.set_value_no_signal(_wind_max)
+	_refresh_wind_labels()
+	_emit_wind()
+
+func _on_wind_max(v: float) -> void:
+	_wind_max = max(v, _wind_min)
+	if _wind_max_slider != null and v < _wind_min:
+		_wind_max_slider.set_value_no_signal(_wind_max)
+	_refresh_wind_labels()
+	_emit_wind()
+
+func _on_wind_speed(v: float) -> void:
+	_wind_speed = v
+	_refresh_wind_labels()
+	_emit_wind()
+
+func _emit_wind() -> void:
+	var rad: float = deg_to_rad(_wind_dir_deg)
+	wind_changed.emit(Vector2(cos(rad), sin(rad)), _wind_min, _wind_max, _wind_speed)
+
+func set_wind(dir: Vector2, lo: float, hi: float, speed: float) -> void:
+	# Used during state hydrate so opening the panel reflects the persisted
+	# wind feel without a hand re-tune.
+	var d: Vector2 = dir.normalized() if dir.length() > 0.0001 else Vector2(1, 0)
+	_wind_dir_deg = rad_to_deg(atan2(d.y, d.x))
+	if _wind_dir_deg < 0.0:
+		_wind_dir_deg += 360.0
+	_wind_min = lo
+	_wind_max = max(hi, lo)
+	_wind_speed = speed
+	if _wind_dir_slider != null:
+		_wind_dir_slider.set_value_no_signal(_wind_dir_deg)
+		_wind_min_slider.set_value_no_signal(_wind_min)
+		_wind_max_slider.set_value_no_signal(_wind_max)
+		_wind_speed_slider.set_value_no_signal(_wind_speed)
+	_refresh_wind_labels()
 
 func _luminance(c: Color) -> float:
 	return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b

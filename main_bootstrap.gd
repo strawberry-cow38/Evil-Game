@@ -64,6 +64,14 @@ func _ready() -> void:
 		foliage_root.name = "Foliage"
 		add_child(foliage_root)
 		foliage_root.set_state(MapState.foliage_instances)
+		var w: Dictionary = MapState.foliage_wind
+		if not w.is_empty():
+			foliage_root.set_wind(
+				Vector2(float(w.get("dir_x", 1.0)), float(w.get("dir_y", 0.0))),
+				float(w.get("min", 0.04)),
+				float(w.get("max", 0.18)),
+				float(w.get("speed", 1.8)),
+			)
 	# Roads — extruded slab over the authored bezier chains. Needs the
 	# terrain reference so its samples match the surface the editor previewed.
 	if not MapState.roads.is_empty():
