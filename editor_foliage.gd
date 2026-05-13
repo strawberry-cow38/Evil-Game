@@ -6,7 +6,7 @@ extends Node3D
 # through MapState as plain JSON. Used by both the editor and
 # main_bootstrap.
 
-const TEX_SIZE: int = 32
+const TEX_SIZE: int = 128
 const GRASS_SHADER := preload("res://grass.gdshader")
 const DEFAULT_PRESET: String = "short_green"
 
