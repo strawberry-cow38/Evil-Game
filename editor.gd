@@ -505,6 +505,7 @@ func _ready() -> void:
 		tb.repeat_mode = String(entry.get("repeat_mode", "once"))
 		tb.repeat_count = int(entry.get("repeat_count", 1))
 		tb.repeat_cooldown = float(entry.get("repeat_cooldown", 1.0))
+		tb.destroy_after_fire = bool(entry.get("destroy_after_fire", false))
 		add_child(tb)
 		tb.global_transform = entry.get("xform", Transform3D.IDENTITY)
 		_placed_props.append(tb)
@@ -706,6 +707,7 @@ func _snapshot_to_mapstate() -> void:
 			"repeat_mode":       String(box.repeat_mode),
 			"repeat_count":      int(box.repeat_count),
 			"repeat_cooldown":   float(box.repeat_cooldown),
+			"destroy_after_fire": bool(box.destroy_after_fire),
 		})
 	MapState.map_events.clear()
 	if _events_panel != null:
@@ -835,6 +837,7 @@ func _restore_from_mapstate() -> void:
 		tb.repeat_mode = String(tentry.get("repeat_mode", "once"))
 		tb.repeat_count = int(tentry.get("repeat_count", 1))
 		tb.repeat_cooldown = float(tentry.get("repeat_cooldown", 1.0))
+		tb.destroy_after_fire = bool(tentry.get("destroy_after_fire", false))
 		add_child(tb)
 		tb.global_transform = tentry.get("xform", Transform3D.IDENTITY)
 		_placed_props.append(tb)

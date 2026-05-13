@@ -21,6 +21,16 @@ var _player_ref: Node3D = null
 #     fires_done: int,     # how many times this trigger has fired
 #     last_fire_t: float } # secs since trigger fire (for cooldown)
 var _state: Dictionary = {}
+# Dead triggers don't tick anymore. Populated when a trigger with
+# destroy_after_fire fires, or when a Destroy event targets a trigger's
+# prop_id (self or otherwise). Using a flag instead of mutating the
+# triggers array keeps the per-frame for-loop safe against concurrent
+# changes from event callbacks (including self-targeting fires).
+var _dead: Dictionary = {}  # trigger_id → true
+# prop_id → trigger_id lookup so Destroy events can resolve trigger
+# targets (which never exist as live runtime nodes, so they wouldn't
+# show up in props_by_id).
+var _trigger_pid_to_tid: Dictionary = {}
 var _t_global: float = 0.0
 
 func setup(p_triggers: Array, p_events: Array, p_props_by_id: Dictionary) -> void:
@@ -29,6 +39,9 @@ func setup(p_triggers: Array, p_events: Array, p_props_by_id: Dictionary) -> voi
 	props_by_id = p_props_by_id
 	for tr in triggers:
 		_state[String(tr.get("trigger_id", ""))] = {"armed": false, "fires_done": 0, "last_fire_t": -1e9}
+		var pid: String = String(tr.get("prop_id", ""))
+		if pid != "":
+			_trigger_pid_to_tid[pid] = String(tr.get("trigger_id", ""))
 
 func _process(delta: float) -> void:
 	_t_global += delta
@@ -39,6 +52,8 @@ func _process(delta: float) -> void:
 
 func _tick_trigger(tr: Dictionary) -> void:
 	var tid: String = String(tr.get("trigger_id", ""))
+	if _dead.get(tid, false):
+		return
 	var st: Dictionary = _state.get(tid, {})
 	if st.is_empty():
 		return
@@ -61,6 +76,11 @@ func _tick_trigger(tr: Dictionary) -> void:
 		st["last_fire_t"] = _t_global
 		st["fires_done"] = fires_done + 1
 		_fire_trigger(tr)
+		# Self-destruct flag — even if an event the trigger fires also
+		# targets the trigger, this just sets the same flag twice. Mark
+		# AFTER _fire_trigger so synchronous self-fire still gets to run.
+		if bool(tr.get("destroy_after_fire", false)):
+			_dead[tid] = true
 	_state[tid] = st
 
 func _trigger_world_aabb(tr: Dictionary) -> AABB:
@@ -184,10 +204,20 @@ func _apply_event(event_id: String) -> void:
 	match kind:
 		"destroy":
 			for pid in targets:
-				var n: Node = props_by_id.get(String(pid), null)
+				var spid: String = String(pid)
+				var n: Node = props_by_id.get(spid, null)
 				if n != null and is_instance_valid(n):
 					n.queue_free()
-					props_by_id.erase(String(pid))
+					props_by_id.erase(spid)
+				# Trigger volumes have no runtime node, so destroying one
+				# means marking it dead in the eval list. Works for both
+				# self-destruct (trigger targets its own prop_id) and
+				# chain-destruct (trigger A kills trigger B). The _dead
+				# flag short-circuits _tick_trigger before any condition
+				# eval, so a self-fire that destroys self is safe — the
+				# already-scheduled fire still applies, future ticks skip.
+				if _trigger_pid_to_tid.has(spid):
+					_dead[String(_trigger_pid_to_tid[spid])] = true
 
 func _find_event(event_id: String) -> Dictionary:
 	for ev in events:
