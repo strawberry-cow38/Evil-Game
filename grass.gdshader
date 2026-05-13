@@ -8,7 +8,7 @@ render_mode unshaded, cull_disabled, depth_draw_opaque, shadows_disabled, specul
 // MultiMesh feeds us per-instance MODEL_MATRIX; the instance origin doubles
 // as a phase seed so neighbouring blades don't bend in lockstep.
 
-uniform sampler2D albedo_tex : source_color, filter_linear_mipmap_anisotropic;
+uniform sampler2D albedo_tex : source_color, filter_nearest_mipmap;
 uniform vec4 albedo_tint : source_color = vec4(0.7, 1.0, 0.7, 1.0);
 uniform float alpha_scissor : hint_range(0.0, 1.0) = 0.5;
 // World-space horizontal wind direction (xz). Length is informational only;
@@ -54,14 +54,7 @@ void vertex() {
 }
 
 void fragment() {
-	vec4 c = texture(albedo_tex, UV);
-	// Mipmap alpha-coverage compensation. As distance grows the box-filtered
-	// mip chain averages blade alpha against empty pixels, so the silhouette
-	// fades below the scissor and the field melts into ground. Boost alpha
-	// proportional to the active LOD so distant patches keep their density.
-	float lod = textureQueryLod(albedo_tex, UV).y;
-	c.a = clamp(c.a * (1.0 + 0.35 * lod), 0.0, 1.0);
-	c *= albedo_tint;
+	vec4 c = texture(albedo_tex, UV) * albedo_tint;
 	if (c.a < alpha_scissor) {
 		discard;
 	}

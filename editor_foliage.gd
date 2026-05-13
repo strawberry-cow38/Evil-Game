@@ -6,7 +6,7 @@ extends Node3D
 # through MapState as plain JSON. Used by both the editor and
 # main_bootstrap.
 
-const TEX_SIZE: int = 128
+const TEX_SIZE: int = 32
 const GRASS_SHADER := preload("res://grass.gdshader")
 const DEFAULT_PRESET: String = "short_green"
 
@@ -83,7 +83,11 @@ func _build_blade_mesh(p: Dictionary) -> Mesh:
 
 func _build_blade_texture() -> ImageTexture:
 	var img := Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0, 0, 0, 0))
+	# Fill transparent pixels with the blade's mid-tone (alpha 0) so the mip
+	# chain averages toward the silhouette colour instead of toward black.
+	# Without this, distant mips mix bright blade rgb with (0,0,0,0) and
+	# produce dark fringes that look like blackness at the carpet horizon.
+	img.fill(Color(1.0, 1.0, 1.0, 0.0))
 	for x in range(TEX_SIZE):
 		for y in range(TEX_SIZE):
 			var u: float = float(x) / float(TEX_SIZE - 1)
