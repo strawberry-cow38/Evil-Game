@@ -72,10 +72,13 @@ func _build_blade_texture() -> ImageTexture:
 			var u: float = float(x) / float(TEX_SIZE - 1)
 			var v: float = float(y) / float(TEX_SIZE - 1)
 			# Three blade columns with slight curvature; widest at the base.
+			# QuadMesh UV has V=0 at the top edge of the quad (tip, away
+			# from terrain), V=1 at the bottom (root, on ground), so the
+			# thickness/shade gradients are anchored to V=1 = root.
 			var blade_centre_a: float = 0.18 + 0.03 * sin(v * PI)
 			var blade_centre_b: float = 0.5  + 0.05 * cos(v * PI * 0.8)
 			var blade_centre_c: float = 0.82 - 0.03 * sin(v * PI)
-			var thickness: float = lerp(0.10, 0.02, v)
+			var thickness: float = lerp(0.02, 0.10, v)
 			var d_a: float = absf(u - blade_centre_a)
 			var d_b: float = absf(u - blade_centre_b)
 			var d_c: float = absf(u - blade_centre_c)
