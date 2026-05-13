@@ -89,7 +89,13 @@ var _item_spawn_ghost_mat: StandardMaterial3D = null
 # interface (set_selected, get_aabb_local) so picking + gizmo binding
 # treats them uniformly. Source id lives on each node.
 var _placed_props: Array[Node3D] = []
+# Multi-select. `_selected_prop` is the *primary* (last clicked) — drives
+# the gizmo target + side panels. `_selected_props` is the full set; the
+# primary is always its last element. Shift+LMB toggles membership; plain
+# LMB replaces. Plain LMB on empty clears everything; shift on empty is
+# a no-op.
 var _selected_prop: Node3D = null
+var _selected_props: Array[Node3D] = []
 # Item-spawn cubes (Spawns → Items). Owned separately because they
 # don't participate in the gizmo / selection pipeline — they're plain
 # colored cubes whose contents come from a roll table at play-mode
@@ -145,7 +151,8 @@ var _pause_menu: PanelContainer = null
 # Object clipboard. Empty dict = nothing copied. `paste_at_mouse` true
 # after a cut so V drops the copy where the cursor is; false after a
 # copy so V re-stamps at the original transform (paste-in-place).
-var _object_clipboard: Dictionary = {}
+var _object_clipboard: Array = []
+var _clipboard_paste_at_mouse: bool = false
 # Transform clipboard for the Ctrl+B / Ctrl+N pose-snapshot tool. The
 # bottom-left Global/Local toggle gates what gets captured: global only
 # copies world position, local copies the full world transform (pos +
@@ -153,6 +160,16 @@ var _object_clipboard: Dictionary = {}
 # values live in this dict, not in any node ref.
 var _xform_clipboard: Dictionary = {}
 var _use_local_space: bool = false
+# Undo / redo stacks. Each entry is {kind: "spawn"/"delete"/"transform",
+# data: ...}. spawn → undo deletes via prop_id, redo respawns from
+# snapshots. delete → mirror. transform → per-prop_id before/after
+# Transform3D maps. New commands clear _redo_stack. _gizmo_drag_start
+# captures pre-drag xforms keyed by prop_id so a successful drag pushes
+# a single transform command on release.
+var _undo_stack: Array = []
+var _redo_stack: Array = []
+var _gizmo_drag_start: Dictionary = {}
+const UNDO_LIMIT: int = 200
 @onready var _world_env: WorldEnvironment = $WorldEnvironment
 @onready var _sun: DirectionalLight3D = $Sun
 # Road authoring node. Owns its own visuals; we proxy clicks + E into it
@@ -643,6 +660,14 @@ func _input(event: InputEvent) -> void:
 			_xform_capture()
 		elif event.keycode == KEY_N:
 			_xform_apply()
+		elif event.keycode == KEY_Z:
+			# Ctrl+Shift+Z is the conventional alt redo binding.
+			if event.shift_pressed:
+				_apply_redo()
+			else:
+				_apply_undo()
+		elif event.keycode == KEY_Y:
+			_apply_redo()
 
 func _enter_play_mode() -> void:
 	_snapshot_to_mapstate()
@@ -787,6 +812,10 @@ func _restore_from_mapstate() -> void:
 			s.queue_free()
 	_spawn_visuals.clear()
 	_selected_prop = null
+	_selected_props.clear()
+	# Load wipes history — old commands reference now-freed nodes.
+	_undo_stack.clear()
+	_redo_stack.clear()
 	if _gizmo != null:
 		_gizmo.set_target(null)
 	# Rehydrate spawns + props.
@@ -1057,6 +1086,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	# In-progress drag always consumes the release, even over UI / look-mode.
 	if _drag_handle != "" and not event.pressed:
+		_finish_gizmo_drag()
 		_drag_handle = ""
 		return
 	if _is_over_ui() or _camera.is_looking():
@@ -1161,6 +1191,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			_pick_prop_under_cursor()
 		else:
+			if _drag_handle != "":
+				_finish_gizmo_drag()
 			_drag_handle = ""
 
 func _apply_tool(world_pos: Vector3, delta: float) -> void:
@@ -1420,6 +1452,7 @@ func _spawn_effect_at(effect_id: String, world_pos: Vector3) -> void:
 	box.global_position = world_pos
 	_placed_props.append(box)
 	_select_prop(box)
+	_push_undo({"kind": "spawn", "snapshots": [_snapshot_prop_box(box)]})
 
 func _spawn_item_box(table_id: String, color: Color, world_pos: Vector3) -> void:
 	var box: Node3D = Node3D.new()
@@ -1449,16 +1482,31 @@ func _spawn_object_at(object_id: String, world_pos: Vector3) -> void:
 	box.global_position = world_pos
 	_placed_props.append(box)
 	_select_prop(box)
+	_push_undo({"kind": "spawn", "snapshots": [_snapshot_prop_box(box)]})
 
 func _select_prop(box: Node3D) -> void:
-	if _selected_prop != null and is_instance_valid(_selected_prop):
-		_selected_prop.set_selected(false)
-	_selected_prop = box
-	if box != null:
-		box.set_selected(true)
-	# Re-bind the gizmo to the new selection. If nothing's selected the
-	# gizmo hides itself; if something IS selected, default to the
-	# translate gizmo so the user doesn't need to hit Q just to nudge it.
+	# Single-select replacement. Clears any existing multi-select.
+	if box == null:
+		_apply_selection([], null)
+	else:
+		_apply_selection([box], box)
+
+func _apply_selection(new_set: Array, primary: Node3D) -> void:
+	# Turn off old highlights, swap arrays, turn on new ones, rebind gizmo.
+	# Primary is the gizmo target and side-panel source; it must be a
+	# member of new_set or null. new_set may be empty for clear.
+	for box in _selected_props:
+		if box != null and is_instance_valid(box) and box.has_method("set_selected"):
+			box.set_selected(false)
+	var typed: Array[Node3D] = []
+	for b in new_set:
+		if b != null and is_instance_valid(b):
+			typed.append(b as Node3D)
+	_selected_props = typed
+	_selected_prop = primary if primary != null and is_instance_valid(primary) else null
+	for box in _selected_props:
+		if box.has_method("set_selected"):
+			box.set_selected(true)
 	if _gizmo != null:
 		_gizmo.set_target(_selected_prop)
 		if _selected_prop != null and _gizmo.mode == _gizmo.MODE_NONE:
@@ -1466,6 +1514,26 @@ func _select_prop(box: Node3D) -> void:
 	_refresh_container_panel()
 	_refresh_object_props_panel()
 	_refresh_trigger_panel()
+
+func _toggle_in_selection(box: Node3D) -> void:
+	# Shift+click handler. If already selected, remove (primary falls
+	# back to whatever else is left). If not selected, add as primary.
+	if box == null:
+		return
+	var idx: int = _selected_props.find(box)
+	var new_set: Array = []
+	var primary: Node3D = null
+	if idx >= 0:
+		for b in _selected_props:
+			if b != box:
+				new_set.append(b)
+		primary = new_set.back() if new_set.size() > 0 else null
+	else:
+		for b in _selected_props:
+			new_set.append(b)
+		new_set.append(box)
+		primary = box
+	_apply_selection(new_set, primary)
 
 # Show + bind the loot-table picker iff the current selection is a crate;
 # hide it otherwise. Called from _select_prop and from the table-list
@@ -1543,6 +1611,7 @@ func _spawn_trigger_at(world_pos: Vector3) -> void:
 	tb.global_position = world_pos
 	_placed_props.append(tb)
 	_select_prop(tb)
+	_push_undo({"kind": "spawn", "snapshots": [_snapshot_prop_box(tb)]})
 
 func _on_eyedropper_armed(event_id: String) -> void:
 	_eyedropper_event_id = event_id
@@ -1614,8 +1683,8 @@ func _apply_event_hover_tint() -> void:
 	for box in _placed_props:
 		if not is_instance_valid(box) or not "prop_id" in box:
 			continue
-		if box == _selected_prop:
-			continue  # leave selection visual alone
+		if _selected_props.has(box):
+			continue  # leave selection visual alone for the whole selection set
 		var on: bool = hover_ids.has(String(box.prop_id))
 		if box.has_method("set_selected"):
 			box.set_selected(on)
@@ -1639,50 +1708,80 @@ func _on_hp_changed(v: int) -> void:
 # cubes don't carry the same per-placement settings yet — when they do,
 # extend the clipboard dict's `kind` field accordingly).
 func _clipboard_copy() -> void:
-	var box: Node3D = _selected_prop
-	if box == null or not is_instance_valid(box) or not "object_id" in box:
+	# Snapshot every currently-selected prop. Each snap is a freshly
+	# minted dict (no node refs) and carries its kind so paste dispatches
+	# properly across effects / objects / triggers.
+	var snaps: Array = []
+	for box in _selected_props:
+		var s: Dictionary = _snapshot_prop_box(box)
+		if not s.is_empty():
+			snaps.append(s)
+	if snaps.is_empty():
 		return
-	_object_clipboard = _snapshot_object_box(box)
-	_object_clipboard["paste_at_mouse"] = false
+	_object_clipboard = snaps
+	_clipboard_paste_at_mouse = false
 
 func _clipboard_cut() -> void:
-	var box: Node3D = _selected_prop
-	if box == null or not is_instance_valid(box) or not "object_id" in box:
+	# Same as copy, but the selection is then deleted (which itself
+	# pushes a delete-undo command separate from any later paste).
+	var snaps: Array = []
+	for box in _selected_props:
+		var s: Dictionary = _snapshot_prop_box(box)
+		if not s.is_empty():
+			snaps.append(s)
+	if snaps.is_empty():
 		return
-	_object_clipboard = _snapshot_object_box(box)
-	_object_clipboard["paste_at_mouse"] = true
+	_object_clipboard = snaps
+	_clipboard_paste_at_mouse = true
 	_delete_selected_prop()
 
 func _clipboard_paste() -> void:
 	if _object_clipboard.is_empty():
 		return
-	var oid: String = String(_object_clipboard.get("object_id", ""))
-	if oid == "":
-		return
-	var box: Node3D = Node3D.new()
-	box.set_script(OBJECT_BOX_SCRIPT)
-	box.object_id = oid
-	add_child(box)
-	# Default: re-stamp at the source transform (paste-in-place, sits
-	# inside the original). After a cut, retarget origin to the cursor
-	# so the paste lands where the user is looking.
-	var xform: Transform3D = _object_clipboard.get("xform", Transform3D.IDENTITY)
-	if bool(_object_clipboard.get("paste_at_mouse", false)):
+	# Group offset: if pasting at the cursor (after a cut), centre the
+	# group's centroid on the cursor; otherwise stamp at source xforms
+	# (paste-in-place, useful for duplicating in situ).
+	var delta: Vector3 = Vector3.ZERO
+	if _clipboard_paste_at_mouse:
 		var hit: Dictionary = _raycast_cursor()
 		if not hit.is_empty():
-			xform.origin = hit.position
-	box.global_transform = xform
-	box.loot_table_id = String(_object_clipboard.get("loot_table_id", ""))
-	box.roll_count_override = int(_object_clipboard.get("roll_count_override", -1))
-	box.no_collide = bool(_object_clipboard.get("no_collide", false))
-	box.destructible = bool(_object_clipboard.get("destructible", false))
-	box.hp_max = int(_object_clipboard.get("hp_max", 100))
-	_placed_props.append(box)
-	_select_prop(box)
-	# After a cut+paste, behave like a copy from now on so subsequent V
-	# keeps stamping copies at the source xform.
-	_object_clipboard["paste_at_mouse"] = false
-	_object_clipboard["xform"] = box.global_transform
+			var centroid: Vector3 = Vector3.ZERO
+			var n: int = 0
+			for s in _object_clipboard:
+				var t: Transform3D = (s as Dictionary).get("xform", Transform3D.IDENTITY)
+				centroid += t.origin
+				n += 1
+			if n > 0:
+				centroid /= float(n)
+			delta = hit.position - centroid
+	# Stamp each snapshot. Each gets a fresh prop_id / trigger_id so we
+	# don't collide with the originals (or with previous paste rounds).
+	var fresh: Array = []
+	var spawn_snaps: Array = []
+	for s in _object_clipboard:
+		var dup: Dictionary = (s as Dictionary).duplicate(true)
+		# Strip ids so the boxes generate new ones on _ready.
+		dup.erase("prop_id")
+		if dup.has("trigger_id"):
+			dup.erase("trigger_id")
+		var t2: Transform3D = dup.get("xform", Transform3D.IDENTITY)
+		t2.origin = t2.origin + delta
+		dup["xform"] = t2
+		var b: Node3D = _spawn_from_snapshot(dup)
+		if b != null:
+			fresh.append(b)
+			# Re-snapshot after spawn so the undo entry carries the new
+			# prop_id (the original copy didn't have one).
+			spawn_snaps.append(_snapshot_prop_box(b))
+	if fresh.size() > 0:
+		_apply_selection(fresh, fresh.back())
+		_push_undo({"kind": "spawn", "snapshots": spawn_snaps})
+	# After a cut+paste, subsequent V should keep stamping at the
+	# original (post-paste) layout, not retarget to cursor again.
+	_clipboard_paste_at_mouse = false
+	# Update clipboard xforms so consecutive pastes don't re-stack.
+	for i in range(min(_object_clipboard.size(), spawn_snaps.size())):
+		(_object_clipboard[i] as Dictionary)["xform"] = (spawn_snaps[i] as Dictionary).get("xform", Transform3D.IDENTITY)
 
 # Pose snapshot tied to the bottom-left Global/Local toggle. Global mode
 # only stamps position; Local mode stamps the full transform (pos + rot
@@ -1723,6 +1822,8 @@ func _xform_apply() -> void:
 
 func _snapshot_object_box(box: Node3D) -> Dictionary:
 	return {
+		"kind":                "object",
+		"prop_id":             String(box.get("prop_id")),
 		"object_id":           String(box.object_id),
 		"xform":               box.global_transform,
 		"loot_table_id":       String(box.get("loot_table_id")),
@@ -1789,26 +1890,205 @@ func _pick_prop_under_cursor() -> void:
 		if t >= 0.0 and t < best_t:
 			best_t = t
 			best = box
-	# Clicking on empty space (no box hit) deselects — same convention as
-	# every other 3D editor. Gizmo handle picks short-circuit before this
-	# runs, so dragging an arrow off into space won't accidentally drop
-	# the selection.
-	_select_prop(best)
+	# Shift+LMB adds/removes from selection. Plain LMB replaces. Plain
+	# LMB on empty deselects everything (gizmo handle picks short-circuit
+	# upstream so dragging an arrow off into space won't drop selection).
+	# Shift on empty is a no-op — preserves selection during fiddly picks.
+	var additive: bool = Input.is_key_pressed(KEY_SHIFT)
+	if additive:
+		if best != null:
+			_toggle_in_selection(best)
+	else:
+		_select_prop(best)
 
 func _delete_selected_prop() -> void:
-	if _selected_prop == null:
+	# Deletes everything in _selected_props (single-select degrades to a
+	# 1-element list). Records a single undo command for the whole batch.
+	if _selected_props.is_empty():
 		return
-	var doomed: Node3D = _selected_prop
-	_placed_props.erase(doomed)
-	_selected_prop = null
-	if _gizmo != null:
-		_gizmo.set_target(null)
+	var snaps: Array = []
+	var doomed_list: Array = _selected_props.duplicate()
+	for box in doomed_list:
+		if box == null or not is_instance_valid(box):
+			continue
+		var snap: Dictionary = _snapshot_prop_box(box)
+		if not snap.is_empty():
+			snaps.append(snap)
+		_placed_props.erase(box)
+		box.queue_free()
+	_apply_selection([], null)
 	_drag_handle = ""
-	doomed.queue_free()
-	# Hide the per-selection side panels — selection's gone, their UI
-	# should follow.
-	_refresh_container_panel()
-	_refresh_object_props_panel()
+	if not snaps.is_empty():
+		_push_undo({"kind": "delete", "snapshots": snaps})
+
+func _snapshot_prop_box(box: Node3D) -> Dictionary:
+	# Unified snapshot covering object / effect / trigger boxes. The
+	# returned dict round-trips through _spawn_from_snapshot.
+	if box == null or not is_instance_valid(box):
+		return {}
+	if "trigger_id" in box:
+		return {
+			"kind":               "trigger",
+			"prop_id":            String(box.get("prop_id")),
+			"trigger_id":         String(box.trigger_id),
+			"xform":              box.global_transform,
+			"conditions":         (box.conditions as Array).duplicate(true),
+			"logic_op":           String(box.logic_op),
+			"fire_event_ids":     (box.fire_event_ids as Array).duplicate(),
+			"delay":              float(box.delay),
+			"inter_event_delay":  float(box.inter_event_delay),
+			"repeat_mode":        String(box.repeat_mode),
+			"repeat_count":       int(box.repeat_count),
+			"repeat_cooldown":    float(box.repeat_cooldown),
+			"destroy_after_fire": bool(box.destroy_after_fire),
+			"visible_in_play":    bool(box.visible_in_play),
+		}
+	if "object_id" in box and String(box.object_id) != "":
+		return _snapshot_object_box(box)
+	if "effect_id" in box and String(box.effect_id) != "":
+		return {
+			"kind":     "effect",
+			"effect_id": String(box.effect_id),
+			"prop_id":   String(box.get("prop_id")),
+			"xform":     box.global_transform,
+		}
+	return {}
+
+func _spawn_from_snapshot(snap: Dictionary) -> Node3D:
+	# Inverse of _snapshot_prop_box. Reuses the original prop_id /
+	# trigger_id so event-target wiring + undo identity stays stable.
+	var kind: String = String(snap.get("kind", "object"))
+	var box: Node3D = Node3D.new()
+	if kind == "trigger":
+		box.set_script(TRIGGER_BOX_SCRIPT)
+		if snap.has("prop_id") and String(snap["prop_id"]) != "":
+			box.prop_id = String(snap["prop_id"])
+		if snap.has("trigger_id") and String(snap["trigger_id"]) != "":
+			box.trigger_id = String(snap["trigger_id"])
+		box.conditions = (snap.get("conditions", []) as Array).duplicate(true)
+		box.logic_op = String(snap.get("logic_op", "and"))
+		box.fire_event_ids = (snap.get("fire_event_ids", []) as Array).duplicate()
+		box.delay = float(snap.get("delay", 0.0))
+		box.inter_event_delay = float(snap.get("inter_event_delay", 0.0))
+		box.repeat_mode = String(snap.get("repeat_mode", "once"))
+		box.repeat_count = int(snap.get("repeat_count", 1))
+		box.repeat_cooldown = float(snap.get("repeat_cooldown", 1.0))
+		box.destroy_after_fire = bool(snap.get("destroy_after_fire", false))
+		box.visible_in_play = bool(snap.get("visible_in_play", false))
+	elif kind == "effect":
+		box.set_script(EFFECT_BOX_SCRIPT)
+		box.effect_id = String(snap.get("effect_id", ""))
+		if snap.has("prop_id") and String(snap["prop_id"]) != "":
+			box.prop_id = String(snap["prop_id"])
+	else:
+		box.set_script(OBJECT_BOX_SCRIPT)
+		box.object_id = String(snap.get("object_id", ""))
+		if snap.has("prop_id") and String(snap["prop_id"]) != "":
+			box.prop_id = String(snap["prop_id"])
+	add_child(box)
+	box.global_transform = snap.get("xform", Transform3D.IDENTITY)
+	if kind == "object":
+		box.loot_table_id = String(snap.get("loot_table_id", ""))
+		box.roll_count_override = int(snap.get("roll_count_override", -1))
+		box.no_collide = bool(snap.get("no_collide", false))
+		box.destructible = bool(snap.get("destructible", false))
+		box.hp_max = int(snap.get("hp_max", 100))
+	_placed_props.append(box)
+	return box
+
+func _find_prop_by_id(pid: String) -> Node3D:
+	if pid == "":
+		return null
+	for box in _placed_props:
+		if not is_instance_valid(box):
+			continue
+		if "prop_id" in box and String(box.prop_id) == pid:
+			return box
+	return null
+
+func _delete_props_by_ids(ids: Array) -> void:
+	# Used by undo of spawn / redo of delete. Operates by prop_id so
+	# stale Node refs don't matter.
+	var doomed: Array = []
+	for pid in ids:
+		var b: Node3D = _find_prop_by_id(String(pid))
+		if b != null:
+			doomed.append(b)
+	for b in doomed:
+		_placed_props.erase(b)
+		b.queue_free()
+	# Drop any deleted nodes from the live selection so the gizmo
+	# doesn't keep a stale target.
+	var keep: Array = []
+	for s in _selected_props:
+		if s != null and is_instance_valid(s) and not doomed.has(s):
+			keep.append(s)
+	var prim: Node3D = keep.back() if keep.size() > 0 else null
+	_apply_selection(keep, prim)
+
+func _push_undo(cmd: Dictionary) -> void:
+	_undo_stack.append(cmd)
+	if _undo_stack.size() > UNDO_LIMIT:
+		_undo_stack.pop_front()
+	_redo_stack.clear()
+
+func _apply_undo() -> void:
+	if _undo_stack.is_empty():
+		return
+	var cmd: Dictionary = _undo_stack.pop_back()
+	_invert_command(cmd, true)
+	_redo_stack.append(cmd)
+
+func _apply_redo() -> void:
+	if _redo_stack.is_empty():
+		return
+	var cmd: Dictionary = _redo_stack.pop_back()
+	_invert_command(cmd, false)
+	_undo_stack.append(cmd)
+
+func _invert_command(cmd: Dictionary, undo: bool) -> void:
+	# Apply or revert a command. `undo=true` means we're playing the
+	# command backwards (popping from undo); `undo=false` is redo.
+	var kind: String = String(cmd.get("kind", ""))
+	match kind:
+		"spawn":
+			# Forward = spawn; backward = delete by prop_id.
+			if undo:
+				var ids: Array = []
+				for s in cmd.get("snapshots", []):
+					ids.append(String((s as Dictionary).get("prop_id", "")))
+				_delete_props_by_ids(ids)
+			else:
+				var fresh: Array = []
+				for s in cmd.get("snapshots", []):
+					var b: Node3D = _spawn_from_snapshot(s)
+					if b != null:
+						fresh.append(b)
+				if fresh.size() > 0:
+					_apply_selection(fresh, fresh.back())
+		"delete":
+			# Forward = delete; backward = respawn from snapshots.
+			if undo:
+				var fresh2: Array = []
+				for s in cmd.get("snapshots", []):
+					var b: Node3D = _spawn_from_snapshot(s)
+					if b != null:
+						fresh2.append(b)
+				if fresh2.size() > 0:
+					_apply_selection(fresh2, fresh2.back())
+			else:
+				var ids2: Array = []
+				for s in cmd.get("snapshots", []):
+					ids2.append(String((s as Dictionary).get("prop_id", "")))
+				_delete_props_by_ids(ids2)
+		"transform":
+			var target: Dictionary = cmd.get("befores", {}) if undo else cmd.get("afters", {})
+			for pid in target.keys():
+				var b: Node3D = _find_prop_by_id(String(pid))
+				if b != null:
+					b.global_transform = target[pid]
+			if _gizmo != null and _selected_prop != null:
+				_gizmo.set_target(_selected_prop)
 
 func _try_start_gizmo_drag() -> bool:
 	if _gizmo == null or _gizmo.mode == _gizmo.MODE_NONE or _selected_prop == null:
@@ -1901,6 +2181,14 @@ func _try_start_gizmo_drag() -> bool:
 		_drag_axis = pick.get("axis", Vector3.RIGHT)
 		var ap: Vector3 = _closest_point_on_axis(from, dir, _drag_anchor, _drag_axis)
 		_drag_offset = _drag_anchor - ap
+	# Capture per-selected pre-drag xforms — used by both the multi-target
+	# replay in _continue_gizmo_drag and the transform-command push when
+	# the drag releases.
+	_gizmo_drag_start.clear()
+	for sb in _selected_props:
+		if sb == null or not is_instance_valid(sb) or not "prop_id" in sb:
+			continue
+		_gizmo_drag_start[String(sb.prop_id)] = sb.global_transform
 	return true
 
 func _continue_gizmo_drag() -> void:
@@ -1977,6 +2265,64 @@ func _continue_gizmo_drag() -> void:
 		if snap:
 			new_pos = _snap_translate_axis(new_pos, _drag_axis)
 		_selected_prop.global_position = new_pos
+	# Multi-select replay: mirror the primary's delta onto siblings.
+	# Translate handles propagate the position delta verbatim. Rotate
+	# handles compose the rotation around the primary's pre-drag origin.
+	# Scale handles intentionally stay single-target — propagating
+	# arbitrary-orientation per-axis scale to siblings is ambiguous.
+	if _selected_props.size() > 1:
+		var primary_pid: String = String(_selected_prop.get("prop_id"))
+		if _gizmo_drag_start.has(primary_pid):
+			var p_start: Transform3D = _gizmo_drag_start[primary_pid]
+			var p_now: Transform3D = _selected_prop.global_transform
+			if _drag_handle.begins_with("r"):
+				var r_delta: Basis = p_now.basis.orthonormalized() * p_start.basis.orthonormalized().inverse()
+				var pivot: Vector3 = p_start.origin
+				for sb in _selected_props:
+					if sb == _selected_prop:
+						continue
+					if sb == null or not is_instance_valid(sb) or not "prop_id" in sb:
+						continue
+					var spid: String = String(sb.prop_id)
+					if not _gizmo_drag_start.has(spid):
+						continue
+					var s_start: Transform3D = _gizmo_drag_start[spid]
+					var s_new: Transform3D = s_start
+					s_new.basis = r_delta * s_start.basis
+					s_new.origin = pivot + r_delta * (s_start.origin - pivot)
+					sb.global_transform = s_new
+			elif _drag_handle.begins_with("p") or _drag_handle in ["x", "y", "z"] or (not _drag_handle.begins_with("s") and not _drag_handle.begins_with("r")):
+				var d_pos: Vector3 = p_now.origin - p_start.origin
+				for sb in _selected_props:
+					if sb == _selected_prop:
+						continue
+					if sb == null or not is_instance_valid(sb) or not "prop_id" in sb:
+						continue
+					var spid2: String = String(sb.prop_id)
+					if not _gizmo_drag_start.has(spid2):
+						continue
+					var s_start2: Transform3D = _gizmo_drag_start[spid2]
+					sb.global_position = s_start2.origin + d_pos
+
+func _finish_gizmo_drag() -> void:
+	# Called when LMB releases mid-drag. Pushes a single transform
+	# command containing every prop that actually moved.
+	if _gizmo_drag_start.is_empty():
+		return
+	var befores: Dictionary = {}
+	var afters: Dictionary = {}
+	for pid in _gizmo_drag_start.keys():
+		var b: Node3D = _find_prop_by_id(String(pid))
+		if b == null:
+			continue
+		var before: Transform3D = _gizmo_drag_start[pid]
+		var after: Transform3D = b.global_transform
+		if not before.is_equal_approx(after):
+			befores[pid] = before
+			afters[pid] = after
+	_gizmo_drag_start.clear()
+	if not befores.is_empty():
+		_push_undo({"kind": "transform", "befores": befores, "afters": afters})
 
 func _snap_translate_axis(new_pos: Vector3, axis: Vector3) -> Vector3:
 	# Snap motion to multiples of the object's world-space width along `axis`.
