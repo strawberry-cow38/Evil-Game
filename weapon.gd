@@ -326,18 +326,18 @@ const RECOIL_PATTERN_M249: Array[Vector2] = [
 # tiny, but accuracy is shot to hell by barrel walk + spin precession —
 # real recoil is in the bloom, not the climb.
 const RECOIL_PATTERN_MINIGUN: Array[Vector2] = [
-	Vector2(-0.08, 0.30),
-	Vector2(-0.14, 0.36),
-	Vector2(-0.04, 0.40),
-	Vector2(-0.18, 0.42),
-	Vector2( 0.04, 0.42),
-	Vector2(-0.22, 0.40),
-	Vector2( 0.08, 0.38),
-	Vector2(-0.26, 0.36),
-	Vector2( 0.10, 0.34),
-	Vector2(-0.30, 0.32),
-	Vector2( 0.12, 0.30),
-	Vector2(-0.32, 0.28),
+	Vector2(-0.25, 1.55),
+	Vector2(-0.50, 1.75),
+	Vector2(-0.15, 1.90),
+	Vector2(-0.65, 2.00),
+	Vector2( 0.20, 2.00),
+	Vector2(-0.85, 1.95),
+	Vector2( 0.25, 1.90),
+	Vector2(-1.00, 1.85),
+	Vector2( 0.40, 1.80),
+	Vector2(-1.20, 1.75),
+	Vector2( 0.50, 1.70),
+	Vector2(-1.35, 1.65),
 ]
 # PM Makarov: small pistol, light upward kick, mild drift.
 const RECOIL_PATTERN_MAKAROV: Array[Vector2] = [
@@ -1010,6 +1010,12 @@ var _laser_beam: MeshInstance3D
 var _laser_beam_im: ImmediateMesh
 var _laser_beam_mat: StandardMaterial3D
 var _profile: Dictionary = {}
+# Minigun spin throttle. 0 = idle, 1 = fully spun (firing enabled).
+# Driven by RMB hold while the minigun is equipped; spins back down on
+# release. Player.gd reads this to scale move speed + block jump.
+const MINIGUN_SPINUP_TIME: float = 1.2
+const MINIGUN_SPINDOWN_TIME: float = 1.8
+var _minigun_spin_t: float = 0.0
 var _fire_streams: Dictionary = {}     # weapon key -> Array[AudioStream]
 var _burst_fire_streams: Dictionary = {}  # weapon key -> AudioStream (one per burst)
 var _ammo := 0
@@ -1653,6 +1659,12 @@ func _play_fire_sound_with(stream: AudioStream) -> void:
 func is_ads() -> bool:
 	return _player != null and _player.has_method("is_ads") and _player.is_ads()
 
+func is_minigun_equipped() -> bool:
+	return _current_weapon == "minigun"
+
+func get_minigun_spin() -> float:
+	return _minigun_spin_t
+
 # True if the equipped weapon should render the scope overlay when ADS.
 func has_scope() -> bool:
 	if bool(_active_mods.get("scope", false)):
@@ -1776,6 +1788,16 @@ func _process(delta: float) -> void:
 				_reloading = false
 				_finish_reload()
 
+	# Minigun spin-up driven by RMB hold. Spins back down on release. Cannot
+	# spin while reloading (mag swap interrupts the throttle). Only the
+	# minigun owns this state; other weapons keep it at 0.
+	if _current_weapon == "minigun":
+		var want_spin: bool = Input.is_action_pressed("ads") and not _reloading and now >= _pullout_until
+		var spin_rate: float = (1.0 / MINIGUN_SPINUP_TIME) if want_spin else -(1.0 / MINIGUN_SPINDOWN_TIME)
+		_minigun_spin_t = clamp(_minigun_spin_t + spin_rate * delta, 0.0, 1.0)
+	else:
+		_minigun_spin_t = 0.0
+
 	# Decide whether to fire this frame based on mode. Per-round reload only
 	# allows fire if at least one round has finished loading — partway through
 	# the current round's window the shell isn't seated yet, so trigger does
@@ -1804,7 +1826,9 @@ func _process(delta: float) -> void:
 		# Per-profile override lets weapons like the G11 (hyperburst) crank
 		# intra-burst cyclic well past the global default.
 		interval /= float(_profile.get("burst_rpm_mult", BURST_RPM_MULT))
-	if want_fire and _ammo > 0 and now - _last_fire_time >= interval and now >= _pullout_until:
+	# Minigun must be fully spun before any round leaves the barrel.
+	var minigun_ready: bool = _current_weapon != "minigun" or _minigun_spin_t >= 1.0
+	if want_fire and _ammo > 0 and now - _last_fire_time >= interval and now >= _pullout_until and minigun_ready:
 		_fire(now)
 		_ammo -= 1
 		if _fire_mode == FireMode.BURST:

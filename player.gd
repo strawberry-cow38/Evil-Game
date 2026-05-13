@@ -373,7 +373,11 @@ func _process(delta: float) -> void:
 	# Bolt-action rifles force the player out of ADS for the cycle window so
 	# the scope kicks off the screen between shots.
 	var ads_locked: bool = _weapon != null and _weapon.has_method("is_ads_locked") and _weapon.is_ads_locked()
-	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not is_pie_open() and not weapon_reloading and not ads_locked
+	# Minigun hijacks RMB for spin-up — never treat its RMB hold as ADS,
+	# otherwise the camera would zoom in mid-spin and the FOV lerp would
+	# fight the minigun viewmodel.
+	var minigun_equipped: bool = _weapon != null and _weapon.has_method("is_minigun_equipped") and _weapon.is_minigun_equipped()
+	_ads = Input.is_action_pressed("ads") and not is_menu_open() and not is_pie_open() and not weapon_reloading and not ads_locked and not minigun_equipped
 
 	# ADS FOV zoom. Sniper scopes override the default ADS FOV via profile.
 	var ads_fov: float = FOV_ADS
@@ -446,11 +450,18 @@ func _physics_process(delta: float) -> void:
 	if not is_on_floor():
 		velocity += get_gravity() * delta
 
-	if Input.is_action_just_pressed("jump") and is_on_floor() and not _crouched:
+	# Minigun spin-up locks out jumping + scales speed down toward half so
+	# you commit to your position before opening up. mg_spin == 0 means
+	# either not equipped or not spinning, so the gates are inert.
+	var mg_spin: float = 0.0
+	if _weapon != null and _weapon.has_method("get_minigun_spin"):
+		mg_spin = _weapon.get_minigun_spin()
+	var mg_speed_mult: float = lerp(1.0, 0.5, mg_spin)
+	if Input.is_action_just_pressed("jump") and is_on_floor() and not _crouched and mg_spin <= 0.0:
 		velocity.y = JUMP_VELOCITY
 
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var sprinting := Input.is_action_pressed("sprint") and input_dir.y < 0.0 and not _crouched
+	var sprinting := Input.is_action_pressed("sprint") and input_dir.y < 0.0 and not _crouched and mg_spin <= 0.0
 	var forward_speed := SPEED_FORWARD if input_dir.y < 0.0 else SPEED_BACK
 	if sprinting:
 		forward_speed = SPEED_SPRINT
@@ -458,6 +469,8 @@ func _physics_process(delta: float) -> void:
 	if _crouched:
 		forward_speed *= CROUCH_SPEED_MULT
 		strafe_speed *= CROUCH_SPEED_MULT
+	forward_speed *= mg_speed_mult
+	strafe_speed *= mg_speed_mult
 	var local_vel := Vector3(input_dir.x * strafe_speed, 0.0, input_dir.y * forward_speed)
 	var world_vel := transform.basis * local_vel
 	if input_dir != Vector2.ZERO:
