@@ -784,6 +784,8 @@ const PROFILES := {
 		"ammo_id": "ammo_47x33",
 		"reload_time": 3.4,
 		"pullout_time": 1.2,
+		# 4.73×33mm is caseless — no brass to clatter off the floor.
+		"no_shell_impact": true,
 		# 2160 RPM hyperburst — three rounds dump in ~83ms total.
 		"burst_rpm_mult": 3.6,
 		"burst_fire_sound": "res://assets/audio/Shot_GTEK473mm.ogg",
