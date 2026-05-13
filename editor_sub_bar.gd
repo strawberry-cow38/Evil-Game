@@ -15,6 +15,10 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 		{"id": "t_flatten", "label": "Flatten"},
 		{"id": "t_smooth",  "label": "Smooth"},
 		{"id": "t_ramp",    "label": "Ramp"},
+		# Foliage authoring. Spray brush + remove brush share the foliage
+		# panel; spray's R/W toggle handles exact vs brush placement.
+		{"id": "t_foliage_paint",  "label": "Foliage"},
+		{"id": "t_foliage_remove", "label": "Remove Foliage"},
 	],
 	"environment": [
 		{"id": "e_lighting", "label": "Lighting"},

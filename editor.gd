@@ -29,6 +29,8 @@ const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
 const TOOL_E_ROADS := "e_roads"
 const TOOL_E_PAINT := "e_paint"
+const TOOL_F_PAINT := "t_foliage_paint"
+const TOOL_F_REMOVE := "t_foliage_remove"
 
 const EFFECT_BOX_SCRIPT := preload("res://editor_effect_box.gd")
 const OBJECT_BOX_SCRIPT := preload("res://editor_object_box.gd")
@@ -43,6 +45,8 @@ const PAUSE_MENU_SCRIPT := preload("res://editor_pause_menu.gd")
 const ROADS_SCRIPT := preload("res://editor_roads.gd")
 const ROADS_PANEL_SCRIPT := preload("res://editor_roads_panel.gd")
 const PAINT_PANEL_SCRIPT := preload("res://editor_terrain_paint_panel.gd")
+const FOLIAGE_PANEL_SCRIPT := preload("res://editor_foliage_panel.gd")
+const FOLIAGE_SCRIPT := preload("res://editor_foliage.gd")
 const SNAP_WIDGET_SCRIPT := preload("res://editor_snap_widget.gd")
 const EVENTS_PANEL_SCRIPT := preload("res://editor_events_panel.gd")
 const TRIGGER_PANEL_SCRIPT := preload("res://editor_trigger_panel.gd")
@@ -180,6 +184,16 @@ var _roads_panel: PanelContainer = null
 var _paint_panel: PanelContainer = null
 var _paint_material_id: int = 1   # 1 = grass
 var _paint_shape: String = "circle"
+# Foliage authoring state. Live foliage instances are owned by the
+# editor_foliage Node3D below; the editor keeps the brush settings and
+# the exact-mode ghost preview.
+var _foliage_panel: PanelContainer = null
+var _foliage_node: Node3D = null
+var _foliage_density: int = 12
+var _foliage_shape: String = "circle"
+var _foliage_mat_filter: int = 1     # -1 = any
+var _foliage_mode: String = "spray"  # "spray" or "exact"
+var _foliage_ghost: MeshInstance3D = null
 # Snap settings panel — bottom-left, shown while placement tools are active.
 var _snap_widget: PanelContainer = null
 var _rotation_snap_deg: float = 15.0
@@ -471,6 +485,44 @@ func _ready() -> void:
 	$UI.add_child(_paint_panel)
 	_paint_panel.material_changed.connect(_on_paint_material)
 	_paint_panel.shape_changed.connect(_on_paint_shape)
+	# Foliage authoring — backing Node3D (lives under the editor root, NOT
+	# under Terrain, so a terrain rebuild doesn't blow away the MultiMesh)
+	# plus a side panel for density / shape / lock-to-material / mode.
+	_foliage_node = Node3D.new()
+	_foliage_node.set_script(FOLIAGE_SCRIPT)
+	_foliage_node.name = "Foliage"
+	add_child(_foliage_node)
+	_foliage_panel = PanelContainer.new()
+	_foliage_panel.set_script(FOLIAGE_PANEL_SCRIPT)
+	_foliage_panel.anchor_left = 1.0
+	_foliage_panel.anchor_right = 1.0
+	_foliage_panel.anchor_top = 0.0
+	_foliage_panel.anchor_bottom = 0.0
+	_foliage_panel.offset_left = -260
+	_foliage_panel.offset_right = -16
+	_foliage_panel.offset_top = 90
+	_foliage_panel.offset_bottom = 480
+	$UI.add_child(_foliage_panel)
+	_foliage_panel.density_changed.connect(_on_foliage_density)
+	_foliage_panel.shape_changed.connect(_on_foliage_shape)
+	_foliage_panel.material_filter_changed.connect(_on_foliage_mat_filter)
+	_foliage_panel.mode_changed.connect(_on_foliage_mode)
+	# Exact-mode ghost: a single translucent grass quad that follows the
+	# cursor so the user can preview placement before committing.
+	_foliage_ghost = MeshInstance3D.new()
+	var fg_qm := QuadMesh.new()
+	fg_qm.size = Vector2(0.6, 0.7)
+	fg_qm.center_offset = Vector3(0, 0.35, 0)
+	var fg_mat := StandardMaterial3D.new()
+	fg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fg_mat.albedo_color = Color(0.5, 1.0, 0.55, 0.55)
+	fg_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
+	fg_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	fg_qm.material = fg_mat
+	_foliage_ghost.mesh = fg_qm
+	_foliage_ghost.visible = false
+	add_child(_foliage_ghost)
 	# Events panel (left rail) — global named-events list with eyedropper.
 	_events_panel = PanelContainer.new()
 	_events_panel.set_script(EVENTS_PANEL_SCRIPT)
@@ -527,6 +579,9 @@ func _ready() -> void:
 		add_child(tb)
 		tb.global_transform = entry.get("xform", Transform3D.IDENTITY)
 		_placed_props.append(tb)
+	# Foliage rehydrate (F9 round-trip or fresh editor open w/ persisted state).
+	if _foliage_node != null and MapState.foliage_instances.size() > 0:
+		_foliage_node.set_state(MapState.foliage_instances)
 
 func _on_rotation_snap_changed(deg: float) -> void:
 	_rotation_snap_deg = deg
@@ -615,6 +670,18 @@ func _input(event: InputEvent) -> void:
 				var hit3 := _raycast_cursor()
 				if not hit3.is_empty():
 					_spawn_trigger_at(hit3.position)
+	# Foliage mode toggle: R = spray brush, W = exact placement w/ ghost.
+	# Only active when the Foliage Paint tool is selected, so the same
+	# keys still drive the gizmo when a prop is being edited.
+	if event is InputEventKey and event.pressed and not event.echo and _active_tool == TOOL_F_PAINT:
+		if event.keycode == KEY_R:
+			if _foliage_panel != null:
+				_foliage_panel.set_mode("spray")
+			return
+		elif event.keycode == KEY_W:
+			if _foliage_panel != null:
+				_foliage_panel.set_mode("exact")
+			return
 	# Q → translate gizmo. Only when an effect is selected and the
 	# camera isn't grabbing the key for fly-down (camera only consumes
 	# Q while MMB is held).
@@ -782,6 +849,11 @@ func _snapshot_to_mapstate() -> void:
 		})
 	if _roads_node != null:
 		MapState.roads = _roads_node.get_state()
+	# Foliage — copy the live instance list out so play / save catches it.
+	if _foliage_node != null:
+		MapState.foliage_instances = _foliage_node.get_state()
+	else:
+		MapState.foliage_instances = []
 
 func _restore_from_mapstate() -> void:
 	# Inverse of _snapshot_to_mapstate. Wipes whatever's currently in the
@@ -901,6 +973,9 @@ func _restore_from_mapstate() -> void:
 		_apply_lighting(MapState.lighting)
 	if _roads_node != null:
 		_roads_node.set_state(MapState.roads)
+	# Foliage rehydrate — wipe + replay the persisted instance list.
+	if _foliage_node != null:
+		_foliage_node.set_state(MapState.foliage_instances)
 
 func _open_pause_menu() -> void:
 	if _pause_menu == null:
@@ -1036,9 +1111,30 @@ func _process(delta: float) -> void:
 		_actor_spawn_ghost_mat.albedo_color = Color(acol.r, acol.g, acol.b, 0.45)
 		_actor_spawn_ghost.visible = true
 		return
+	# Foliage exact-mode ghost: single billboard follows the cursor so the
+	# user previews placement before clicking.
+	if _active_tool == TOOL_F_PAINT and _foliage_mode == "exact":
+		_brush_ring.hide_ring()
+		if _is_over_ui():
+			_foliage_ghost.visible = false
+			return
+		var fg_hit := _raycast_cursor()
+		if fg_hit.is_empty():
+			_foliage_ghost.visible = false
+			return
+		_foliage_ghost.global_position = fg_hit.position
+		_foliage_ghost.visible = true
+		return
+	else:
+		if _foliage_ghost != null:
+			_foliage_ghost.visible = false
 	# Brush ring only makes sense for terrain brushes; spawn tools use
 	# pinpoint clicks.
-	var is_brush_tool: bool = _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE, TOOL_S_ACTORS_REMOVE, TOOL_E_PAINT]
+	# TOOL_F_PAINT only counts as a brush while in spray mode — exact
+	# mode places one billboard per LMB click via _unhandled_input, so we
+	# don't want _apply_tool ticking every frame.
+	var foliage_brush_active: bool = (_active_tool == TOOL_F_PAINT and _foliage_mode == "spray") or _active_tool == TOOL_F_REMOVE
+	var is_brush_tool: bool = foliage_brush_active or _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE, TOOL_S_ACTORS_REMOVE, TOOL_E_PAINT]
 	if not is_brush_tool:
 		_brush_ring.hide_ring()
 		return
@@ -1177,6 +1273,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		pr.y = _terrain.sample_height(pr)
 		_roads_node.on_click(pr, Vector3i(-1, -1, -1))
 		return
+	# Foliage exact-place: each LMB press drops a single billboard at the
+	# cursor. Spray mode is handled by the per-frame _apply_tool path.
+	if _active_tool == TOOL_F_PAINT and _foliage_mode == "exact" and event.pressed:
+		var fhit := _raycast_cursor()
+		if not fhit.is_empty():
+			_foliage_try_place(fhit.position)
+		return
 	# Effects / Objects / Triggers tools: LMB picks a gizmo handle first
 	# (so dragging an arrow doesn't deselect the prop underneath). Falls
 	# through to pick the box itself if no handle was hit. Release ends
@@ -1212,6 +1315,11 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 			_remove_actor_spawns_in_radius(world_pos, _brush_radius)
 		TOOL_E_PAINT:
 			_terrain.paint_brush(world_pos, _brush_radius, 4.0 * s, delta, _paint_material_id, _paint_shape)
+		TOOL_F_PAINT:
+			_foliage_spray(world_pos)
+		TOOL_F_REMOVE:
+			if _foliage_node != null:
+				_foliage_node.remove_in_radius(world_pos, _brush_radius, _foliage_shape)
 
 func _raycast_cursor() -> Dictionary:
 	# Two cursor modes:
@@ -1237,7 +1345,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _actor_tables_panel, _clothing_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel, _paint_panel, _roads_panel, _snap_widget, _events_panel, _trigger_panel]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _actor_tables_panel, _clothing_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel, _paint_panel, _foliage_panel, _roads_panel, _snap_widget, _events_panel, _trigger_panel]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -1255,14 +1363,20 @@ func _on_category_picked(category: String) -> void:
 
 func _on_tool_picked(tool_id: String) -> void:
 	_active_tool = tool_id
-	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE or tool_id == TOOL_E_PAINT
+	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE or tool_id == TOOL_E_PAINT or tool_id == TOOL_F_PAINT or tool_id == TOOL_F_REMOVE
 	_radius_widget.visible = is_brush_tool
 	if _paint_panel != null:
 		_paint_panel.visible = (tool_id == TOOL_E_PAINT)
 		if tool_id == TOOL_E_PAINT:
 			_brush_ring.set_shape(_paint_shape)
+		elif tool_id == TOOL_F_PAINT or tool_id == TOOL_F_REMOVE:
+			_brush_ring.set_shape(_foliage_shape)
 		else:
 			_brush_ring.set_shape("circle")
+	if _foliage_panel != null:
+		_foliage_panel.visible = (tool_id == TOOL_F_PAINT or tool_id == TOOL_F_REMOVE)
+	# Hide the exact-mode ghost unless we're in foliage paint + exact.
+	_update_foliage_ghost_visibility()
 	_space_toggle.visible = tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS or tool_id == TOOL_L_TRIGGERS
 	if _snap_widget != null:
 		_snap_widget.visible = tool_id == TOOL_L_EFFECTS or tool_id == TOOL_O_OBJECTS or tool_id == TOOL_L_TRIGGERS
@@ -1380,6 +1494,92 @@ func _on_radius_changed(r: float) -> void:
 
 func _on_strength_changed(s: float) -> void:
 	_brush_strength = s
+
+# --- Foliage callbacks + helpers ---------------------------------------------
+
+func _on_foliage_density(d: int) -> void:
+	_foliage_density = d
+
+func _on_foliage_shape(s: String) -> void:
+	_foliage_shape = s
+	# Mirror onto the brush ring so the visual matches the spray footprint.
+	if _active_tool == TOOL_F_PAINT or _active_tool == TOOL_F_REMOVE:
+		_brush_ring.set_shape(s)
+
+func _on_foliage_mat_filter(mat_id: int) -> void:
+	_foliage_mat_filter = mat_id
+
+func _on_foliage_mode(m: String) -> void:
+	_foliage_mode = m
+	_update_foliage_ghost_visibility()
+
+func _update_foliage_ghost_visibility() -> void:
+	# Ghost is exact-mode-only; spray mode shows the brush ring instead.
+	# The per-frame branch in _process owns the live position; this only
+	# kills the visual instantly when the user flips away.
+	if _foliage_ghost == null:
+		return
+	if _active_tool != TOOL_F_PAINT or _foliage_mode != "exact":
+		_foliage_ghost.visible = false
+
+func _foliage_mat_passes(world_pos: Vector3) -> bool:
+	# Returns true if the active material filter allows foliage at this
+	# sample point. -1 = any (always passes). Otherwise sample the nearest
+	# terrain paint vertex and require the matching channel to dominate.
+	if _foliage_mat_filter < 0:
+		return true
+	if _terrain == null or _terrain.paint.is_empty():
+		return false
+	var g: Vector2 = _terrain.world_to_grid(world_pos)
+	var gx: int = int(round(g.x))
+	var gy: int = int(round(g.y))
+	if gx < 0 or gy < 0 or gx >= _terrain.GRID_W or gy >= _terrain.GRID_H:
+		return false
+	var c: Color = _terrain.paint[gx + gy * _terrain.GRID_W]
+	# Pick the strongest channel; if the user's locked material isn't it,
+	# bail. Channels: 0=dirt(r), 1=grass(g), 2=stone(b), 3=sand(a).
+	var weights := [c.r, c.g, c.b, c.a]
+	var best: int = 0
+	for i in range(1, 4):
+		if weights[i] > weights[best]:
+			best = i
+	return best == _foliage_mat_filter
+
+func _foliage_spray(world_pos: Vector3) -> void:
+	# Per-tick spray: throw _foliage_density samples within the brush
+	# footprint, drop instances that pass the material filter, jittered in
+	# scale + yaw so the carpet doesn't look stamped.
+	if _foliage_node == null:
+		return
+	for i in range(_foliage_density):
+		var dx: float
+		var dz: float
+		if _foliage_shape == "square":
+			dx = randf_range(-_brush_radius, _brush_radius)
+			dz = randf_range(-_brush_radius, _brush_radius)
+		else:
+			# Uniform disk sample — sqrt on the radial keeps density even
+			# rather than clustering toward the centre.
+			var r: float = sqrt(randf()) * _brush_radius
+			var a: float = randf() * TAU
+			dx = cos(a) * r
+			dz = sin(a) * r
+		var sample: Vector3 = world_pos + Vector3(dx, 0, dz)
+		if not _foliage_mat_passes(sample):
+			continue
+		sample.y = _terrain.sample_height(sample)
+		_foliage_node.add_instance(sample, randf_range(0.85, 1.15), randf_range(0.0, TAU))
+
+func _foliage_try_place(world_pos: Vector3) -> void:
+	# Exact-mode single placement. Honours the material lock so the user
+	# can't accidentally drop a blade on a stone patch they're avoiding.
+	if _foliage_node == null:
+		return
+	if not _foliage_mat_passes(world_pos):
+		return
+	var p: Vector3 = world_pos
+	p.y = _terrain.sample_height(p)
+	_foliage_node.add_instance(p, randf_range(0.9, 1.1), randf_range(0.0, TAU))
 
 # Spawn-marker visual: vertical pillar with a flag on top, tinted
 # cyan. Used both for committed markers and the placement ghost

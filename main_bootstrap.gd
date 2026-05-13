@@ -18,6 +18,7 @@ const DUMMY_HEAD_SCRIPT := preload("res://dummy_head.gd")
 const CORPSE_SCRIPT := preload("res://corpse.gd")
 const TRIGGER_RUNTIME := preload("res://trigger_runtime.gd")
 const TRIGGER_BOX_SCRIPT := preload("res://editor_trigger_box.gd")
+const FOLIAGE_SCRIPT := preload("res://editor_foliage.gd")
 const NOTHING_ITEM_ID := "nothing"
 # Loot rolls per actor death — drop_table_id is rolled this many times
 # and each non-nothing result is shoved into the corpse container.
@@ -54,6 +55,15 @@ func _ready() -> void:
 			terrain.paint = MapState.terrain_paint.duplicate()
 		terrain.rebuild()
 		terrain_node = terrain
+	# Foliage — single MultiMeshInstance3D rebuilt from authored instances.
+	# Independent of terrain (already y-baked at spray time), but only useful
+	# alongside an editor map; legacy flat-ground play has no foliage anyway.
+	if not MapState.foliage_instances.is_empty():
+		var foliage_root := Node3D.new()
+		foliage_root.set_script(FOLIAGE_SCRIPT)
+		foliage_root.name = "Foliage"
+		add_child(foliage_root)
+		foliage_root.set_state(MapState.foliage_instances)
 	# Roads — extruded slab over the authored bezier chains. Needs the
 	# terrain reference so its samples match the surface the editor previewed.
 	if not MapState.roads.is_empty():

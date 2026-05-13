@@ -53,6 +53,10 @@ var placed_triggers: Array = []
 # Named events authored in the Events panel. Each entry:
 #   { "id": String, "name": String, "kind": String, "targets": Array[String of prop_ids] }
 var map_events: Array = []
+# Foliage instances authored via Terrain → Foliage. Each entry mirrors
+# editor_foliage.gd's internal shape: { pos: Vector3, scale: float, rot_y: float }.
+# Play scene rebuilds the MultiMesh from this list.
+var foliage_instances: Array = []
 
 func has_map() -> bool:
 	return heights.size() > 0 and grid_w > 0 and grid_h > 0
@@ -72,6 +76,7 @@ func clear() -> void:
 	roads.clear()
 	placed_triggers.clear()
 	map_events.clear()
+	foliage_instances.clear()
 
 func random_player_spawn() -> Vector3:
 	if player_spawns.is_empty():

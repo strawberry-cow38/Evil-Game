@@ -8,7 +8,7 @@ extends Node
 # saves can be rejected (or migrated) instead of silently misloading.
 
 const SAVE_DIR := "user://maps"
-const SCHEMA_VERSION := 4
+const SCHEMA_VERSION := 5
 
 func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(SAVE_DIR))
@@ -170,6 +170,14 @@ func _snapshot_state() -> Dictionary:
 	var events_out: Array = []
 	for ev in MapState.map_events:
 		events_out.append(ev.duplicate(true))
+	# Foliage — Vector3 needs the dict round-trip; scale + rot_y are plain floats.
+	var foliage_out: Array = []
+	for inst in MapState.foliage_instances:
+		foliage_out.append({
+			"pos": _v3_to_dict(inst.get("pos", Vector3.ZERO)),
+			"scale": float(inst.get("scale", 1.0)),
+			"rot_y": float(inst.get("rot_y", 0.0)),
+		})
 	return {
 		"schema": SCHEMA_VERSION,
 		"heights": heights_arr,
@@ -186,6 +194,7 @@ func _snapshot_state() -> Dictionary:
 		"roads": roads_out,
 		"placed_triggers": triggers_out,
 		"map_events": events_out,
+		"foliage_instances": foliage_out,
 	}
 
 func _apply_state(data: Dictionary) -> void:
@@ -274,6 +283,12 @@ func _apply_state(data: Dictionary) -> void:
 		MapState.placed_triggers.append(tdup)
 	for ev in data.get("map_events", []):
 		MapState.map_events.append(ev.duplicate(true))
+	for inst in data.get("foliage_instances", []):
+		MapState.foliage_instances.append({
+			"pos": _dict_to_v3(inst.get("pos", {})),
+			"scale": float(inst.get("scale", 1.0)),
+			"rot_y": float(inst.get("rot_y", 0.0)),
+		})
 
 # --- Type helpers ----------------------------------------------------------
 
