@@ -32,7 +32,7 @@ const DROP_SPREAD := 0.45            # m random radius around drop anchor
 const DROP_HEIGHT := 0.35            # m above floor
 const DROP_WALL_BUFFER := 0.30       # m back-off from wall hit point
 
-const STARTING_WEAPONS: Array[String] = ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "mgl", "shotgun_combat"]
+const STARTING_WEAPONS: Array[String] = ["akm", "sks", "m16a2", "bizon", "mp5sd", "p90", "makarov", "m700", "m249", "m60", "minigun", "mgl", "shotgun_combat"]
 # Quality + condition demo seed — varied so every tier color shows up in the
 # inventory list right at game start.
 const STARTING_WEAPON_INSTANCES: Array = [
@@ -64,6 +64,7 @@ const STARTING_WEAPON_INSTANCES: Array = [
 	{"id": "g11",         "condition": 0.93, "quality": 5},  # Masterwork Pristine
 	{"id": "m249",    "condition": 0.78, "quality": 3},  # Good Worn
 	{"id": "m60",     "condition": 0.20, "quality": 0},  # Awful Ruined
+	{"id": "minigun", "condition": 1.00, "quality": 6},  # Legendary Pristine
 	{"id": "mgl",     "condition": 1.00, "quality": 6},  # Legendary Pristine
 	{"id": "shotgun_combat", "condition": 0.95, "quality": 4},  # Excellent Pristine
 	{"id": "usas12",  "condition": 0.88, "quality": 4},  # Excellent Pristine

@@ -527,6 +527,20 @@ const PROFILES := {
 		"reload_time": 7.5,
 		"pullout_time": 1.9,
 	},
+	"minigun": {
+		"name": "M134 Minigun",
+		"mag_size": 1500,
+		"rpm": 3000.0,
+		"modes": [FireMode.AUTO],
+		"fire_sounds": ["res://assets/audio/Shot_GTEK762mm_BeltA.ogg"],
+		"fire_hold": 0.06,
+		"fire_fade": 0.16,
+		"recoil_pattern": RECOIL_PATTERN_M249,
+		"bloom_mult": 2.5,
+		"ammo_id": "ammo_762nato",
+		"reload_time": 12.0,
+		"pullout_time": 2.5,
+	},
 	"makarov": {
 		"name": "PM Makarov",
 		"mag_size": 8,
@@ -924,7 +938,7 @@ const PROFILES := {
 	},
 }
 const DEFAULT_PULLOUT_TIME := 1.0
-const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "mgl", "shotgun_combat", "ks23", "usas12", "lever_4570", "pistol_4570", "python", "g11"]
+const WEAPON_ORDER := ["akm", "sks", "m16a2", "aug", "fal", "g3", "m14", "stg57", "bar", "garand", "m1903", "bizon", "mp5sd", "ppsh41", "thompson", "uzi", "mac10", "p90", "makarov", "m1911", "m700", "m249", "m60", "minigun", "mgl", "shotgun_combat", "ks23", "usas12", "lever_4570", "pistol_4570", "python", "g11"]
 const GRENADE_SCRIPT := preload("res://grenade.gd")
 const Items = preload("res://items.gd")
 
