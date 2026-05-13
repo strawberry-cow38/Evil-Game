@@ -25,6 +25,7 @@ var repeat_mode: String = "once"  # "once" | "n" | "infinite"
 var repeat_count: int = 1
 var repeat_cooldown: float = 1.0
 var destroy_after_fire: bool = false
+var visible_in_play: bool = false
 # Box size — uniform-scaled by the gizmo's scale handles.
 var _size: Vector3 = SIZE
 

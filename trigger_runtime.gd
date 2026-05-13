@@ -31,6 +31,10 @@ var _dead: Dictionary = {}  # trigger_id → true
 # targets (which never exist as live runtime nodes, so they wouldn't
 # show up in props_by_id).
 var _trigger_pid_to_tid: Dictionary = {}
+# Visual proxies for triggers whose author opted into play-mode
+# visibility. Keyed by trigger_id; queue_freed when the trigger dies so
+# you don't see ghost wireframes for triggers that already fired.
+var _visuals: Dictionary = {}
 var _t_global: float = 0.0
 
 func setup(p_triggers: Array, p_events: Array, p_props_by_id: Dictionary) -> void:
@@ -80,7 +84,7 @@ func _tick_trigger(tr: Dictionary) -> void:
 		# targets the trigger, this just sets the same flag twice. Mark
 		# AFTER _fire_trigger so synchronous self-fire still gets to run.
 		if bool(tr.get("destroy_after_fire", false)):
-			_dead[tid] = true
+			_mark_dead(tid)
 	_state[tid] = st
 
 func _trigger_world_aabb(tr: Dictionary) -> AABB:
@@ -217,7 +221,21 @@ func _apply_event(event_id: String) -> void:
 				# eval, so a self-fire that destroys self is safe — the
 				# already-scheduled fire still applies, future ticks skip.
 				if _trigger_pid_to_tid.has(spid):
-					_dead[String(_trigger_pid_to_tid[spid])] = true
+					_mark_dead(String(_trigger_pid_to_tid[spid]))
+
+func register_visual(trigger_id: String, node: Node) -> void:
+	if trigger_id == "" or node == null:
+		return
+	_visuals[trigger_id] = node
+
+func _mark_dead(trigger_id: String) -> void:
+	if trigger_id == "":
+		return
+	_dead[trigger_id] = true
+	var v: Node = _visuals.get(trigger_id, null)
+	if v != null and is_instance_valid(v):
+		v.queue_free()
+		_visuals.erase(trigger_id)
 
 func _find_event(event_id: String) -> Dictionary:
 	for ev in events:

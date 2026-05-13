@@ -41,6 +41,7 @@ var _repeat_btn: OptionButton
 var _repeat_count_spin: SpinBox
 var _cooldown_spin: SpinBox
 var _destroy_after_chk: CheckBox
+var _visible_in_play_chk: CheckBox
 var _bound_box: Node = null
 var _events_source: Node = null  # editor_events_panel; we read its events list
 var _item_tables: Array = []
@@ -123,6 +124,10 @@ func _ready() -> void:
 	_destroy_after_chk.text = "Destroy trigger after fire"
 	_destroy_after_chk.toggled.connect(func(_v: bool): _push_change())
 	vb.add_child(_destroy_after_chk)
+	_visible_in_play_chk = CheckBox.new()
+	_visible_in_play_chk.text = "Visible in play mode"
+	_visible_in_play_chk.toggled.connect(func(_v: bool): _push_change())
+	vb.add_child(_visible_in_play_chk)
 
 func set_events_source(panel: Node) -> void:
 	_events_source = panel
@@ -148,6 +153,7 @@ func bind(box: Node) -> void:
 	_repeat_count_spin.value = float(box.repeat_count)
 	_cooldown_spin.value = float(box.repeat_cooldown)
 	_destroy_after_chk.button_pressed = bool(box.destroy_after_fire)
+	_visible_in_play_chk.button_pressed = bool(box.visible_in_play)
 	_rebuild_conditions()
 	_rebuild_fire_list()
 	_suppress = false
@@ -272,6 +278,7 @@ func _push_change() -> void:
 	_bound_box.repeat_count = int(_repeat_count_spin.value)
 	_bound_box.repeat_cooldown = float(_cooldown_spin.value)
 	_bound_box.destroy_after_fire = bool(_destroy_after_chk.button_pressed)
+	_bound_box.visible_in_play = bool(_visible_in_play_chk.button_pressed)
 	trigger_changed.emit()
 
 func _label(t: String) -> Label:

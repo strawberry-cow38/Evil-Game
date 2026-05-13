@@ -17,6 +17,7 @@ const DUMMY_SCRIPT := preload("res://dummy.gd")
 const DUMMY_HEAD_SCRIPT := preload("res://dummy_head.gd")
 const CORPSE_SCRIPT := preload("res://corpse.gd")
 const TRIGGER_RUNTIME := preload("res://trigger_runtime.gd")
+const TRIGGER_BOX_SCRIPT := preload("res://editor_trigger_box.gd")
 const NOTHING_ITEM_ID := "nothing"
 # Loot rolls per actor death — drop_table_id is rolled this many times
 # and each non-nothing result is shoved into the corpse container.
@@ -211,6 +212,18 @@ func _ready() -> void:
 		triggers_root.set_script(TRIGGER_RUNTIME)
 		add_child(triggers_root)
 		triggers_root.setup(MapState.placed_triggers, MapState.map_events, props_by_id)
+		# Spawn visual proxies for triggers whose author opted into
+		# play-mode visibility. Reuses the editor box so the rendered look
+		# matches the authoring view. Visuals register with the runtime so
+		# they self-destruct alongside their backing trigger.
+		for tr in MapState.placed_triggers:
+			if not bool(tr.get("visible_in_play", false)):
+				continue
+			var tvis: Node3D = Node3D.new()
+			tvis.set_script(TRIGGER_BOX_SCRIPT)
+			add_child(tvis)
+			tvis.global_transform = tr.get("xform", Transform3D.IDENTITY)
+			triggers_root.register_visual(String(tr.get("trigger_id", "")), tvis)
 	for spec in VEHICLE_SPAWNS:
 		var v := VehicleBody3D.new()
 		v.set_script(VEHICLE)
