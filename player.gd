@@ -46,12 +46,12 @@ const LEAN_ADS_MULT := 0.2
 # (body compresses + drives off), landing fires a bigger downward
 # impulse scaled by impact speed and the kick rebounds back to zero.
 # Stiff/damp pair sits just past critical so it doesn't ring forever.
-const KICK_STIFFNESS := 180.0
-const KICK_DAMPING := 22.0
-const KICK_JUMP_IMPULSE := -1.1     # m/s of camera dip on takeoff
-const KICK_LAND_GAIN := 0.18        # multiplied by impact y-speed
+const KICK_STIFFNESS := 90.0        # ω ≈ 9.5 rad/s → noticeable but not floaty
+const KICK_DAMPING := 14.0
+const KICK_JUMP_IMPULSE := -3.0     # m/s of camera dip on takeoff
+const KICK_LAND_GAIN := 0.5         # multiplied by impact y-speed
 const KICK_LAND_MIN_SPEED := 2.5    # below this, no land kick (avoid stair noise)
-const KICK_LAND_MAX_IMPULSE := -7.0 # cap so terminal-velocity drops don't bottom out
+const KICK_LAND_MAX_IMPULSE := -12.0 # cap so terminal-velocity drops don't bottom out
 
 const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
@@ -176,6 +176,10 @@ var _kick_y: float = 0.0
 var _kick_vel: float = 0.0
 var _was_grounded: bool = true
 var _prev_vy: float = 0.0
+# Bob-free camera base height. Tracked separately so bob + kick offsets
+# don't leak into the crouch/TP height lerp (would cause the camera to
+# slowly ride up while oscillating).
+var _cam_base_y: float = CAMERA_HEIGHT_STAND
 # Mouse motion accumulators applied in _physics_process. With physics
 # interpolation enabled, setting rotation outside the physics tick lets
 # the engine lerp between old and new transforms — feels like yaw lag.
@@ -483,16 +487,6 @@ func _physics_process(delta: float) -> void:
 		_camera.rotation.x = _pitch
 		_yaw_delta = 0.0
 		_pitch_delta = 0.0
-	# Landing edge detection. We were airborne last tick, grounded this
-	# tick → fire a land kick scaled by impact y-speed captured before
-	# the previous move_and_slide zeroed it. Soft stair drops (under
-	# KICK_LAND_MIN_SPEED) skip the kick so walking down geometry doesn't
-	# rattle the camera.
-	if not _was_grounded and is_on_floor():
-		var impact: float = absf(_prev_vy)
-		if impact >= KICK_LAND_MIN_SPEED:
-			var impulse: float = max(KICK_LAND_MAX_IMPULSE, -impact * KICK_LAND_GAIN)
-			_kick_vel += impulse
 	# Crouch height lerp lives in physics so the interpolated camera doesn't
 	# warn about transform changes outside the physics tick.
 	var base_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
@@ -502,16 +496,11 @@ func _physics_process(delta: float) -> void:
 	_tp_blend = lerpf(_tp_blend, tp_target, blend_alpha)
 	var crouch_alpha: float = 1.0 - exp(-CROUCH_LERP_RATE * delta)
 	var base_target_y: float = base_y + TP_UP_BOOST * _tp_blend
+	_cam_base_y = lerpf(_cam_base_y, base_target_y, crouch_alpha)
 	var cam_pos := _camera.position
-	# Lerp the bob-free base height. We strip the previous frame's bob
-	# before lerping so the bob oscillation doesn't smear into the base
-	# height tracking and cause the camera to "ride up" while bobbing.
-	var prev_bob_y: float = _bob_amp * sin(_bob_phase) * BOB_AMP_VERT
-	var prev_bob_x: float = _bob_amp * sin(_bob_phase * 0.5) * BOB_AMP_LAT
-	cam_pos.y = lerpf(cam_pos.y - prev_bob_y, base_target_y, crouch_alpha)
+	cam_pos.y = _cam_base_y
+	cam_pos.x = 0.0
 	cam_pos.z = TP_BACK_DIST * _tp_blend
-	# Strip prev lateral bob too so the camera doesn't drift sideways.
-	cam_pos.x -= prev_bob_x
 	# Advance + apply bob. Phase ties to XZ distance so phase freezes when
 	# stationary. Damp amplitude based on stance: ADS/crouch/TP/airborne
 	# all suppress bob to varying degrees.
@@ -583,6 +572,7 @@ func _physics_process(delta: float) -> void:
 		velocity.z = move_toward(velocity.z, 0.0, SPEED_FORWARD * 2.0)
 		_prev_vy = velocity.y
 		move_and_slide()
+		_check_landing()
 		_was_grounded = is_on_floor()
 		return
 
@@ -624,7 +614,24 @@ func _physics_process(delta: float) -> void:
 
 	_prev_vy = velocity.y
 	move_and_slide()
+	_check_landing()
 	_was_grounded = is_on_floor()
+
+# Edge-detected landing: fires when this tick's move_and_slide put us
+# back on the floor after being airborne last tick. Uses _prev_vy
+# (captured before move_and_slide) so we read the impact speed before
+# collision zeroed it. Soft drops under KICK_LAND_MIN_SPEED skip so
+# walking down short steps doesn't rattle the camera.
+func _check_landing() -> void:
+	if _was_grounded:
+		return
+	if not is_on_floor():
+		return
+	var impact: float = absf(_prev_vy)
+	if impact < KICK_LAND_MIN_SPEED:
+		return
+	var impulse: float = max(KICK_LAND_MAX_IMPULSE, -impact * KICK_LAND_GAIN)
+	_kick_vel += impulse
 
 func _update_interact_target() -> void:
 	if is_menu_open():
