@@ -120,6 +120,11 @@ const RELOAD_HOLD_THRESHOLD := 0.20
 
 var _yaw := 0.0
 var _pitch := 0.0
+# Last position we dropped a grass-wake puff at. Refreshed every
+# WAKE_STEP metres travelled so the trail behind a moving player looks
+# continuous instead of teleporting.
+var _last_wake_pos: Vector3 = Vector3.INF
+const WAKE_STEP: float = 0.4
 # Mouse motion accumulators applied in _physics_process. With physics
 # interpolation enabled, setting rotation outside the physics tick lets
 # the engine lerp between old and new transforms — feels like yaw lag.
@@ -238,6 +243,22 @@ func is_ads() -> bool:
 #  1. random authored player_spawn marker (positioned at terrain
 #     height + 1.2m so we don't clip)
 #  2. fallback to the position the player started at this scene
+func _emit_grass_wake() -> void:
+	# Drop a wake puff every WAKE_STEP metres of horizontal travel. The
+	# foliage node decays + composes these into the shader uniform; no
+	# foliage on the map = silent no-op.
+	if _last_wake_pos == Vector3.INF:
+		_last_wake_pos = global_position
+		return
+	var p: Vector3 = global_position
+	var d: Vector2 = Vector2(p.x - _last_wake_pos.x, p.z - _last_wake_pos.z)
+	if d.length() < WAKE_STEP:
+		return
+	_last_wake_pos = p
+	var fol := get_tree().get_first_node_in_group("foliage")
+	if fol != null and fol.has_method("push_wake"):
+		fol.call("push_wake", p, 3.0)
+
 func _respawn_at_safe_point() -> void:
 	var target: Vector3 = _initial_spawn
 	if MapState != null and not MapState.player_spawns.is_empty():
@@ -435,6 +456,7 @@ func _physics_process(delta: float) -> void:
 	if global_position.y < FALL_SAFETY_Y:
 		_respawn_at_safe_point()
 		return
+	_emit_grass_wake()
 	if is_menu_open():
 		# Hold position while menu is up — gravity still applies so we don't
 		# float, but no input-driven movement.

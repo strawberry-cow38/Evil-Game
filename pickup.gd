@@ -52,6 +52,13 @@ func _ready() -> void:
 	body.add_child(col)
 	add_child(body)
 
+	# Register as a persistent grass displacer so the patch under the
+	# dropped item stays flattened until the item is picked up / freed.
+	# tree_exited inside foliage handles cleanup if we get queue_freed.
+	var fol := get_tree().get_first_node_in_group("foliage")
+	if fol != null and fol.has_method("register_persistent_displacer"):
+		fol.call("register_persistent_displacer", self)
+
 func get_label() -> String:
 	var n: String = Items.item_name(item_id)
 	if not instance.is_empty():

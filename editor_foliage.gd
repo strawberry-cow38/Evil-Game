@@ -27,6 +27,13 @@ const DEFAULT_PRESET: String = "short_green"
 const DENSITY_CELL_SIZE: float = 0.5
 const MAX_PER_CELL: int = 24
 
+# Grass displacement budget. Shader iterates this many slots per vertex,
+# so bumping it costs real GPU. Persistent registrants (items) live in
+# the low end of the array; transient trail wakes (player/vehicle) fill
+# the rest. Newest trail wakes evict oldest when the slice fills.
+const MAX_DISPLACERS: int = 24
+const DEFAULT_WAKE_LIFETIME: float = 3.0
+
 # Preset table. Each preset is one MultiMesh bucket — same shader/texture
 # but its own quad height + tint uniform. Tints picked to read against the
 # terrain paint colours (grass = green, dirt = dry/brown, sand = pale).
@@ -76,12 +83,21 @@ var _shared_shadow_mat: StandardMaterial3D = null
 # / set_state so any caller path stays honest.
 var _density_grid: Dictionary = {}
 
+# Persistent displacers — Node3Ds that flatten grass around themselves
+# until they leave the scene tree. Pickups register here so a dropped
+# apple still looks like it's sitting in matted grass minutes later.
+var _persistent_displacers: Array = []
+# Trail wakes — short-lived flat spots a moving entity drops behind it.
+# Each entry: { "pos": Vector3, "born": float, "lifetime": float }.
+var _wake_trail: Array = []
+
 var _wind_dir: Vector2 = Vector2(1.0, 0.0)
 var _wind_min: float = 0.04
 var _wind_max: float = 0.18
 var _wind_speed: float = 1.8
 
 func _ready() -> void:
+	add_to_group("foliage")
 	_shared_blade_tex = _build_blade_texture()
 	for p in PRESETS:
 		if String(p.get("kind", "grass")) == "shrub":
@@ -98,6 +114,68 @@ func _process(_delta: float) -> void:
 	if _dirty:
 		_rebuild_all()
 		_dirty = false
+	_update_displacer_uniforms()
+
+# Public API — anything that walks/sits on grass calls this. Pickups call
+# register_persistent_displacer once on _ready; movers (player, vehicles)
+# call push_wake every step distance. Both eventually feed the same vec4
+# slot array on the grass shader.
+func register_persistent_displacer(node: Node3D) -> void:
+	if node == null or _persistent_displacers.has(node):
+		return
+	_persistent_displacers.append(node)
+	# Auto-cleanup so pickups removed via queue_free don't leak slots.
+	node.tree_exited.connect(_on_displacer_tree_exited.bind(node))
+
+func _on_displacer_tree_exited(node: Node3D) -> void:
+	_persistent_displacers.erase(node)
+
+func push_wake(pos: Vector3, lifetime: float = DEFAULT_WAKE_LIFETIME) -> void:
+	_wake_trail.append({"pos": pos, "born": Time.get_ticks_msec() / 1000.0, "lifetime": lifetime})
+
+func _update_displacer_uniforms() -> void:
+	# Compose persistent + trail into the single uniform array the shader
+	# loops over. Persistent first (strength 1.0); trail wakes after, with
+	# strength fading linearly over their lifetime. Empty tail slots have
+	# w=0 so the shader's `if (d.w <= 0.0) continue` skips them.
+	var now: float = Time.get_ticks_msec() / 1000.0
+	# Cull dead wakes in-place.
+	var kept_trail: Array = []
+	for w in _wake_trail:
+		var age: float = now - float(w["born"])
+		if age < float(w["lifetime"]):
+			kept_trail.append(w)
+	_wake_trail = kept_trail
+	# Drop dead Node3D refs (paranoia — tree_exited should handle this, but
+	# scripts can null nodes via free() without firing it in some cases).
+	_persistent_displacers = _persistent_displacers.filter(func(n): return is_instance_valid(n) and n.is_inside_tree())
+	var slots: PackedVector4Array = PackedVector4Array()
+	slots.resize(MAX_DISPLACERS)
+	var idx: int = 0
+	for n in _persistent_displacers:
+		if idx >= MAX_DISPLACERS:
+			break
+		var p: Vector3 = (n as Node3D).global_position
+		slots[idx] = Vector4(p.x, p.y, p.z, 1.0)
+		idx += 1
+	# Newest wakes first so eviction (truncation past MAX) drops the
+	# stalest tail rather than the freshest puff right at the player's
+	# feet — that one matters most visually.
+	_wake_trail.sort_custom(func(a, b): return float(a["born"]) > float(b["born"]))
+	for w in _wake_trail:
+		if idx >= MAX_DISPLACERS:
+			break
+		var p2: Vector3 = w["pos"]
+		var age2: float = now - float(w["born"])
+		var strength: float = 1.0 - (age2 / float(w["lifetime"]))
+		slots[idx] = Vector4(p2.x, p2.y, p2.z, strength)
+		idx += 1
+	# Tail slots stay at (0,0,0,0) from the resize — w=0 makes the shader
+	# skip them, so we don't need to overwrite.
+	for pid in _materials.keys():
+		var mat: ShaderMaterial = _materials[pid]
+		mat.set_shader_parameter("displacers", slots)
+		mat.set_shader_parameter("disp_count", idx)
 
 func _init_preset(p: Dictionary) -> void:
 	var pid: String = String(p.id)

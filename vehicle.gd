@@ -152,6 +152,11 @@ const VARIANTS := {
 
 # Runtime-mutable copies of the per-variant tunables. _apply_variant() fills
 # these from VARIANTS[variant] before _ready builds the visuals.
+# Grass-wake bookkeeping — last position we emitted a wake at. Refreshed
+# every WAKE_STEP metres of travel so tyres leave a continuous trail.
+var _last_wake_pos: Vector3 = Vector3.INF
+const WAKE_STEP: float = 0.5
+
 var _engine_force: float = ENGINE_FORCE
 var _reverse_force: float = REVERSE_FORCE
 var _brake_force: float = BRAKE_FORCE
@@ -476,7 +481,21 @@ func _setup_audio() -> void:
 	_die_player.play()
 	_die_playback = _die_player.get_stream_playback()
 
+func _emit_grass_wake() -> void:
+	if _last_wake_pos == Vector3.INF:
+		_last_wake_pos = global_position
+		return
+	var p: Vector3 = global_position
+	var d: Vector2 = Vector2(p.x - _last_wake_pos.x, p.z - _last_wake_pos.z)
+	if d.length() < WAKE_STEP:
+		return
+	_last_wake_pos = p
+	var fol := get_tree().get_first_node_in_group("foliage")
+	if fol != null and fol.has_method("push_wake"):
+		fol.call("push_wake", p, 4.0)
+
 func _physics_process(delta: float) -> void:
+	_emit_grass_wake()
 	# Driver input drives engine + steering. Brake is applied to all
 	# wheels via the VehicleBody3D `brake` property.
 	if _driver != null:

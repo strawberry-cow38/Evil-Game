@@ -32,6 +32,17 @@ uniform int billboard_mode : hint_range(0, 1) = 1;
 // blades behind the camera skip rasterisation entirely.
 uniform float cull_back_dot : hint_range(-1.0, 1.0) = -1.0;
 
+// Displacement footprints (player, dropped items, vehicles). Each vec4 is
+// (world_x, world_y, world_z, strength) — strength 0 = empty slot. MAX
+// matches the cap in editor_foliage so the CPU side never overflows.
+// disp_radius is the falloff radius in metres; disp_push is how far the
+// tip can shove sideways at full strength.
+const int MAX_DISP = 24;
+uniform vec4 displacers[MAX_DISP];
+uniform int disp_count = 0;
+uniform float disp_radius : hint_range(0.05, 4.0) = 0.7;
+uniform float disp_push : hint_range(0.0, 1.0) = 0.35;
+
 void vertex() {
 	vec3 inst_origin = MODEL_MATRIX[3].xyz;
 	// Behind-camera cull check. Done once per vertex but the result is the
@@ -102,6 +113,29 @@ void vertex() {
 		float osc = sin(TIME * wind_speed + seed);
 		float amp = wind_min + wind_max * osc;
 		world_pos += vec3(wind_dir.x, 0.0, wind_dir.y) * amp * top_factor * sway_mult;
+		// Displacement from player / items / vehicles. Each active
+		// displacer shoves the tip radially outward (anchor stays put)
+		// with a linear falloff inside disp_radius. We sum contributions
+		// so two overlapping wakes stack rather than fight.
+		vec3 push_total = vec3(0.0);
+		for (int i = 0; i < disp_count; i++) {
+			vec4 d = displacers[i];
+			if (d.w <= 0.0) {
+				continue;
+			}
+			vec2 to_inst = vec2(inst_origin.x - d.x, inst_origin.z - d.z);
+			float dist = length(to_inst);
+			if (dist < disp_radius && dist > 0.0001) {
+				float falloff = (1.0 - dist / disp_radius) * d.w;
+				vec2 dir = to_inst / dist;
+				push_total.x += dir.x * falloff * disp_push;
+				push_total.z += dir.y * falloff * disp_push;
+			}
+		}
+		// Multiply by sway_mult so clover patches (sway_mult=0) don't slide
+		// underfoot, shrubs (0.4) get a gentle nudge, and grass blades
+		// (1.0) take the full push.
+		world_pos += push_total * top_factor * sway_mult;
 	}
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);
 }
