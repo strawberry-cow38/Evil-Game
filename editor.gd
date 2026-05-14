@@ -685,18 +685,69 @@ func _input(event: InputEvent) -> void:
 				var hit3 := _raycast_cursor()
 				if not hit3.is_empty():
 					_spawn_trigger_at(hit3.position)
-	# Foliage mode toggle: Q = spray brush, W = exact placement w/ ghost.
-	# Only active when the Foliage Paint tool is selected, so the same
-	# keys still drive the gizmo when a prop is being edited.
-	if event is InputEventKey and event.pressed and not event.echo and _active_tool == TOOL_F_PAINT:
-		if event.keycode == KEY_Q:
-			if _foliage_panel != null:
-				_foliage_panel.set_mode("spray")
-			return
-		elif event.keycode == KEY_W:
-			if _foliage_panel != null:
-				_foliage_panel.set_mode("exact")
-			return
+	# Sub-bar numeric hotkeys (1..9) select the Nth group within the
+	# currently visible category. Suppressed when typing into the save
+	# field (handled by pause menu gate above) and when the mouse is
+	# over UI to avoid stealing keystrokes from widgets.
+	if event is InputEventKey and event.pressed and not event.echo and not _camera.is_looking() and not _is_over_ui():
+		if event.keycode >= KEY_1 and event.keycode <= KEY_9:
+			var idx: int = event.keycode - KEY_0  # KEY_1 == 49, KEY_0 == 48
+			if _sub_bar != null:
+				var gid: String = _sub_bar.tool_id_at(idx)
+				if gid != "":
+					_sub_bar.select_tool(gid)
+					return
+	# Mode hotkeys within the active group. Each block early-returns so
+	# the generic gizmo Q/W/R bindings below don't double-fire while a
+	# brush tool owns those keys.
+	if event is InputEventKey and event.pressed and not event.echo and not _camera.is_looking():
+		var group: String = String(TOOL_GROUP.get(_active_tool, ""))
+		match group:
+			"g_foliage":
+				if event.keycode == KEY_Q:
+					if _foliage_panel != null:
+						_foliage_panel.set_mode("spray")
+					return
+				elif event.keycode == KEY_W:
+					if _foliage_panel != null:
+						_foliage_panel.set_mode("exact")
+					return
+			"g_heights":
+				# Q = raise (Shift-click while painting = lower).
+				# W = flatten. E = smooth. R = ramp.
+				if event.keycode == KEY_Q:
+					_active_tool = TOOL_T_RAISE
+					return
+				elif event.keycode == KEY_W:
+					_active_tool = TOOL_T_FLATTEN
+					return
+				elif event.keycode == KEY_E:
+					_active_tool = TOOL_T_SMOOTH
+					return
+				elif event.keycode == KEY_R:
+					_active_tool = TOOL_T_RAMP
+					return
+			"g_spawn_player":
+				if event.keycode == KEY_Q:
+					_on_tool_picked(TOOL_S_PLACE_SPAWN)
+					return
+				elif event.keycode == KEY_W:
+					_on_tool_picked(TOOL_S_DELETE_SPAWN)
+					return
+			"g_spawn_items":
+				if event.keycode == KEY_Q:
+					_on_tool_picked(TOOL_S_ITEMS)
+					return
+				elif event.keycode == KEY_W:
+					_on_tool_picked(TOOL_S_ITEMS_REMOVE)
+					return
+			"g_spawn_actors":
+				if event.keycode == KEY_Q:
+					_on_tool_picked(TOOL_S_ACTORS)
+					return
+				elif event.keycode == KEY_W:
+					_on_tool_picked(TOOL_S_ACTORS_REMOVE)
+					return
 	# Q → translate gizmo. Only when an effect is selected and the
 	# camera isn't grabbing the key for fly-down (camera only consumes
 	# Q while MMB is held).
@@ -1331,7 +1382,12 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 	var s: float = _brush_strength
 	match _active_tool:
 		TOOL_T_RAISE:
-			_terrain.raise_brush(world_pos, _brush_radius, BRUSH_STRENGTH * s, delta)
+			# Single "Heights → Raise/Lower" tool. Shift held during the stroke
+			# inverts to a lower pass; no separate Lower tool button now.
+			if Input.is_key_pressed(KEY_SHIFT):
+				_terrain.lower_brush(world_pos, _brush_radius, BRUSH_STRENGTH * s, delta)
+			else:
+				_terrain.raise_brush(world_pos, _brush_radius, BRUSH_STRENGTH * s, delta)
 		TOOL_T_LOWER:
 			_terrain.lower_brush(world_pos, _brush_radius, BRUSH_STRENGTH * s, delta)
 		TOOL_T_FLATTEN:
@@ -1396,7 +1452,38 @@ func _on_category_picked(category: String) -> void:
 	_effects_panel.visible = false
 	_objects_panel.visible = false
 
+const GROUP_DEFAULT_TOOL: Dictionary = {
+	"g_heights":       "t_raise",
+	"g_materials":     "e_paint",
+	"g_foliage":       "t_foliage_paint",
+	"g_spawn_player":  "s_player_place",
+	"g_spawn_items":   "s_items",
+	"g_spawn_actors":  "s_actors",
+}
+
+# Granular tool ID → group ID, for reverse lookup when mode hotkeys fire.
+const TOOL_GROUP: Dictionary = {
+	"t_raise":           "g_heights",
+	"t_lower":           "g_heights",
+	"t_flatten":         "g_heights",
+	"t_smooth":          "g_heights",
+	"t_ramp":            "g_heights",
+	"e_paint":           "g_materials",
+	"t_foliage_paint":   "g_foliage",
+	"t_foliage_remove":  "g_foliage",
+	"s_player_place":    "g_spawn_player",
+	"s_player_delete":   "g_spawn_player",
+	"s_items":           "g_spawn_items",
+	"s_items_remove":    "g_spawn_items",
+	"s_actors":          "g_spawn_actors",
+	"s_actors_remove":   "g_spawn_actors",
+}
+
 func _on_tool_picked(tool_id: String) -> void:
+	# Sub-bar buttons emit group IDs ("g_*"). Resolve to the default
+	# sub-tool so the granular branches below keep working unchanged.
+	if GROUP_DEFAULT_TOOL.has(tool_id):
+		tool_id = String(GROUP_DEFAULT_TOOL[tool_id])
 	_active_tool = tool_id
 	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE or tool_id == TOOL_E_PAINT or tool_id == TOOL_F_PAINT or tool_id == TOOL_F_REMOVE
 	_radius_widget.visible = is_brush_tool

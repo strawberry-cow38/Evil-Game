@@ -1,37 +1,28 @@
 extends PanelContainer
 
 # Sub-bar shown directly under the top category bar. Contents change
-# based on the selected category. For Terrain → Heights we expose the
-# five height tools the user requested; other categories currently
-# render an "(empty)" placeholder so the layout still makes sense.
+# based on the selected category. Each entry is a TOOL GROUP — one
+# button representing a family of related modes (e.g. Heights covers
+# raise/lower/flatten/smooth/ramp). The sub-bar only knows about the
+# top-level group; the editor maps the group to a default sub-tool and
+# binds Q/W/E/R hotkeys to swap mode within it.
 
 signal tool_picked(tool_id: String)
 
 const TOOLS_BY_CATEGORY: Dictionary = {
 	"terrain": [
-		# Heights group. Future groups (textures, foliage) get sibling rows.
-		{"id": "t_raise",   "label": "Raise"},
-		{"id": "t_lower",   "label": "Lower"},
-		{"id": "t_flatten", "label": "Flatten"},
-		{"id": "t_smooth",  "label": "Smooth"},
-		{"id": "t_ramp",    "label": "Ramp"},
-		# Foliage authoring. Spray brush + remove brush share the foliage
-		# panel; spray's Q/W toggle handles exact vs brush placement.
-		{"id": "t_foliage_paint",  "label": "Foliage"},
-		{"id": "t_foliage_remove", "label": "Remove Foliage"},
+		{"id": "g_heights",   "label": "Heights"},
+		{"id": "g_materials", "label": "Materials"},
+		{"id": "g_foliage",   "label": "Foliage"},
 	],
 	"environment": [
 		{"id": "e_lighting", "label": "Lighting"},
 		{"id": "e_roads",    "label": "Roads"},
-		{"id": "e_paint",    "label": "Paint"},
 	],
 	"spawns": [
-		{"id": "s_player_place",  "label": "Place Player Spawn"},
-		{"id": "s_player_delete", "label": "Delete Player Spawn"},
-		{"id": "s_items",         "label": "Items"},
-		{"id": "s_items_remove",  "label": "Remove Items"},
-		{"id": "s_actors",        "label": "Actors"},
-		{"id": "s_actors_remove", "label": "Remove Actors"},
+		{"id": "g_spawn_player", "label": "Player Spawn"},
+		{"id": "g_spawn_items",  "label": "Items"},
+		{"id": "g_spawn_actors", "label": "Actors"},
 	],
 	"objects": [
 		{"id": "o_objects", "label": "Objects"},
@@ -45,6 +36,7 @@ const TOOLS_BY_CATEGORY: Dictionary = {
 var _hbox: HBoxContainer
 var _buttons: Dictionary = {}
 var _selected: String = ""
+var _current_category: String = ""
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -53,6 +45,7 @@ func _ready() -> void:
 	add_child(_hbox)
 
 func show_category(category: String) -> void:
+	_current_category = category
 	for c in _hbox.get_children():
 		c.queue_free()
 	_buttons.clear()
@@ -64,14 +57,29 @@ func show_category(category: String) -> void:
 		lbl.add_theme_font_size_override("font_size", 14)
 		_hbox.add_child(lbl)
 		return
-	for t in tools:
+	for i in range(tools.size()):
+		var t: Dictionary = tools[i]
 		var b := Button.new()
-		b.text = t.label
-		b.custom_minimum_size = Vector2(96, 28)
+		b.text = "%d  %s" % [i + 1, t.label]
+		b.custom_minimum_size = Vector2(110, 28)
 		b.add_theme_font_size_override("font_size", 14)
-		b.pressed.connect(func(): _select(String(t.id)))
+		var tid: String = String(t.id)
+		b.pressed.connect(func(): _select(tid))
 		_hbox.add_child(b)
-		_buttons[t.id] = b
+		_buttons[tid] = b
+
+func tool_id_at(index: int) -> String:
+	# 1-based lookup matching the number-key shown on each button. Returns
+	# "" if the index is out of range for the current category.
+	var tools: Array = TOOLS_BY_CATEGORY.get(_current_category, [])
+	if index < 1 or index > tools.size():
+		return ""
+	return String(tools[index - 1].id)
+
+func select_tool(tool_id: String) -> void:
+	# External entry point: highlight + emit as if the user clicked.
+	if _buttons.has(tool_id):
+		_select(tool_id)
 
 func _select(tool_id: String) -> void:
 	_selected = tool_id
