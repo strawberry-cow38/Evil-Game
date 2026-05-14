@@ -148,6 +148,12 @@ func _ready() -> void:
 					content.set_meta("destructible", true)
 					content.set_meta("hp_max", hpmax)
 					content.set_meta("hp", hpmax)
+				# Type-specific per-instance state (Computer Station cam
+				# lists, CCTV cam_id/ptz). Catalog node opts in by
+				# defining apply_state(); generic objects skip this.
+				var ostate: Dictionary = entry.get("object_state", {})
+				if not ostate.is_empty() and content.has_method("apply_state"):
+					content.apply_state(ostate)
 			# Container loot fill — roll the assigned table N times where N
 			# is the crate variant's roll_count. Each successful roll is
 			# fed through crate.add(), which weight-checks against the

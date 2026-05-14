@@ -226,6 +226,7 @@ var _reload_press_time: float = 0.0
 var _reload_speedloader_used: bool = false
 var _pie_active: bool = false
 var _vehicle: Node = null  # set when seated as driver; suppresses movement + interact
+var _mounted_station: Node = null  # set when at a computer station; suppresses movement + interact
 var _saved_collision_layer: int = -1
 var _saved_collision_mask: int = -1
 
@@ -585,6 +586,25 @@ func set_in_vehicle(v: Node) -> void:
 			_saved_collision_mask = -1
 	visible = v == null
 
+# Called by computer_station.gd on mount (with the station node) and on
+# exit (with null). Suppresses movement/interact while the player is
+# viewing a CCTV feed; cursor is released so UI buttons are clickable.
+func set_in_station(s: Node) -> void:
+	_mounted_station = s
+	if s != null:
+		velocity = Vector3.ZERO
+		_prompt_label.text = ""
+		_interact_target = null
+		_container_target = null
+		if _container_hover != null:
+			_container_hover.hide_panel()
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func is_mounted_at_station() -> bool:
+	return _mounted_station != null
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not is_pie_open():
 		# Scale sensitivity with current FOV so ADS (and especially scoped ADS)
@@ -627,10 +647,15 @@ func _process(delta: float) -> void:
 	# Driving: vehicle.gd owns input + camera, so nothing for the player to do.
 	if _vehicle != null:
 		return
+	# Mounted at a computer station: the station's UI owns input + camera.
+	if _mounted_station != null:
+		return
 	_update_interact_target()
 	# E priority: try entering a nearby vehicle BEFORE looting a pickup, so the
 	# player can stand near a car+item and have E mean "drive" rather than "loot".
 	if not is_menu_open() and Input.is_action_just_pressed("interact"):
+		if _try_mount_nearby_station():
+			return
 		if _try_enter_nearby_vehicle():
 			return
 		if _container_target != null:
@@ -780,6 +805,11 @@ func _physics_process(delta: float) -> void:
 	if _vehicle != null:
 		velocity = Vector3.ZERO
 		return
+	# Mounted at a station: lock the body in place so the player doesn't
+	# slide / fall while their viewpoint is at a remote camera.
+	if _mounted_station != null:
+		velocity = Vector3.ZERO
+		return
 	# Fall-out-of-the-world safety net — teleport back to spawn before
 	# the player falls forever.
 	if global_position.y < FALL_SAFETY_Y:
@@ -901,6 +931,17 @@ func _update_interact_target() -> void:
 		_prompt_label.text = ""
 		if _container_hover != null:
 			_container_hover.hide_panel()
+	# Computer-station mount prompt — wins over the empty case, loses to
+	# anything the ray actually hit (a crate / pickup in front of you is
+	# more relevant than the station beside you).
+	if pickup == null and container == null:
+		for s in get_tree().get_nodes_in_group("computer_station"):
+			if s == null or not (s is Node3D):
+				continue
+			var rad: float = float(s.get("mount_radius")) if "mount_radius" in s else 1.8
+			if global_position.distance_to((s as Node3D).global_position) <= rad:
+				_prompt_label.text = "[E] Mount Station"
+				break
 	# Container contents may have changed (we just transferred items, or some
 	# other path mutated them) — keep the panel readout fresh.
 	if container != null and _container_hover != null:
@@ -924,6 +965,23 @@ func _try_enter_nearby_vehicle() -> bool:
 	if best == null:
 		return false
 	return best.try_enter_driver(self)
+
+# Walk the "computer_station" group, pick the closest one within its own
+# mount_radius, ask it to mount us. Returns true if mounted.
+func _try_mount_nearby_station() -> bool:
+	var best: Node = null
+	var best_d: float = INF
+	for s in get_tree().get_nodes_in_group("computer_station"):
+		if s == null or not s.has_method("try_mount") or not (s is Node3D):
+			continue
+		var r: float = float(s.get("mount_radius")) if "mount_radius" in s else 1.8
+		var d: float = global_position.distance_to((s as Node3D).global_position)
+		if d <= r and d < best_d:
+			best_d = d
+			best = s
+	if best == null:
+		return false
+	return best.try_mount(self)
 
 func _check_equip_hotkeys() -> void:
 	if _inventory == null:
