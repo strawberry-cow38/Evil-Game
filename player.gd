@@ -332,22 +332,35 @@ func is_ads() -> bool:
 # into the per-material banks. Missing files are silently skipped so the
 # game still boots before the audio gen pass lands.
 func _load_footstep_bank() -> void:
+	# Guarded load: ResourceLoader.exists() returns true once the .import
+	# metadata file lives next to the WAV, but the imported .sample blob
+	# may still be missing if the project wasn't reimported after pull.
+	# Skip + warn rather than spam load errors.
 	var mats: Array = ["dirt", "grass", "stone", "sand"]
 	for mi in range(mats.size()):
 		var key: String = mats[mi]
 		var steps: Array = []
 		for i in range(1, 5):
 			var p: String = "res://assets/audio/footsteps/step_%s_%d.wav" % [key, i]
-			if ResourceLoader.exists(p):
-				steps.append(load(p))
+			var s := _safe_load_audio(p)
+			if s != null:
+				steps.append(s)
 		if not steps.is_empty():
 			_step_bank[mi] = steps
 		var lp: String = "res://assets/audio/footsteps/land_%s.wav" % key
-		if ResourceLoader.exists(lp):
-			_land_bank[mi] = load(lp)
+		var ls := _safe_load_audio(lp)
+		if ls != null:
+			_land_bank[mi] = ls
 	var jp: String = "res://assets/audio/footsteps/jump_start.wav"
-	if ResourceLoader.exists(jp):
-		_jump_start_stream = load(jp)
+	_jump_start_stream = _safe_load_audio(jp)
+
+func _safe_load_audio(p: String) -> AudioStream:
+	if not ResourceLoader.exists(p):
+		return null
+	var r: Resource = ResourceLoader.load(p, "", ResourceLoader.CACHE_MODE_REUSE)
+	if r == null or not (r is AudioStream):
+		return null
+	return r
 
 func _current_material_id() -> int:
 	var terrain := get_node_or_null("../EditorTerrain")
