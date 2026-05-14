@@ -19,6 +19,20 @@ const FOV_HIP := 80.0
 const FOV_ADS := 55.0
 const ADS_LERP_RATE := 18.0
 
+# View bob. Phase advances proportional to horizontal speed so slow steps
+# bob slow and sprinting punches harder. Vertical uses full phase (one
+# bob per footfall), lateral runs at half phase so the camera traces a
+# soft figure-8 over each stride pair. Amplitude is damped while ADS
+# (scope can't fight bob), crouched (subtle creep), and zeroed in TP /
+# while airborne / in a vehicle.
+const BOB_FREQ := 1.8           # phase cycles per metre of XZ travel
+const BOB_AMP_VERT := 0.045
+const BOB_AMP_LAT := 0.035
+const BOB_ADS_MULT := 0.25
+const BOB_CROUCH_MULT := 0.6
+const BOB_SPRINT_MULT := 1.35
+const BOB_LERP_RATE := 12.0     # how fast bob amp eases in/out at start/stop
+
 const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
 const INTERACT_MASK := 0xFFFFFFFF
@@ -125,6 +139,12 @@ var _pitch := 0.0
 # continuous instead of teleporting.
 var _last_wake_pos: Vector3 = Vector3.INF
 const WAKE_STEP: float = 0.4
+# View-bob state. `_bob_phase` accumulates with horizontal travel so phase
+# is tied to distance, not time — stop walking and the camera freezes
+# mid-stride instead of continuing to oscillate. `_bob_amp` eases the
+# offset on/off so we don't pop on direction changes.
+var _bob_phase: float = 0.0
+var _bob_amp: float = 0.0
 # Mouse motion accumulators applied in _physics_process. With physics
 # interpolation enabled, setting rotation outside the physics tick lets
 # the engine lerp between old and new transforms — feels like yaw lag.
@@ -440,9 +460,44 @@ func _physics_process(delta: float) -> void:
 	var tp_target: float = 1.0 if _third_person and _vehicle == null and not scope_lock else 0.0
 	_tp_blend = lerpf(_tp_blend, tp_target, blend_alpha)
 	var crouch_alpha: float = 1.0 - exp(-CROUCH_LERP_RATE * delta)
+	var base_target_y: float = base_y + TP_UP_BOOST * _tp_blend
 	var cam_pos := _camera.position
-	cam_pos.y = lerpf(cam_pos.y, base_y + TP_UP_BOOST * _tp_blend, crouch_alpha)
+	# Lerp the bob-free base height. We strip the previous frame's bob
+	# before lerping so the bob oscillation doesn't smear into the base
+	# height tracking and cause the camera to "ride up" while bobbing.
+	var prev_bob_y: float = _bob_amp * sin(_bob_phase) * BOB_AMP_VERT
+	var prev_bob_x: float = _bob_amp * sin(_bob_phase * 0.5) * BOB_AMP_LAT
+	cam_pos.y = lerpf(cam_pos.y - prev_bob_y, base_target_y, crouch_alpha)
 	cam_pos.z = TP_BACK_DIST * _tp_blend
+	# Strip prev lateral bob too so the camera doesn't drift sideways.
+	cam_pos.x -= prev_bob_x
+	# Advance + apply bob. Phase ties to XZ distance so phase freezes when
+	# stationary. Damp amplitude based on stance: ADS/crouch/TP/airborne
+	# all suppress bob to varying degrees.
+	var xz_speed: float = Vector2(velocity.x, velocity.z).length()
+	var grounded: bool = is_on_floor()
+	var moving: bool = xz_speed > 0.2 and grounded and _vehicle == null
+	var amp_target: float = 0.0
+	if moving:
+		amp_target = 1.0
+		if _ads:
+			amp_target *= BOB_ADS_MULT
+		if _crouched:
+			amp_target *= BOB_CROUCH_MULT
+		if Input.is_action_pressed("sprint") and not _crouched:
+			amp_target *= BOB_SPRINT_MULT
+		if _tp_blend > 0.05:
+			amp_target *= (1.0 - _tp_blend)
+	var bob_alpha: float = 1.0 - exp(-BOB_LERP_RATE * delta)
+	_bob_amp = lerpf(_bob_amp, amp_target, bob_alpha)
+	if moving:
+		_bob_phase += xz_speed * BOB_FREQ * delta
+		if _bob_phase > TAU * 64.0:
+			_bob_phase -= TAU * 64.0
+	var bob_y: float = _bob_amp * sin(_bob_phase) * BOB_AMP_VERT
+	var bob_x: float = _bob_amp * sin(_bob_phase * 0.5) * BOB_AMP_LAT
+	cam_pos.y += bob_y
+	cam_pos.x += bob_x
 	_camera.position = cam_pos
 	if _body_mesh != null:
 		_body_mesh.visible = _tp_blend > 0.05 and _vehicle == null
