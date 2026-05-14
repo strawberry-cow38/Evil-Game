@@ -685,11 +685,11 @@ func _input(event: InputEvent) -> void:
 				var hit3 := _raycast_cursor()
 				if not hit3.is_empty():
 					_spawn_trigger_at(hit3.position)
-	# Foliage mode toggle: R = spray brush, W = exact placement w/ ghost.
+	# Foliage mode toggle: Q = spray brush, W = exact placement w/ ghost.
 	# Only active when the Foliage Paint tool is selected, so the same
 	# keys still drive the gizmo when a prop is being edited.
 	if event is InputEventKey and event.pressed and not event.echo and _active_tool == TOOL_F_PAINT:
-		if event.keycode == KEY_R:
+		if event.keycode == KEY_Q:
 			if _foliage_panel != null:
 				_foliage_panel.set_mode("spray")
 			return
@@ -1166,6 +1166,13 @@ func _process(delta: float) -> void:
 		return
 	_brush_ring.set_radius(_brush_radius)
 	_brush_ring.place(hit.position)
+	# Foliage spray: half-radius inner ring shows Shift-erase footprint.
+	# Red while Shift held to signal "remove" mode.
+	if _active_tool == TOOL_F_PAINT and _foliage_mode == "spray":
+		var erase: bool = Input.is_key_pressed(KEY_SHIFT)
+		_brush_ring.set_inner(0.5, Color(1.0, 0.3, 0.25, 1.0) if erase else Color(1.0, 0.55, 0.35, 1.0))
+	else:
+		_brush_ring.set_inner(0.0)
 	# Flatten target preview ring at the sampled height.
 	if _active_tool == TOOL_T_FLATTEN:
 		_flatten_ring.set_radius(_brush_radius)
@@ -1338,7 +1345,13 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 		TOOL_E_PAINT:
 			_terrain.paint_brush(world_pos, _brush_radius, 4.0 * s, delta, _paint_material_id, _paint_shape)
 		TOOL_F_PAINT:
-			_foliage_spray(world_pos)
+			# Holding Shift while spraying converts the inner half-radius
+			# circle into a remove pass — lets the user feather-erase
+			# without switching tools or losing the outer paint reach.
+			if Input.is_key_pressed(KEY_SHIFT) and _foliage_node != null:
+				_foliage_node.remove_in_radius(world_pos, _brush_radius * 0.5, _foliage_shape)
+			else:
+				_foliage_spray(world_pos)
 		TOOL_F_REMOVE:
 			if _foliage_node != null:
 				_foliage_node.remove_in_radius(world_pos, _brush_radius, _foliage_shape)

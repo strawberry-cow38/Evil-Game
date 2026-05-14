@@ -103,10 +103,11 @@ func _ready() -> void:
 		p_grid.add_child(pb)
 		_preset_buttons.append(pb)
 
-	# Mode toggle: spray (R) / exact (W). Keys mirror the gizmo letters
-	# users already know from the prop tools.
+	# Mode toggle: spray (Q) / exact (W). Hold Shift while spraying to
+	# remove inside a 50%-radius inner circle (visualised by a second
+	# concentric ring on the brush).
 	var mode_lbl := Label.new()
-	mode_lbl.text = "Mode  (R=spray, W=exact)"
+	mode_lbl.text = "Mode  (Q=spray, W=exact, Shift=remove inner)"
 	mode_lbl.modulate = Color(1, 1, 1, 0.7)
 	vb.add_child(mode_lbl)
 	var mode_row := HBoxContainer.new()

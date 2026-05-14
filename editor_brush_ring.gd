@@ -10,9 +10,16 @@ var radius := 4.0
 var terrain: Node = null
 var color := Color(1.0, 0.9, 0.2, 1.0)
 var shape: String = "circle"  # "circle" or "square"
+# Optional concentric inner ring. inner_ratio in (0,1] = fraction of
+# outer radius; 0 disables. inner_color lets callers re-tint it (e.g.
+# red when Shift-erase is active). Inner ring is always a circle so it
+# stays visually distinct from a square outer.
+var inner_ratio: float = 0.0
+var inner_color: Color = Color(1.0, 0.4, 0.3, 1.0)
 
 var _mesh_instance: MeshInstance3D
 var _material: StandardMaterial3D
+var _inner_material: StandardMaterial3D
 # When set (mode_flat = true), the ring renders as a flat circle at
 # fixed world y instead of hugging the terrain surface. Used for the
 # flatten target preview.
@@ -26,6 +33,11 @@ func _ready() -> void:
 	_material.albedo_color = color
 	_material.no_depth_test = true
 	_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_inner_material = StandardMaterial3D.new()
+	_inner_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_inner_material.albedo_color = inner_color
+	_inner_material.no_depth_test = true
+	_inner_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
 
@@ -39,6 +51,13 @@ func set_color(c: Color) -> void:
 	color = c
 	if _material != null:
 		_material.albedo_color = c
+
+func set_inner(ratio: float, c: Color = Color(0, 0, 0, 0)) -> void:
+	inner_ratio = clamp(ratio, 0.0, 1.0)
+	if c.a > 0.0:
+		inner_color = c
+		if _inner_material != null:
+			_inner_material.albedo_color = c
 
 func place(center: Vector3) -> void:
 	visible = true
@@ -84,6 +103,23 @@ func _rebuild() -> void:
 		im.surface_add_vertex(p0)
 		im.surface_add_vertex(p1)
 	im.surface_end()
+	if inner_ratio > 0.001:
+		var ir: float = radius * inner_ratio
+		im.surface_begin(Mesh.PRIMITIVE_LINES, _inner_material)
+		for j in range(segs):
+			var a0: float = (float(j)     / float(segs)) * TAU
+			var a1: float = (float(j + 1) / float(segs)) * TAU
+			var ip0 := Vector3(cos(a0) * ir, 0.0, sin(a0) * ir)
+			var ip1 := Vector3(cos(a1) * ir, 0.0, sin(a1) * ir)
+			if _mode_flat:
+				ip0.y = _flat_y - global_position.y
+				ip1.y = _flat_y - global_position.y
+			else:
+				ip0.y = terrain.sample_height(global_position + ip0) - global_position.y + 0.05
+				ip1.y = terrain.sample_height(global_position + ip1) - global_position.y + 0.05
+			im.surface_add_vertex(ip0)
+			im.surface_add_vertex(ip1)
+		im.surface_end()
 	_mesh_instance.mesh = im
 
 func _square_point(i: int, segs: int) -> Vector3:
