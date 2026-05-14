@@ -14,7 +14,6 @@ const SHRUB_VARIANTS: int = 3
 # silhouette variation instead of one repeated drawing.
 const SHRUB_BUCKETS: int = 5
 const GRASS_SHADER := preload("res://grass.gdshader")
-const GRASS_SHADOW_SHADER := preload("res://grass_shadow.gdshader")
 const DEFAULT_PRESET: String = "short_green"
 
 # Preset table. Each preset is one MultiMesh bucket — same shader/texture
@@ -59,10 +58,6 @@ var _shared_clover_tex: ImageTexture = null
 var _shared_daisy_tex: ImageTexture = null
 var _shared_shadow_tex: ImageTexture = null
 var _shared_shadow_mat: StandardMaterial3D = null
-# Per-grass shadow uses a ShaderMaterial (cone-cull in vertex) instead of the
-# shrub's StandardMaterial3D — every blade gets a disc, so the GPU has to be
-# able to throw away the ones outside the camera cone before rasterising.
-var _grass_shadow_mat: ShaderMaterial = null
 
 var _wind_dir: Vector2 = Vector2(1.0, 0.0)
 var _wind_min: float = 0.04
@@ -78,7 +73,6 @@ func _ready() -> void:
 	_shared_daisy_tex = _build_daisy_texture()
 	_shared_shadow_tex = _build_shadow_texture()
 	_shared_shadow_mat = _make_shadow_material(_shared_shadow_tex)
-	_grass_shadow_mat = _make_grass_shadow_material(_shared_shadow_tex)
 	for p in PRESETS:
 		_init_preset(p)
 	_rebuild_all()
@@ -208,29 +202,6 @@ func _build_blade_mesh(p: Dictionary) -> Mesh:
 	arrays[Mesh.ARRAY_INDEX] = indices
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	am.surface_set_material(0, _make_foliage_material(p, _shared_blade_tex, 0))
-	# Ground shadow disc — same idea as the shrub mesh, but the material is a
-	# ShaderMaterial that cone-culls behind the camera in the vertex stage so
-	# the per-blade cost is paid only for the discs the camera can actually
-	# see. Disc kept smaller than the blade footprint so tufts look pinched
-	# to the ground, not floating on saucers.
-	var sw: float = w * 1.4
-	var sh_verts := PackedVector3Array([
-		Vector3(-sw * 0.5, 0.01, -sw * 0.5),
-		Vector3( sw * 0.5, 0.01, -sw * 0.5),
-		Vector3( sw * 0.5, 0.01,  sw * 0.5),
-		Vector3(-sw * 0.5, 0.01,  sw * 0.5),
-	])
-	var sh_uvs := PackedVector2Array([
-		Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1),
-	])
-	var sh_indices := PackedInt32Array([0, 1, 2, 0, 2, 3])
-	var sh_arrays: Array = []
-	sh_arrays.resize(Mesh.ARRAY_MAX)
-	sh_arrays[Mesh.ARRAY_VERTEX] = sh_verts
-	sh_arrays[Mesh.ARRAY_TEX_UV] = sh_uvs
-	sh_arrays[Mesh.ARRAY_INDEX] = sh_indices
-	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sh_arrays)
-	am.surface_set_material(1, _grass_shadow_mat)
 	return am
 
 func _build_shrub_mesh(p: Dictionary, bucket: int = 0) -> Mesh:
@@ -800,18 +771,6 @@ func _build_shadow_texture() -> ImageTexture:
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
 
-func _make_grass_shadow_material(tex: ImageTexture) -> ShaderMaterial:
-	var mat := ShaderMaterial.new()
-	mat.shader = GRASS_SHADOW_SHADER
-	mat.set_shader_parameter("albedo_tex", tex)
-	# 7m range matches roughly the visible blade horizon at the editor's
-	# default FOV; fov_cos 0.55 ≈ 56° half-angle, a bit wider than the camera
-	# so blades at the edge of view still get their shadow drawn.
-	mat.set_shader_parameter("max_range", 7.0)
-	mat.set_shader_parameter("fov_cos", 0.55)
-	mat.set_shader_parameter("opacity", 0.4)
-	return mat
-
 func _make_shadow_material(tex: ImageTexture) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -919,7 +878,7 @@ func instance_count() -> int:
 # kept separate so the overlay can show drawcall amortisation cost.
 #
 # Tris per instance (sum across surfaces):
-#   grass  = 2 crossed quads (4 tri foliage) + shadow disc (2 tri) = 6
+#   grass  = 2 crossed quads (4 tri foliage), shadow killed
 #   shrub  = 3 quads (6 tri foliage) + shadow disc (2 tri) = 8
 #   clover = 1 flat quad (2 tri)
 #   daisy  = 1 Y-billboard quad (2 tri)
@@ -951,8 +910,8 @@ func _profile_row(pid: String, public_id: String, kind: String) -> Dictionary:
 	var surfaces: int
 	match kind:
 		"grass":
-			tris_per = 6
-			surfaces = 2
+			tris_per = 4
+			surfaces = 1
 		"shrub":
 			tris_per = 8
 			surfaces = 2
