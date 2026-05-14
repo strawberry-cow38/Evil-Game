@@ -41,6 +41,18 @@ const LEAN_MAX_DEG := 1.6
 const LEAN_LERP_RATE := 9.0
 const LEAN_ADS_MULT := 0.2
 
+# Jump/land camera kick. Modelled as a critically-damped spring offset
+# added on top of the camera Y. Launch fires a small downward impulse
+# (body compresses + drives off), landing fires a bigger downward
+# impulse scaled by impact speed and the kick rebounds back to zero.
+# Stiff/damp pair sits just past critical so it doesn't ring forever.
+const KICK_STIFFNESS := 180.0
+const KICK_DAMPING := 22.0
+const KICK_JUMP_IMPULSE := -1.1     # m/s of camera dip on takeoff
+const KICK_LAND_GAIN := 0.18        # multiplied by impact y-speed
+const KICK_LAND_MIN_SPEED := 2.5    # below this, no land kick (avoid stair noise)
+const KICK_LAND_MAX_IMPULSE := -7.0 # cap so terminal-velocity drops don't bottom out
+
 const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
 const INTERACT_MASK := 0xFFFFFFFF
@@ -156,6 +168,14 @@ var _bob_amp: float = 0.0
 # Current camera roll (radians) — lerps toward a target derived from
 # local-space lateral velocity so strafing banks the view.
 var _lean_z: float = 0.0
+# Jump/land kick spring state. _kick_y is the current camera Y offset
+# from kicks; _kick_vel is its velocity. Updated each physics tick.
+# _was_grounded + _prev_vy let us detect the airborne→grounded edge and
+# read the impact speed from the frame before move_and_slide zeroed it.
+var _kick_y: float = 0.0
+var _kick_vel: float = 0.0
+var _was_grounded: bool = true
+var _prev_vy: float = 0.0
 # Mouse motion accumulators applied in _physics_process. With physics
 # interpolation enabled, setting rotation outside the physics tick lets
 # the engine lerp between old and new transforms — feels like yaw lag.
@@ -463,6 +483,16 @@ func _physics_process(delta: float) -> void:
 		_camera.rotation.x = _pitch
 		_yaw_delta = 0.0
 		_pitch_delta = 0.0
+	# Landing edge detection. We were airborne last tick, grounded this
+	# tick → fire a land kick scaled by impact y-speed captured before
+	# the previous move_and_slide zeroed it. Soft stair drops (under
+	# KICK_LAND_MIN_SPEED) skip the kick so walking down geometry doesn't
+	# rattle the camera.
+	if not _was_grounded and is_on_floor():
+		var impact: float = absf(_prev_vy)
+		if impact >= KICK_LAND_MIN_SPEED:
+			var impulse: float = max(KICK_LAND_MAX_IMPULSE, -impact * KICK_LAND_GAIN)
+			_kick_vel += impulse
 	# Crouch height lerp lives in physics so the interpolated camera doesn't
 	# warn about transform changes outside the physics tick.
 	var base_y: float = CAMERA_HEIGHT_CROUCH if _crouched else CAMERA_HEIGHT_STAND
@@ -507,7 +537,13 @@ func _physics_process(delta: float) -> void:
 			_bob_phase -= TAU * 64.0
 	var bob_y: float = _bob_amp * sin(_bob_phase) * BOB_AMP_VERT
 	var bob_x: float = _bob_amp * sin(_bob_phase * 0.5) * BOB_AMP_LAT
-	cam_pos.y += bob_y
+	# Jump/land kick spring step. Critically-damped oscillator: impulses
+	# (from the jump branch + land detection) get applied to _kick_vel
+	# and the spring pulls _kick_y back to zero.
+	var kick_accel: float = -KICK_STIFFNESS * _kick_y - KICK_DAMPING * _kick_vel
+	_kick_vel += kick_accel * delta
+	_kick_y += _kick_vel * delta
+	cam_pos.y += bob_y + _kick_y
 	cam_pos.x += bob_x
 	_camera.position = cam_pos
 	# Strafe lean. Project velocity onto the player's right axis so we
@@ -545,7 +581,9 @@ func _physics_process(delta: float) -> void:
 			velocity += get_gravity() * delta
 		velocity.x = move_toward(velocity.x, 0.0, SPEED_FORWARD * 2.0)
 		velocity.z = move_toward(velocity.z, 0.0, SPEED_FORWARD * 2.0)
+		_prev_vy = velocity.y
 		move_and_slide()
+		_was_grounded = is_on_floor()
 		return
 
 	_crouched = Input.is_action_pressed("crouch")
@@ -562,6 +600,7 @@ func _physics_process(delta: float) -> void:
 	var mg_speed_mult: float = lerp(1.0, 0.5, mg_spin)
 	if Input.is_action_just_pressed("jump") and is_on_floor() and not _crouched and mg_spin <= 0.0:
 		velocity.y = JUMP_VELOCITY
+		_kick_vel += KICK_JUMP_IMPULSE
 
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var sprinting := Input.is_action_pressed("sprint") and input_dir.y < 0.0 and not _crouched and mg_spin <= 0.0
@@ -583,7 +622,9 @@ func _physics_process(delta: float) -> void:
 		velocity.x = move_toward(velocity.x, 0.0, SPEED_FORWARD)
 		velocity.z = move_toward(velocity.z, 0.0, SPEED_FORWARD)
 
+	_prev_vy = velocity.y
 	move_and_slide()
+	_was_grounded = is_on_floor()
 
 func _update_interact_target() -> void:
 	if is_menu_open():
