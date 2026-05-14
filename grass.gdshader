@@ -31,6 +31,12 @@ uniform int billboard_mode : hint_range(0, 1) = 1;
 // to zero area. -1.0 = no culling (default). Set to about -0.2 on grass so
 // blades behind the camera skip rasterisation entirely.
 uniform float cull_back_dot : hint_range(-1.0, 1.0) = -1.0;
+// Distance cull (XZ): blades farther than this from the camera collapse
+// to inst_origin in the vertex stage → zero-area triangles get discarded
+// before rasterisation. Cheap on the vertex side, kills fragment cost
+// entirely. -1 = disabled. Per-material so shrubs/clovers can stay on
+// always while grass blades fade out past ~28m.
+uniform float cull_far_dist : hint_range(-1.0, 200.0) = -1.0;
 
 // Displacement footprints (player, dropped items, vehicles). Each vec4 is
 // (world_x, world_y, world_z, strength) — strength 0 = empty slot. MAX
@@ -50,7 +56,14 @@ void vertex() {
 	// corners onto inst_origin and the zero-area triangles get skipped
 	// before the fragment stage.
 	bool cull = false;
-	if (cull_back_dot > -0.999) {
+	if (cull_far_dist > 0.0) {
+		vec3 cam_pos_d = INV_VIEW_MATRIX[3].xyz;
+		vec2 to_xz = vec2(inst_origin.x - cam_pos_d.x, inst_origin.z - cam_pos_d.z);
+		if (length(to_xz) > cull_far_dist) {
+			cull = true;
+		}
+	}
+	if (!cull && cull_back_dot > -0.999) {
 		// Full-3D check: previously we projected both vectors to XZ so the
 		// cull was "is this instance behind me on the ground plane?", but
 		// that falls apart when the camera pitches down — at near-vertical

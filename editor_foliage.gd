@@ -259,6 +259,13 @@ func _make_foliage_material(p: Dictionary, tex: ImageTexture, billboard_mode: in
 	# oblique angles — keep shrubs always-on.
 	var cull_dot: float = -1.0 if kind == "shrub" else -0.2
 	mat.set_shader_parameter("cull_back_dot", cull_dot)
+	# Distance cull: blades past this XZ distance from the camera collapse
+	# to zero-area in the vertex shader. Grass tufts are tiny + dense, so
+	# the visual cost of cutting them past ~28m is invisible against the
+	# fragment savings. Shrubs/clover/daisy stay always-on (they're sparse
+	# enough that the cull check is a net loss).
+	var far_dist: float = 28.0 if kind == "grass" else -1.0
+	mat.set_shader_parameter("cull_far_dist", far_dist)
 	_materials[String(p.id)] = mat
 	_apply_wind_uniforms_to(mat)
 	return mat
