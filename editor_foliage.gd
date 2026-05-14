@@ -21,11 +21,12 @@ const DEFAULT_PRESET: String = "short_green"
 # what we actually care about, not per-variant counts. Spray samples that
 # would push a cell past MAX_PER_CELL are silently rejected.
 #
-# 0.5m cell × 24 instances ≈ 96 plants per m² peak, which is dense but not
-# pathological. Bump MAX_PER_CELL if a future tuning pass wants thicker
-# carpets.
+# 0.5m cell × 14 instances ≈ 56 plants per m² peak — still reads as a
+# thick carpet from eye height but stops spray from stacking a thousand
+# tris into the same square half-metre. Bump if a future tuning pass
+# wants denser fields.
 const DENSITY_CELL_SIZE: float = 0.5
-const MAX_PER_CELL: int = 24
+const MAX_PER_CELL: int = 14
 
 # Grass displacement budget. Shader iterates this many slots per vertex,
 # so bumping it costs real GPU. Persistent registrants (items) live in
