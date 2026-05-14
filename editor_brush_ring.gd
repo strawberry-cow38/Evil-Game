@@ -25,6 +25,12 @@ var _inner_material: StandardMaterial3D
 # flatten target preview.
 var _mode_flat: bool = false
 var _flat_y: float = 0.0
+# When true, _rebuild also draws a small "+" mark at every terrain
+# vertex inside the brush footprint. Used by the Materials tools so
+# the user can see which verts will get touched by paint / smooth /
+# hole strokes. Requires terrain to expose VERT_SPACING + heights.
+var _show_vert_dots: bool = false
+var _vert_dot_color: Color = Color(0.2, 1.0, 0.5, 1.0)
 
 func _ready() -> void:
 	_material = StandardMaterial3D.new()
@@ -51,6 +57,11 @@ func set_color(c: Color) -> void:
 	color = c
 	if _material != null:
 		_material.albedo_color = c
+
+func set_vert_dots(enabled: bool, c: Color = Color(0, 0, 0, 0)) -> void:
+	_show_vert_dots = enabled
+	if c.a > 0.0:
+		_vert_dot_color = c
 
 func set_inner(ratio: float, c: Color = Color(0, 0, 0, 0)) -> void:
 	inner_ratio = clamp(ratio, 0.0, 1.0)
@@ -119,6 +130,41 @@ func _rebuild() -> void:
 				ip1.y = terrain.sample_height(global_position + ip1) - global_position.y + 0.05
 			im.surface_add_vertex(ip0)
 			im.surface_add_vertex(ip1)
+		im.surface_end()
+	# Vertex-dot preview: small "+" mark at every terrain grid vertex
+	# inside the brush footprint, projected to the surface. Lets the user
+	# see exactly which verts a paint / smooth / hole stroke will touch.
+	if _show_vert_dots and not _mode_flat and terrain != null and "VERT_SPACING" in terrain:
+		var vs: float = float(terrain.VERT_SPACING)
+		var rg: int = int(ceil(radius / vs)) + 1
+		var cgx: int = int(round((global_position.x - terrain.global_position.x - terrain.ORIGIN_OFFSET.x) / vs))
+		var cgy: int = int(round((global_position.z - terrain.global_position.z - terrain.ORIGIN_OFFSET.z) / vs))
+		var dot_mat := StandardMaterial3D.new()
+		dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		dot_mat.albedo_color = _vert_dot_color
+		dot_mat.no_depth_test = true
+		dot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		im.surface_begin(Mesh.PRIMITIVE_LINES, dot_mat)
+		var mark: float = 0.12
+		var r2: float = radius * radius
+		var is_square: bool = (shape == "square")
+		for dyi in range(-rg, rg + 1):
+			for dxi in range(-rg, rg + 1):
+				var wx: float = float(dxi) * vs
+				var wz: float = float(dyi) * vs
+				var inside: bool
+				if is_square:
+					inside = absf(wx) <= radius and absf(wz) <= radius
+				else:
+					inside = (wx * wx + wz * wz) <= r2
+				if not inside:
+					continue
+				var world_pos := global_position + Vector3(wx, 0.0, wz)
+				var y: float = terrain.sample_height(world_pos) - global_position.y + 0.06
+				im.surface_add_vertex(Vector3(wx - mark, y, wz))
+				im.surface_add_vertex(Vector3(wx + mark, y, wz))
+				im.surface_add_vertex(Vector3(wx, y, wz - mark))
+				im.surface_add_vertex(Vector3(wx, y, wz + mark))
 		im.surface_end()
 	_mesh_instance.mesh = im
 

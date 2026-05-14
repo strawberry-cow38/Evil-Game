@@ -29,6 +29,8 @@ const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
 const TOOL_E_ROADS := "e_roads"
 const TOOL_E_PAINT := "e_paint"
+const TOOL_T_MAT_SMOOTH := "t_mat_smooth"
+const TOOL_T_HOLE := "t_hole"
 const TOOL_F_PAINT := "t_foliage_paint"
 const TOOL_F_REMOVE := "t_foliage_remove"
 
@@ -220,6 +222,9 @@ func _ready() -> void:
 		_terrain.heights = MapState.heights.duplicate()
 		if MapState.terrain_paint.size() == _terrain.paint.size():
 			_terrain.paint = MapState.terrain_paint.duplicate()
+		if MapState.terrain_holes.size() == _terrain.holes.size():
+			_terrain.holes = MapState.terrain_holes.duplicate()
+			_terrain._holes_dirty = true
 		_terrain.rebuild()
 	_brush_ring.terrain = _terrain
 	_brush_ring.set_radius(_brush_radius)
@@ -727,6 +732,17 @@ func _input(event: InputEvent) -> void:
 				elif event.keycode == KEY_R:
 					_active_tool = TOOL_T_RAMP
 					return
+			"g_materials":
+				# Q = paint. E = smooth blend. R = hole cut (Shift-click repairs).
+				if event.keycode == KEY_Q:
+					_on_tool_picked(TOOL_E_PAINT)
+					return
+				elif event.keycode == KEY_E:
+					_on_tool_picked(TOOL_T_MAT_SMOOTH)
+					return
+				elif event.keycode == KEY_R:
+					_on_tool_picked(TOOL_T_HOLE)
+					return
 			"g_spawn_player":
 				if event.keycode == KEY_Q:
 					_on_tool_picked(TOOL_S_PLACE_SPAWN)
@@ -816,6 +832,7 @@ func _snapshot_to_mapstate() -> void:
 	# MapIO can serialize it to disk for save-to-file.
 	MapState.heights = _terrain.heights.duplicate()
 	MapState.terrain_paint = _terrain.paint.duplicate()
+	MapState.terrain_holes = _terrain.holes.duplicate()
 	MapState.grid_w = _terrain.GRID_W
 	MapState.grid_h = _terrain.GRID_H
 	MapState.placed_props.clear()
@@ -937,6 +954,9 @@ func _restore_from_mapstate() -> void:
 		_terrain.heights = MapState.heights.duplicate()
 		if MapState.terrain_paint.size() == _terrain.paint.size():
 			_terrain.paint = MapState.terrain_paint.duplicate()
+		if MapState.terrain_holes.size() == _terrain.holes.size():
+			_terrain.holes = MapState.terrain_holes.duplicate()
+			_terrain._holes_dirty = true
 		_terrain.rebuild()
 	# Clear placed visuals.
 	for box in _placed_props:
@@ -1207,7 +1227,7 @@ func _process(delta: float) -> void:
 	# mode places one billboard per LMB click via _unhandled_input, so we
 	# don't want _apply_tool ticking every frame.
 	var foliage_brush_active: bool = (_active_tool == TOOL_F_PAINT and _foliage_mode == "spray") or _active_tool == TOOL_F_REMOVE
-	var is_brush_tool: bool = foliage_brush_active or _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE, TOOL_S_ACTORS_REMOVE, TOOL_E_PAINT]
+	var is_brush_tool: bool = foliage_brush_active or _active_tool in [TOOL_T_RAISE, TOOL_T_LOWER, TOOL_T_FLATTEN, TOOL_T_SMOOTH, TOOL_T_RAMP, TOOL_S_ITEMS_REMOVE, TOOL_S_ACTORS_REMOVE, TOOL_E_PAINT, TOOL_T_MAT_SMOOTH, TOOL_T_HOLE]
 	if not is_brush_tool:
 		_brush_ring.hide_ring()
 		return
@@ -1217,6 +1237,14 @@ func _process(delta: float) -> void:
 		return
 	_brush_ring.set_radius(_brush_radius)
 	_brush_ring.place(hit.position)
+	# Per-tool ring color cues. Hole tool flips red (cut) / green (repair)
+	# so the user can see the destructive vs constructive side at a
+	# glance; everything else gets the default yellow ring.
+	if _active_tool == TOOL_T_HOLE:
+		var repairing: bool = Input.is_key_pressed(KEY_SHIFT)
+		_brush_ring.set_color(Color(0.3, 1.0, 0.4, 1.0) if repairing else Color(1.0, 0.25, 0.25, 1.0))
+	else:
+		_brush_ring.set_color(Color(1.0, 0.9, 0.2, 1.0))
 	# Foliage spray: half-radius inner ring shows Shift-erase footprint.
 	# Red while Shift held to signal "remove" mode.
 	if _active_tool == TOOL_F_PAINT and _foliage_mode == "spray":
@@ -1224,6 +1252,11 @@ func _process(delta: float) -> void:
 		_brush_ring.set_inner(0.5, Color(1.0, 0.3, 0.25, 1.0) if erase else Color(1.0, 0.55, 0.35, 1.0))
 	else:
 		_brush_ring.set_inner(0.0)
+	# Vertex-dot overlay for all per-vertex Materials tools. Heights/Foliage
+	# brushes don't get them — paint/smooth/hole are the ones master asked
+	# to expose the affected verts on.
+	var materials_brush: bool = _active_tool == TOOL_E_PAINT or _active_tool == TOOL_T_MAT_SMOOTH or _active_tool == TOOL_T_HOLE
+	_brush_ring.set_vert_dots(materials_brush)
 	# Flatten target preview ring at the sampled height.
 	if _active_tool == TOOL_T_FLATTEN:
 		_flatten_ring.set_radius(_brush_radius)
@@ -1400,6 +1433,13 @@ func _apply_tool(world_pos: Vector3, delta: float) -> void:
 			_remove_actor_spawns_in_radius(world_pos, _brush_radius)
 		TOOL_E_PAINT:
 			_terrain.paint_brush(world_pos, _brush_radius, 4.0 * s, delta, _paint_material_id, _paint_shape)
+		TOOL_T_MAT_SMOOTH:
+			_terrain.mat_smooth_brush(world_pos, _brush_radius, 4.0 * s, delta, _paint_shape)
+		TOOL_T_HOLE:
+			# Shift inverts cut → repair. Single-pass per-vertex toggle, so
+			# brush strength has no meaning here.
+			var v: int = 0 if Input.is_key_pressed(KEY_SHIFT) else 1
+			_terrain.hole_brush(world_pos, _brush_radius, _paint_shape, v)
 		TOOL_F_PAINT:
 			# Holding Shift while spraying converts the inner half-radius
 			# circle into a remove pass — lets the user feather-erase
@@ -1469,6 +1509,8 @@ const TOOL_GROUP: Dictionary = {
 	"t_smooth":          "g_heights",
 	"t_ramp":            "g_heights",
 	"e_paint":           "g_materials",
+	"t_mat_smooth":      "g_materials",
+	"t_hole":            "g_materials",
 	"t_foliage_paint":   "g_foliage",
 	"t_foliage_remove":  "g_foliage",
 	"s_player_place":    "g_spawn_player",
@@ -1485,11 +1527,13 @@ func _on_tool_picked(tool_id: String) -> void:
 	if GROUP_DEFAULT_TOOL.has(tool_id):
 		tool_id = String(GROUP_DEFAULT_TOOL[tool_id])
 	_active_tool = tool_id
-	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE or tool_id == TOOL_E_PAINT or tool_id == TOOL_F_PAINT or tool_id == TOOL_F_REMOVE
+	var is_brush_tool: bool = tool_id == TOOL_T_RAISE or tool_id == TOOL_T_LOWER or tool_id == TOOL_T_FLATTEN or tool_id == TOOL_T_SMOOTH or tool_id == TOOL_T_RAMP or tool_id == TOOL_S_PLACE_SPAWN or tool_id == TOOL_S_DELETE_SPAWN or tool_id == TOOL_S_ITEMS or tool_id == TOOL_S_ITEMS_REMOVE or tool_id == TOOL_S_ACTORS or tool_id == TOOL_S_ACTORS_REMOVE or tool_id == TOOL_E_PAINT or tool_id == TOOL_T_MAT_SMOOTH or tool_id == TOOL_T_HOLE or tool_id == TOOL_F_PAINT or tool_id == TOOL_F_REMOVE
 	_radius_widget.visible = is_brush_tool
 	if _paint_panel != null:
+		# Paint panel = material-channel picker. Only meaningful for the
+		# base paint mode; smooth/hole modes don't need it.
 		_paint_panel.visible = (tool_id == TOOL_E_PAINT)
-		if tool_id == TOOL_E_PAINT:
+		if tool_id == TOOL_E_PAINT or tool_id == TOOL_T_MAT_SMOOTH or tool_id == TOOL_T_HOLE:
 			_brush_ring.set_shape(_paint_shape)
 		elif tool_id == TOOL_F_PAINT or tool_id == TOOL_F_REMOVE:
 			_brush_ring.set_shape(_foliage_shape)

@@ -181,10 +181,15 @@ func _snapshot_state() -> Dictionary:
 			"scale": float(inst.get("scale", 1.0)),
 			"rot_y": float(inst.get("rot_y", 0.0)),
 		})
+	var holes_arr: Array = []
+	holes_arr.resize(MapState.terrain_holes.size())
+	for i in range(MapState.terrain_holes.size()):
+		holes_arr[i] = int(MapState.terrain_holes[i])
 	return {
 		"schema": SCHEMA_VERSION,
 		"heights": heights_arr,
 		"terrain_paint": paint_arr,
+		"terrain_holes": holes_arr,
 		"grid_w": MapState.grid_w,
 		"grid_h": MapState.grid_h,
 		"player_spawns": spawns,
@@ -221,6 +226,12 @@ func _apply_state(data: Dictionary) -> void:
 			float(paint_arr[i * 4 + 3]),
 		)
 	MapState.terrain_paint = paint_packed
+	var holes_arr: Array = data.get("terrain_holes", [])
+	var holes_packed: PackedByteArray = PackedByteArray()
+	holes_packed.resize(holes_arr.size())
+	for i in range(holes_arr.size()):
+		holes_packed[i] = int(holes_arr[i]) & 0x01
+	MapState.terrain_holes = holes_packed
 	MapState.grid_w = int(data.get("grid_w", 0))
 	MapState.grid_h = int(data.get("grid_h", 0))
 	for sp in data.get("player_spawns", []):

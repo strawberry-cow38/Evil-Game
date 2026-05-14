@@ -15,6 +15,10 @@ var heights: PackedFloat32Array = PackedFloat32Array()
 # Per-vertex paint weights — rgba = (dirt, grass, stone, sand). Sum
 # kept ~1 by the brush; shader normalises just in case.
 var paint: PackedColorArray = PackedColorArray()
+# Per-vertex hole mask. 0 = solid, 1 = cut. Any triangle touching a
+# cut vertex is dropped from both the rendered mesh and the collider,
+# so the player falls through. Repair brush flips bytes back to 0.
+var holes: PackedByteArray = PackedByteArray()
 
 # Material palette for the 4 paint channels. Order matches paint rgba.
 const PAINT_COLORS: Array = [
@@ -53,6 +57,11 @@ var _vertices: PackedVector3Array = PackedVector3Array()
 var _normals: PackedVector3Array = PackedVector3Array()
 var _colors: PackedColorArray = PackedColorArray()
 var _array_mesh: ArrayMesh = null
+# Filtered index buffer that drops triangles touching a hole vertex.
+# Rebuilt only when `holes` changes; mesh + collider both consume this
+# instead of the raw _indices buffer.
+var _active_indices: PackedInt32Array = PackedInt32Array()
+var _holes_dirty: bool = true
 # Coalesced rebuild flags. Brush calls just mark these — actual mesh
 # work happens in _process at most once per frame, and collision
 # rebuild waits until end_stroke() is called. _dirty_min/_max bound
@@ -71,6 +80,9 @@ func _ready() -> void:
 	paint.resize(GRID_W * GRID_H)
 	for i in paint.size():
 		paint[i] = Color(0.0, 1.0, 0.0, 0.0)  # default to full grass
+	holes.resize(GRID_W * GRID_H)
+	for i in holes.size():
+		holes[i] = 0
 	var sh := Shader.new()
 	sh.code = PAINT_SHADER_CODE
 	_material = ShaderMaterial.new()
@@ -263,6 +275,79 @@ func paint_brush(center: Vector3, radius: float, strength: float, delta: float, 
 	# mesh dirty so colors get re-uploaded; skip collider rebuild.
 	_mark_paint_dirty(x0, y0, x1, y1)
 
+# Smooth each affected vertex's paint weights toward the local average
+# of its 8 neighbours, weighted by brush falloff. Used by the Materials
+# tool's blend mode to soften hard paint boundaries.
+func mat_smooth_brush(center: Vector3, radius: float, strength: float, delta: float, shape: String) -> void:
+	var rate: float = clampf(strength * delta, 0.0, 1.0)
+	if rate <= 0.0:
+		return
+	var g := world_to_grid(center)
+	var rg: float = radius / VERT_SPACING
+	var x0: int = max(1, int(floor(g.x - rg)))
+	var x1: int = min(GRID_W - 2, int(ceil(g.x + rg)))
+	var y0: int = max(1, int(floor(g.y - rg)))
+	var y1: int = min(GRID_H - 2, int(ceil(g.y + rg)))
+	var is_square: bool = shape == "square"
+	var src := paint.duplicate()
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			var dx: float = float(x) - g.x
+			var dy: float = float(y) - g.y
+			var f: float
+			if is_square:
+				var dm: float = max(absf(dx), absf(dy))
+				if dm > rg:
+					continue
+				f = 1.0 - (dm / rg)
+			else:
+				var d: float = sqrt(dx * dx + dy * dy)
+				if d > rg:
+					continue
+				f = 1.0 - (d / rg)
+			f = f * f * (3.0 - 2.0 * f)
+			var avg := Color(0, 0, 0, 0)
+			for oy in range(-1, 2):
+				for ox in range(-1, 2):
+					avg += src[_idx(x + ox, y + oy)]
+			avg /= 9.0
+			var i: int = _idx(x, y)
+			paint[i] = src[i].lerp(avg, rate * f)
+	_mark_paint_dirty(x0, y0, x1, y1)
+
+# Per-vertex hole brush. `value` is 1 to cut, 0 to repair. Triangles
+# touching any cut vertex are skipped during the next mesh + collider
+# rebuild, so the player falls through. Hole edits dirty BOTH mesh and
+# collider — a hole stroke needs a collider rebuild on release.
+func hole_brush(center: Vector3, radius: float, shape: String, value: int) -> void:
+	var g := world_to_grid(center)
+	var rg: float = radius / VERT_SPACING
+	var x0: int = max(0, int(floor(g.x - rg)))
+	var x1: int = min(GRID_W - 1, int(ceil(g.x + rg)))
+	var y0: int = max(0, int(floor(g.y - rg)))
+	var y1: int = min(GRID_H - 1, int(ceil(g.y + rg)))
+	var v: int = clampi(value, 0, 1)
+	var is_square: bool = shape == "square"
+	var changed: bool = false
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			var dx: float = float(x) - g.x
+			var dy: float = float(y) - g.y
+			var inside: bool
+			if is_square:
+				inside = max(absf(dx), absf(dy)) <= rg
+			else:
+				inside = (dx * dx + dy * dy) <= rg * rg
+			if not inside:
+				continue
+			var i: int = _idx(x, y)
+			if holes[i] != v:
+				holes[i] = v
+				changed = true
+	if changed:
+		_holes_dirty = true
+		_mark_region_dirty(x0, y0, x1, y1)
+
 func _mark_paint_dirty(x0: int, y0: int, x1: int, y1: int) -> void:
 	if not _has_dirty_rect:
 		_dirty_min = Vector2i(x0, y0)
@@ -446,26 +531,62 @@ func _rebuild_mesh_now() -> void:
 			_normals[x + y * GRID_W] = Vector3(hl - hr, 2.0 * VERT_SPACING, hd - hu).normalized()
 	for i in range(paint.size()):
 		_colors[i] = paint[i]
+	if _holes_dirty:
+		_rebuild_active_indices()
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = _vertices
 	arrays[Mesh.ARRAY_NORMAL] = _normals
 	arrays[Mesh.ARRAY_TEX_UV] = _uvs
 	arrays[Mesh.ARRAY_COLOR]  = _colors
-	arrays[Mesh.ARRAY_INDEX]  = _indices
+	arrays[Mesh.ARRAY_INDEX]  = _active_indices
 	_array_mesh.clear_surfaces()
-	_array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	_array_mesh.surface_set_material(0, _material)
+	if _active_indices.size() > 0:
+		_array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		_array_mesh.surface_set_material(0, _material)
 	_has_dirty_rect = false
 
+func _rebuild_active_indices() -> void:
+	# Walk the static index buffer in triplets; drop any triangle that
+	# uses a hole vertex. Cheap full-grid pass (~150k tris) — runs only
+	# on hole edits, not every brush stroke.
+	var has_any_holes: bool = false
+	for h in holes:
+		if h != 0:
+			has_any_holes = true
+			break
+	if not has_any_holes:
+		_active_indices = _indices
+		_holes_dirty = false
+		return
+	var out: PackedInt32Array = PackedInt32Array()
+	out.resize(_indices.size())
+	var w: int = 0
+	for t in range(0, _indices.size(), 3):
+		var a: int = _indices[t]
+		var b: int = _indices[t + 1]
+		var c: int = _indices[t + 2]
+		if holes[a] != 0 or holes[b] != 0 or holes[c] != 0:
+			continue
+		out[w]     = a
+		out[w + 1] = b
+		out[w + 2] = c
+		w += 3
+	out.resize(w)
+	_active_indices = out
+	_holes_dirty = false
+
 func _rebuild_collision_now() -> void:
+	if _holes_dirty:
+		_rebuild_active_indices()
 	var shape := ConcavePolygonShape3D.new()
-	# Build face list directly from indices/vertices (avoids
-	# Mesh.get_faces() which would re-walk the surface).
+	# Build face list directly from the hole-filtered index buffer so
+	# player physics matches the rendered mesh — no invisible floor over
+	# a cut hole.
 	var faces: PackedVector3Array = PackedVector3Array()
-	faces.resize(_indices.size())
-	for i in range(_indices.size()):
-		faces[i] = _vertices[_indices[i]]
+	faces.resize(_active_indices.size())
+	for i in range(_active_indices.size()):
+		faces[i] = _vertices[_active_indices[i]]
 	shape.set_faces(faces)
 	_collision.shape = shape
 	_collision_dirty = false

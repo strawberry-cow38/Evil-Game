@@ -12,6 +12,8 @@ var grid_h: int = 0
 # Sum normalised to 1 in the shader. Empty array = play scene falls back
 # to flat grass.
 var terrain_paint: PackedColorArray = PackedColorArray()
+# Per-vertex hole mask. 0 = solid, 1 = cut. Empty = no holes.
+var terrain_holes: PackedByteArray = PackedByteArray()
 # Player spawn points authored in the editor. Empty = play scene falls
 # back to its hardcoded spawn.
 var player_spawns: Array[Vector3] = []
@@ -70,6 +72,7 @@ func clear() -> void:
 	grid_w = 0
 	grid_h = 0
 	terrain_paint = PackedColorArray()
+	terrain_holes = PackedByteArray()
 	player_spawns.clear()
 	placed_props.clear()
 	item_tables.clear()

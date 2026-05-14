@@ -58,6 +58,9 @@ func _ready() -> void:
 		terrain.heights = MapState.heights.duplicate()
 		if MapState.terrain_paint.size() == terrain.paint.size():
 			terrain.paint = MapState.terrain_paint.duplicate()
+		if MapState.terrain_holes.size() == terrain.holes.size():
+			terrain.holes = MapState.terrain_holes.duplicate()
+			terrain._holes_dirty = true
 		terrain.rebuild()
 		terrain_node = terrain
 	# Foliage — single MultiMeshInstance3D rebuilt from authored instances.
