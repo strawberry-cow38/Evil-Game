@@ -16,6 +16,17 @@ const SHRUB_BUCKETS: int = 5
 const GRASS_SHADER := preload("res://grass.gdshader")
 const DEFAULT_PRESET: String = "short_green"
 
+# Per-cell instance cap so spraying in one spot can't build a million-tri
+# super-patch. The grid sums every preset together — "patch density" is
+# what we actually care about, not per-variant counts. Spray samples that
+# would push a cell past MAX_PER_CELL are silently rejected.
+#
+# 0.5m cell × 24 instances ≈ 96 plants per m² peak, which is dense but not
+# pathological. Bump MAX_PER_CELL if a future tuning pass wants thicker
+# carpets.
+const DENSITY_CELL_SIZE: float = 0.5
+const MAX_PER_CELL: int = 24
+
 # Preset table. Each preset is one MultiMesh bucket — same shader/texture
 # but its own quad height + tint uniform. Tints picked to read against the
 # terrain paint colours (grass = green, dirt = dry/brown, sand = pale).
@@ -58,6 +69,12 @@ var _shared_clover_tex: ImageTexture = null
 var _shared_daisy_tex: ImageTexture = null
 var _shared_shadow_tex: ImageTexture = null
 var _shared_shadow_mat: StandardMaterial3D = null
+
+# Spatial counter for the per-cell density cap. Key = Vector2i cell coord
+# in DENSITY_CELL_SIZE units; value = current instance count across all
+# presets. Kept in sync inside add_instance / remove_in_radius / clear_all
+# / set_state so any caller path stays honest.
+var _density_grid: Dictionary = {}
 
 var _wind_dir: Vector2 = Vector2(1.0, 0.0)
 var _wind_min: float = 0.04
@@ -821,10 +838,33 @@ func get_preset_tint(preset_id: String) -> Color:
 			return p.tint
 	return Color.WHITE
 
-func add_instance(preset_id: String, world_pos: Vector3, scale: float, rot_y: float) -> void:
+func add_instance(preset_id: String, world_pos: Vector3, scale: float, rot_y: float) -> bool:
+	# Per-cell density cap. Cells already at MAX_PER_CELL refuse new
+	# placements — caller paths (spray + exact + state restore) treat the
+	# bool return as "did this actually land". Spray loops use it to count
+	# real placements; exact-mode placement currently ignores it (single
+	# clicks are infrequent enough that overflow doesn't matter).
+	var key: Vector2i = _density_cell(world_pos)
+	if int(_density_grid.get(key, 0)) >= MAX_PER_CELL:
+		return false
 	var pid: String = _resolve_preset(preset_id)
 	_instances[pid].append({"pos": world_pos, "scale": scale, "rot_y": rot_y})
+	_density_grid[key] = int(_density_grid.get(key, 0)) + 1
 	_dirty = true
+	return true
+
+func _density_cell(world_pos: Vector3) -> Vector2i:
+	return Vector2i(
+		int(floor(world_pos.x / DENSITY_CELL_SIZE)),
+		int(floor(world_pos.z / DENSITY_CELL_SIZE)),
+	)
+
+func _rebuild_density_grid() -> void:
+	_density_grid.clear()
+	for pid in _instances.keys():
+		for inst in _instances[pid]:
+			var key: Vector2i = _density_cell(inst.get("pos", Vector3.ZERO))
+			_density_grid[key] = int(_density_grid.get(key, 0)) + 1
 
 func remove_in_radius(world_pos: Vector3, radius: float, shape: String) -> int:
 	# Cross-preset removal: brush erases every variant within the footprint.
@@ -843,6 +883,12 @@ func remove_in_radius(world_pos: Vector3, radius: float, shape: String) -> int:
 				inside = dx * dx + dz * dz <= r2
 			if inside:
 				dropped += 1
+				var key: Vector2i = _density_cell(p)
+				var c: int = int(_density_grid.get(key, 0)) - 1
+				if c <= 0:
+					_density_grid.erase(key)
+				else:
+					_density_grid[key] = c
 			else:
 				keep.append(inst)
 		if keep.size() != _instances[pid].size():
@@ -937,6 +983,7 @@ func _profile_row(pid: String, public_id: String, kind: String) -> Dictionary:
 func clear_all() -> void:
 	for pid in _instances.keys():
 		_instances[pid] = []
+	_density_grid.clear()
 	_dirty = true
 
 func get_state() -> Array:
@@ -968,6 +1015,10 @@ func set_state(state: Array) -> void:
 			"scale": float(inst.get("scale", 1.0)),
 			"rot_y": float(inst.get("rot_y", 0.0)),
 		})
+	# Old saves predate the density cap, so a restored map can legitimately
+	# exceed MAX_PER_CELL. Just rebuild the counter from the loaded state
+	# instead of dropping overflow on load.
+	_rebuild_density_grid()
 	_dirty = true
 
 func _apply_wind_uniforms_to(mat: ShaderMaterial) -> void:
