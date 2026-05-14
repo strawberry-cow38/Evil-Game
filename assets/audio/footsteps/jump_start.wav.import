@@ -1,24 +1,3 @@
 [remap]
 
-importer="wav"
-type="AudioStreamWAV"
-uid="uid://dsq35nbl1x8pc"
-path="res://.godot/imported/jump_start.wav-ca226fe362ffaf8d96ea4804a23f7bb5.sample"
-
-[deps]
-
-source_file="res://assets/audio/footsteps/jump_start.wav"
-dest_files=["res://.godot/imported/jump_start.wav-ca226fe362ffaf8d96ea4804a23f7bb5.sample"]
-
-[params]
-
-force/8_bit=false
-force/mono=false
-force/max_rate=false
-force/max_rate_hz=44100
-edit/trim=false
-edit/normalize=false
-edit/loop_mode=0
-edit/loop_begin=0
-edit/loop_end=-1
-compress/mode=2
+importer="keep"

@@ -332,35 +332,121 @@ func is_ads() -> bool:
 # into the per-material banks. Missing files are silently skipped so the
 # game still boots before the audio gen pass lands.
 func _load_footstep_bank() -> void:
-	# Guarded load: ResourceLoader.exists() returns true once the .import
-	# metadata file lives next to the WAV, but the imported .sample blob
-	# may still be missing if the project wasn't reimported after pull.
-	# Skip + warn rather than spam load errors.
+	# Loaded directly from disk via FileAccess + a tiny WAV header parser
+	# instead of the Godot import pipeline. The .import files alongside
+	# these WAVs use importer="keep" so Godot doesn't try to materialize
+	# .godot/imported/*.sample blobs — a pulled-but-not-reimported clone
+	# would silently fail otherwise.
 	var mats: Array = ["dirt", "grass", "stone", "sand"]
 	for mi in range(mats.size()):
 		var key: String = mats[mi]
 		var steps: Array = []
 		for i in range(1, 5):
 			var p: String = "res://assets/audio/footsteps/step_%s_%d.wav" % [key, i]
-			var s := _safe_load_audio(p)
+			var s := _load_wav_runtime(p)
 			if s != null:
 				steps.append(s)
 		if not steps.is_empty():
 			_step_bank[mi] = steps
 		var lp: String = "res://assets/audio/footsteps/land_%s.wav" % key
-		var ls := _safe_load_audio(lp)
+		var ls := _load_wav_runtime(lp)
 		if ls != null:
 			_land_bank[mi] = ls
-	var jp: String = "res://assets/audio/footsteps/jump_start.wav"
-	_jump_start_stream = _safe_load_audio(jp)
+	_jump_start_stream = _load_wav_runtime("res://assets/audio/footsteps/jump_start.wav")
 
-func _safe_load_audio(p: String) -> AudioStream:
-	if not ResourceLoader.exists(p):
+# Read a .wav off disk and build an AudioStreamWAV without going through
+# the Godot import system. Returns null on any parse failure so missing
+# / malformed files just go silent. Supports PCM and IEEE float (32-bit)
+# mono/stereo at any sample rate — enough for AudioGen output.
+func _load_wav_runtime(path: String) -> AudioStreamWAV:
+	if not FileAccess.file_exists(path):
 		return null
-	var r: Resource = ResourceLoader.load(p, "", ResourceLoader.CACHE_MODE_REUSE)
-	if r == null or not (r is AudioStream):
+	var bytes: PackedByteArray = FileAccess.get_file_as_bytes(path)
+	if bytes.size() < 44:
 		return null
-	return r
+	if bytes.slice(0, 4).get_string_from_ascii() != "RIFF":
+		return null
+	if bytes.slice(8, 12).get_string_from_ascii() != "WAVE":
+		return null
+	var fmt_audio: int = 1
+	var fmt_channels: int = 1
+	var fmt_rate: int = 44100
+	var fmt_bits: int = 16
+	var pcm: PackedByteArray = PackedByteArray()
+	var p: int = 12
+	while p + 8 <= bytes.size():
+		var cid: String = bytes.slice(p, p + 4).get_string_from_ascii()
+		var csz: int = bytes.decode_u32(p + 4)
+		var body: int = p + 8
+		if cid == "fmt ":
+			fmt_audio    = bytes.decode_u16(body + 0)
+			fmt_channels = bytes.decode_u16(body + 2)
+			fmt_rate     = bytes.decode_u32(body + 4)
+			fmt_bits     = bytes.decode_u16(body + 14)
+		elif cid == "data":
+			pcm = bytes.slice(body, body + csz)
+		p = body + csz
+		if csz % 2 == 1:
+			p += 1
+	if pcm.is_empty():
+		return null
+	var stream := AudioStreamWAV.new()
+	stream.mix_rate = fmt_rate
+	stream.stereo = fmt_channels == 2
+	stream.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	# Godot's AudioStreamWAV format flags are limited: 8-bit PCM, 16-bit
+	# PCM, or IMA-ADPCM. Convert 24/32-bit PCM and float down to s16le.
+	if fmt_audio == 1 and fmt_bits == 16:
+		stream.format = AudioStreamWAV.FORMAT_16_BITS
+		stream.data = pcm
+	elif fmt_audio == 1 and fmt_bits == 8:
+		stream.format = AudioStreamWAV.FORMAT_8_BITS
+		stream.data = pcm
+	elif fmt_audio == 3 and fmt_bits == 32:
+		stream.format = AudioStreamWAV.FORMAT_16_BITS
+		stream.data = _f32_to_s16(pcm)
+	elif fmt_audio == 1 and fmt_bits == 24:
+		stream.format = AudioStreamWAV.FORMAT_16_BITS
+		stream.data = _s24_to_s16(pcm)
+	elif fmt_audio == 1 and fmt_bits == 32:
+		stream.format = AudioStreamWAV.FORMAT_16_BITS
+		stream.data = _s32_to_s16(pcm)
+	else:
+		return null
+	return stream
+
+func _f32_to_s16(src: PackedByteArray) -> PackedByteArray:
+	var n: int = src.size() / 4
+	var out := PackedByteArray()
+	out.resize(n * 2)
+	for i in n:
+		var f: float = src.decode_float(i * 4)
+		var s: int = clampi(int(round(clampf(f, -1.0, 1.0) * 32767.0)), -32768, 32767)
+		out.encode_s16(i * 2, s)
+	return out
+
+func _s24_to_s16(src: PackedByteArray) -> PackedByteArray:
+	var n: int = src.size() / 3
+	var out := PackedByteArray()
+	out.resize(n * 2)
+	for i in n:
+		var b0: int = src[i * 3]
+		var b1: int = src[i * 3 + 1]
+		var b2: int = src[i * 3 + 2]
+		var v: int = b0 | (b1 << 8) | (b2 << 16)
+		if v & 0x800000:
+			v -= 0x1000000
+		out.encode_s16(i * 2, v >> 8)
+	return out
+
+func _s32_to_s16(src: PackedByteArray) -> PackedByteArray:
+	var n: int = src.size() / 4
+	var out := PackedByteArray()
+	out.resize(n * 2)
+	for i in n:
+		var v: int = src.decode_s32(i * 4)
+		out.encode_s16(i * 2, v >> 16)
+	return out
 
 func _current_material_id() -> int:
 	var terrain := get_node_or_null("../EditorTerrain")

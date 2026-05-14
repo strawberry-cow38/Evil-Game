@@ -1,24 +1,3 @@
 [remap]
 
-importer="wav"
-type="AudioStreamWAV"
-uid="uid://kadp4jrpcx76"
-path="res://.godot/imported/land_dirt.wav-d0c82e0a407c4c39c39393879d272097.sample"
-
-[deps]
-
-source_file="res://assets/audio/footsteps/land_dirt.wav"
-dest_files=["res://.godot/imported/land_dirt.wav-d0c82e0a407c4c39c39393879d272097.sample"]
-
-[params]
-
-force/8_bit=false
-force/mono=false
-force/max_rate=false
-force/max_rate_hz=44100
-edit/trim=false
-edit/normalize=false
-edit/loop_mode=0
-edit/loop_begin=0
-edit/loop_end=-1
-compress/mode=2
+importer="keep"
