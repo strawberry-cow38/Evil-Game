@@ -33,6 +33,14 @@ const BOB_CROUCH_MULT := 0.6
 const BOB_SPRINT_MULT := 1.35
 const BOB_LERP_RATE := 12.0     # how fast bob amp eases in/out at start/stop
 
+# Strafe lean. Camera rolls slightly opposite the strafe direction so
+# stepping right banks the view left — Quake-era trick that sells lateral
+# motion without forcing the player to track a swinging horizon. Max
+# tilt clamped so scoped weapons don't get a crooked reticle.
+const LEAN_MAX_DEG := 1.6
+const LEAN_LERP_RATE := 9.0
+const LEAN_ADS_MULT := 0.2
+
 const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
 const INTERACT_MASK := 0xFFFFFFFF
@@ -145,6 +153,9 @@ const WAKE_STEP: float = 0.4
 # offset on/off so we don't pop on direction changes.
 var _bob_phase: float = 0.0
 var _bob_amp: float = 0.0
+# Current camera roll (radians) — lerps toward a target derived from
+# local-space lateral velocity so strafing banks the view.
+var _lean_z: float = 0.0
 # Mouse motion accumulators applied in _physics_process. With physics
 # interpolation enabled, setting rotation outside the physics tick lets
 # the engine lerp between old and new transforms — feels like yaw lag.
@@ -499,6 +510,21 @@ func _physics_process(delta: float) -> void:
 	cam_pos.y += bob_y
 	cam_pos.x += bob_x
 	_camera.position = cam_pos
+	# Strafe lean. Project velocity onto the player's right axis so we
+	# bank only on lateral motion (forward/back doesn't tilt). Zero out
+	# while airborne / TP / driving so the camera stays level when we
+	# can't control it cleanly.
+	var lean_target: float = 0.0
+	if grounded and _vehicle == null and _tp_blend < 0.5:
+		var right_axis: Vector3 = transform.basis.x
+		var strafe_dot: float = right_axis.x * velocity.x + right_axis.z * velocity.z
+		var t: float = clamp(strafe_dot / SPEED_STRAFE, -1.0, 1.0)
+		lean_target = -t * deg_to_rad(LEAN_MAX_DEG)
+		if _ads:
+			lean_target *= LEAN_ADS_MULT
+	var lean_alpha: float = 1.0 - exp(-LEAN_LERP_RATE * delta)
+	_lean_z = lerpf(_lean_z, lean_target, lean_alpha)
+	_camera.rotation.z = _lean_z
 	if _body_mesh != null:
 		_body_mesh.visible = _tp_blend > 0.05 and _vehicle == null
 	# Driving: vehicle parks us at the seat marker each frame (effectively),
