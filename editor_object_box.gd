@@ -32,6 +32,11 @@ var no_collide: bool = false
 # metadata; gameplay damage code reads/decrements it.
 var destructible: bool = false
 var hp_max: int = 100
+# Free-form per-object-type state bag. Keys depend on object_id:
+#   obj_computer_station → { pre_added_cams: Array[String], allow_add: bool }
+#   obj_cctv_camera      → { cam_id: String, ptz_enabled: bool }
+# Most object types leave this empty.
+var object_state: Dictionary = {}
 var _local_aabb: AABB = AABB(-FALLBACK_SIZE * 0.5, FALLBACK_SIZE)
 
 var _mesh_instance: MeshInstance3D

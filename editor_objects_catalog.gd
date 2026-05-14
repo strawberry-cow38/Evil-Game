@@ -10,6 +10,8 @@ extends RefCounted
 # values to seed loot from whichever table the editor assigned.
 
 const CRATE := preload("res://crate.gd")
+const COMPUTER_STATION := preload("res://computer_station.gd")
+const CCTV_CAMERA := preload("res://cctv_camera.gd")
 
 # Set of object ids whose build() returns a crate.gd node. Editor uses
 # this to decide when to show the loot-table picker on the selected
@@ -27,8 +29,97 @@ static func build(object_id: String) -> Node3D:
 			return _build_lootable_crate("Crate (Small)", Vector3(1.1, 1.0, 0.8), 60.0, 6)
 		"obj_crate_large":
 			return _build_lootable_crate("Crate (Large)", Vector3(1.7, 1.4, 1.2), 180.0, 14)
+		"obj_computer_station":
+			return _build_computer_station()
+		"obj_cctv_camera":
+			return _build_cctv_camera()
 		_:
 			return null
+
+# Computer Station: a low desk + monitor. Player can mount it at
+# runtime to view CCTV feeds. Per-instance cam list + allow_add flag
+# live on the resulting node (see computer_station.gd).
+static func _build_computer_station() -> Node3D:
+	var holder := Node3D.new()
+	holder.set_script(COMPUTER_STATION)
+	var desk := MeshInstance3D.new()
+	var dm := BoxMesh.new()
+	dm.size = Vector3(1.2, 0.85, 0.7)
+	desk.mesh = dm
+	var dmat := StandardMaterial3D.new()
+	dmat.albedo_color = Color(0.22, 0.22, 0.26, 1.0)
+	dmat.roughness = 0.7
+	desk.material_override = dmat
+	desk.position = Vector3(0, 0.425, 0)
+	holder.add_child(desk)
+	var monitor := MeshInstance3D.new()
+	var mm := BoxMesh.new()
+	mm.size = Vector3(0.9, 0.55, 0.06)
+	monitor.mesh = mm
+	var screen_mat := StandardMaterial3D.new()
+	screen_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	screen_mat.albedo_color = Color(0.15, 0.55, 0.85, 1.0)
+	screen_mat.emission_enabled = true
+	screen_mat.emission = Color(0.05, 0.35, 0.55, 1.0)
+	screen_mat.emission_energy_multiplier = 0.6
+	monitor.material_override = screen_mat
+	monitor.position = Vector3(0, 1.15, -0.28)
+	holder.add_child(monitor)
+	var body := StaticBody3D.new()
+	body.position = Vector3(0, 0.425, 0)
+	var shape := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(1.2, 0.85, 0.7)
+	shape.shape = bs
+	body.add_child(shape)
+	holder.add_child(body)
+	return holder
+
+# CCTV Camera: sphere with a forward-facing protrusion so the user can
+# read where it points. cam_id + ptz_enabled stored on the node.
+static func _build_cctv_camera() -> Node3D:
+	var holder := Node3D.new()
+	holder.set_script(CCTV_CAMERA)
+	var bracket := MeshInstance3D.new()
+	var brm := CylinderMesh.new()
+	brm.top_radius = 0.04
+	brm.bottom_radius = 0.04
+	brm.height = 0.25
+	bracket.mesh = brm
+	var grey := StandardMaterial3D.new()
+	grey.albedo_color = Color(0.32, 0.32, 0.35, 1.0)
+	grey.roughness = 0.55
+	bracket.material_override = grey
+	bracket.position = Vector3(0, 0.125, 0)
+	holder.add_child(bracket)
+	var sphere := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.16
+	sm.height = 0.32
+	sphere.mesh = sm
+	var housing := StandardMaterial3D.new()
+	housing.albedo_color = Color(0.18, 0.18, 0.2, 1.0)
+	housing.roughness = 0.4
+	sphere.material_override = housing
+	sphere.position = Vector3(0, 0.32, 0)
+	holder.add_child(sphere)
+	var lens := MeshInstance3D.new()
+	var lm := CylinderMesh.new()
+	lm.top_radius = 0.07
+	lm.bottom_radius = 0.06
+	lm.height = 0.12
+	lens.mesh = lm
+	var lens_mat := StandardMaterial3D.new()
+	lens_mat.albedo_color = Color(0.05, 0.05, 0.07, 1.0)
+	lens_mat.metallic = 0.5
+	lens_mat.roughness = 0.2
+	lens.material_override = lens_mat
+	# Protrusion points along +Z (forward). Cylinder is Y-aligned by
+	# default; rotate 90deg around X so its axis lies along Z.
+	lens.rotation = Vector3(deg_to_rad(90.0), 0, 0)
+	lens.position = Vector3(0, 0.32, 0.18)
+	holder.add_child(lens)
+	return holder
 
 # Lootable crate factory. No placeholder seeding — bootstrap fills the
 # crate by rolling whichever loot table the editor assigned to this slot.

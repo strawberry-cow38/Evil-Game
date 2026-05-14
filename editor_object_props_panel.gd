@@ -1,18 +1,19 @@
 extends PanelContainer
 
 # Per-placement object settings. Shown when a placed object_box is
-# selected. Toggles for No-Collide and Destructible, plus an HP spinbox
-# that's disabled when destructible is off. Editor wires bind() on
-# selection change and listens to the three signals to mirror the
-# values back onto the selected box.
+# selected. Always shows No-Collide / Destructible / HP / Events; for
+# specific object types (computer station, CCTV cam) shows an extra
+# block of type-specific fields below those.
 
 signal no_collide_changed(value: bool)
 signal destructible_changed(value: bool)
 signal hp_changed(value: int)
 # Emitted when the user picks one of the named-events from the dropdown.
-# event_id "" means the "(none)" entry — useful for jumping focus to the
-# global events panel from here.
 signal event_focused(event_id: String)
+# Emitted whenever a type-specific field in the extras section changes.
+# Carries the FULL fresh state dict for the current object_id; editor
+# mirrors it onto the selected box without trying to diff.
+signal object_state_changed(state: Dictionary)
 
 var _title: Label
 var _no_collide_chk: CheckBox
@@ -21,9 +22,21 @@ var _hp_spin: SpinBox
 var _events_btn: OptionButton
 var _suppress: bool = false
 
+# Extras container — child widgets swap per object_id. Stored state is
+# kept here so we can emit the whole dict on any sub-edit.
+var _extras: VBoxContainer
+var _extras_object_id: String = ""
+var _extras_state: Dictionary = {}
+# Cached widget refs for the active extras layout.
+var _ex_allow_add_chk: CheckBox = null
+var _ex_cam_list: ItemList = null
+var _ex_cam_input: LineEdit = null
+var _ex_cam_id_edit: LineEdit = null
+var _ex_ptz_chk: CheckBox = null
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	custom_minimum_size = Vector2(260, 0)
+	custom_minimum_size = Vector2(280, 0)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 4)
 	add_child(vb)
@@ -74,8 +87,11 @@ func _ready() -> void:
 		event_focused.emit(String(_events_btn.get_item_metadata(idx))))
 	ev_row.add_child(_events_btn)
 	vb.add_child(ev_row)
+	_extras = VBoxContainer.new()
+	_extras.add_theme_constant_override("separation", 4)
+	vb.add_child(_extras)
 
-func bind(label_text: String, no_collide: bool, destructible: bool, hp: int, events: Array = []) -> void:
+func bind(label_text: String, no_collide: bool, destructible: bool, hp: int, events: Array = [], object_id: String = "", object_state: Dictionary = {}) -> void:
 	_suppress = true
 	_title.text = label_text
 	_no_collide_chk.button_pressed = no_collide
@@ -95,4 +111,132 @@ func bind(label_text: String, no_collide: bool, destructible: bool, hp: int, eve
 			_events_btn.add_item(String(ev.get("name", "?")))
 			_events_btn.set_item_metadata(_events_btn.item_count - 1, String(ev.get("id", "")))
 		_events_btn.select(0)
+	_rebuild_extras(object_id, object_state)
 	_suppress = false
+
+func _rebuild_extras(object_id: String, state: Dictionary) -> void:
+	# Tear down whatever extras layout the previous selection used and
+	# build the one matching the new object_id. Widgets cached at the
+	# top of the file are reset to null when not used so we never
+	# accidentally read a stale reference from the previous prop.
+	for c in _extras.get_children():
+		c.queue_free()
+	_ex_allow_add_chk = null
+	_ex_cam_list = null
+	_ex_cam_input = null
+	_ex_cam_id_edit = null
+	_ex_ptz_chk = null
+	_extras_object_id = object_id
+	_extras_state = state.duplicate(true)
+	match object_id:
+		"obj_computer_station":
+			_build_station_extras()
+		"obj_cctv_camera":
+			_build_camera_extras()
+
+func _emit_state() -> void:
+	if _suppress:
+		return
+	object_state_changed.emit(_extras_state.duplicate(true))
+
+func _build_station_extras() -> void:
+	var hdr := Label.new()
+	hdr.text = "Computer Station"
+	hdr.add_theme_font_size_override("font_size", 14)
+	_extras.add_child(hdr)
+	_ex_allow_add_chk = CheckBox.new()
+	_ex_allow_add_chk.text = "Allow Add Cams (at runtime)"
+	_ex_allow_add_chk.button_pressed = bool(_extras_state.get("allow_add", true))
+	_ex_allow_add_chk.toggled.connect(func(v: bool):
+		_extras_state["allow_add"] = v
+		_emit_state())
+	_extras.add_child(_ex_allow_add_chk)
+	var lbl := Label.new()
+	lbl.text = "Pre-added Cam IDs:"
+	_extras.add_child(lbl)
+	_ex_cam_list = ItemList.new()
+	_ex_cam_list.custom_minimum_size = Vector2(0, 120)
+	_ex_cam_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var cams: Array = _extras_state.get("pre_added_cams", [])
+	for c in cams:
+		_ex_cam_list.add_item(String(c))
+	_extras.add_child(_ex_cam_list)
+	var row := HBoxContainer.new()
+	_ex_cam_input = LineEdit.new()
+	_ex_cam_input.placeholder_text = "cam_id (alnum)"
+	_ex_cam_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(_ex_cam_input)
+	var add_btn := Button.new()
+	add_btn.text = "Add"
+	add_btn.pressed.connect(_on_station_add_cam_pressed)
+	row.add_child(add_btn)
+	var rm_btn := Button.new()
+	rm_btn.text = "Remove"
+	rm_btn.pressed.connect(_on_station_remove_cam_pressed)
+	row.add_child(rm_btn)
+	_extras.add_child(row)
+
+func _on_station_add_cam_pressed() -> void:
+	if _ex_cam_input == null or _ex_cam_list == null:
+		return
+	var raw: String = _ex_cam_input.text.strip_edges()
+	if raw == "" or not raw.is_valid_identifier() and not _is_alnum(raw):
+		return
+	var cams: Array = _extras_state.get("pre_added_cams", [])
+	if cams.has(raw):
+		return
+	cams.append(raw)
+	_extras_state["pre_added_cams"] = cams
+	_ex_cam_list.add_item(raw)
+	_ex_cam_input.text = ""
+	_emit_state()
+
+func _on_station_remove_cam_pressed() -> void:
+	if _ex_cam_list == null:
+		return
+	var sel: PackedInt32Array = _ex_cam_list.get_selected_items()
+	if sel.is_empty():
+		return
+	var idx: int = sel[0]
+	var cams: Array = _extras_state.get("pre_added_cams", [])
+	if idx >= 0 and idx < cams.size():
+		cams.remove_at(idx)
+		_extras_state["pre_added_cams"] = cams
+		_ex_cam_list.remove_item(idx)
+		_emit_state()
+
+func _build_camera_extras() -> void:
+	var hdr := Label.new()
+	hdr.text = "CCTV Camera"
+	hdr.add_theme_font_size_override("font_size", 14)
+	_extras.add_child(hdr)
+	var id_row := HBoxContainer.new()
+	var id_lbl := Label.new()
+	id_lbl.text = "Cam ID"
+	id_lbl.custom_minimum_size = Vector2(80, 0)
+	id_row.add_child(id_lbl)
+	_ex_cam_id_edit = LineEdit.new()
+	_ex_cam_id_edit.placeholder_text = "alnum id"
+	_ex_cam_id_edit.text = String(_extras_state.get("cam_id", ""))
+	_ex_cam_id_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_ex_cam_id_edit.text_changed.connect(func(t: String):
+		_extras_state["cam_id"] = t.strip_edges()
+		_emit_state())
+	id_row.add_child(_ex_cam_id_edit)
+	_extras.add_child(id_row)
+	_ex_ptz_chk = CheckBox.new()
+	_ex_ptz_chk.text = "Pan/Tilt/Zoom enabled"
+	_ex_ptz_chk.button_pressed = bool(_extras_state.get("ptz_enabled", false))
+	_ex_ptz_chk.toggled.connect(func(v: bool):
+		_extras_state["ptz_enabled"] = v
+		_emit_state())
+	_extras.add_child(_ex_ptz_chk)
+
+func _is_alnum(s: String) -> bool:
+	for ch in s:
+		if not (ch.is_valid_int() or _is_letter(ch) or ch == "_"):
+			return false
+	return true
+
+func _is_letter(ch: String) -> bool:
+	return (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z")

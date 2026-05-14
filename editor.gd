@@ -343,6 +343,7 @@ func _ready() -> void:
 	_object_props_panel.no_collide_changed.connect(_on_no_collide_changed)
 	_object_props_panel.destructible_changed.connect(_on_destructible_changed)
 	_object_props_panel.hp_changed.connect(_on_hp_changed)
+	_object_props_panel.object_state_changed.connect(_on_object_state_changed)
 	# Snap widget — sits in the bottom-left corner, just above the brush
 	# widget. Visible while a placement tool is active.
 	_snap_widget = PanelContainer.new()
@@ -420,6 +421,10 @@ func _ready() -> void:
 					box.destructible = bool(entry["destructible"])
 				if entry.has("hp_max"):
 					box.hp_max = int(entry["hp_max"])
+				if entry.has("object_state"):
+					box.object_state = (entry["object_state"] as Dictionary).duplicate(true)
+				else:
+					box.object_state = _default_object_state(String(box.object_id))
 			_placed_props.append(box)
 	if MapState.item_tables.size() > 0:
 		_item_tables_panel.set_tables(MapState.item_tables)
@@ -869,6 +874,10 @@ func _snapshot_to_mapstate() -> void:
 		if kind == "object" and "destructible" in box:
 			entry["destructible"] = bool(box.destructible)
 			entry["hp_max"] = int(box.hp_max)
+		if kind == "object" and "object_state" in box:
+			var st: Dictionary = box.object_state
+			if not st.is_empty():
+				entry["object_state"] = st.duplicate(true)
 		MapState.placed_props.append(entry)
 	# Triggers + named events snapshot.
 	MapState.placed_triggers.clear()
@@ -1015,6 +1024,10 @@ func _restore_from_mapstate() -> void:
 				box.destructible = bool(entry["destructible"])
 			if entry.has("hp_max"):
 				box.hp_max = int(entry["hp_max"])
+			if entry.has("object_state"):
+				box.object_state = (entry["object_state"] as Dictionary).duplicate(true)
+			else:
+				box.object_state = _default_object_state(String(box.object_id))
 		_placed_props.append(box)
 	# Triggers + events (round-trip from F9 / load).
 	if _events_panel != null:
@@ -1881,11 +1894,22 @@ func _spawn_object_at(object_id: String, world_pos: Vector3) -> void:
 	var box: Node3D = Node3D.new()
 	box.set_script(OBJECT_BOX_SCRIPT)
 	box.object_id = object_id
+	box.object_state = _default_object_state(object_id)
 	add_child(box)
 	box.global_position = world_pos
 	_placed_props.append(box)
 	_select_prop(box)
 	_push_undo({"kind": "spawn", "snapshots": [_snapshot_prop_box(box)]})
+
+# Per-object-id defaults for the free-form state bag. Only specific
+# object types need a non-empty dict; everything else stays {}.
+func _default_object_state(object_id: String) -> Dictionary:
+	match object_id:
+		"obj_computer_station":
+			return {"pre_added_cams": [], "allow_add": true}
+		"obj_cctv_camera":
+			return {"cam_id": "", "ptz_enabled": false}
+	return {}
 
 func _select_prop(box: Node3D) -> void:
 	# Single-select replacement. Clears any existing multi-select.
@@ -1986,12 +2010,15 @@ func _refresh_object_props_panel() -> void:
 	var events: Array = []
 	if _events_panel != null and "prop_id" in _selected_prop:
 		events = _events_panel.events_for_prop(String(_selected_prop.prop_id))
+	var ostate: Dictionary = _selected_prop.get("object_state") if _selected_prop.get("object_state") != null else {}
 	_object_props_panel.bind(
 		"Object: %s" % oid,
 		bool(_selected_prop.get("no_collide")),
 		bool(_selected_prop.get("destructible")),
 		int(_selected_prop.get("hp_max")),
 		events,
+		oid,
+		ostate,
 	)
 	_object_props_panel.visible = true
 
@@ -2106,6 +2133,13 @@ func _on_hp_changed(v: int) -> void:
 	if _selected_prop == null or not "hp_max" in _selected_prop:
 		return
 	_selected_prop.hp_max = v
+
+func _on_object_state_changed(state: Dictionary) -> void:
+	# Panel pushes the full per-type extras dict on every sub-edit; we
+	# mirror it onto the selected box so the next save / F9 captures it.
+	if _selected_prop == null or not "object_state" in _selected_prop:
+		return
+	_selected_prop.object_state = state.duplicate(true)
 
 # Clipboard ops. Only object_box props are supported (effects + spawn
 # cubes don't carry the same per-placement settings yet — when they do,
@@ -2234,6 +2268,7 @@ func _snapshot_object_box(box: Node3D) -> Dictionary:
 		"no_collide":          bool(box.get("no_collide")),
 		"destructible":        bool(box.get("destructible")),
 		"hp_max":              int(box.get("hp_max")),
+		"object_state":        (box.get("object_state") as Dictionary).duplicate(true) if box.get("object_state") != null else {},
 	}
 
 func _on_lighting_changed(state: Dictionary) -> void:
@@ -2396,6 +2431,8 @@ func _spawn_from_snapshot(snap: Dictionary) -> Node3D:
 		box.no_collide = bool(snap.get("no_collide", false))
 		box.destructible = bool(snap.get("destructible", false))
 		box.hp_max = int(snap.get("hp_max", 100))
+		var st_in: Dictionary = snap.get("object_state", {})
+		box.object_state = st_in.duplicate(true) if not st_in.is_empty() else _default_object_state(box.object_id)
 	_placed_props.append(box)
 	return box
 
