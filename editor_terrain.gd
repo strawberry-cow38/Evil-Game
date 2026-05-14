@@ -19,7 +19,7 @@ var paint: PackedColorArray = PackedColorArray()
 # Material palette for the 4 paint channels. Order matches paint rgba.
 const PAINT_COLORS: Array = [
 	Color(0.42, 0.30, 0.18, 1.0),  # dirt
-	Color(0.32, 0.55, 0.20, 1.0),  # grass
+	Color(0.14, 0.42, 0.11, 1.0),  # grass — pre-darkened so sun+ambient lights it back up to roughly match the unshaded foliage tint (0.26, 0.68, 0.21)
 	Color(0.55, 0.55, 0.55, 1.0),  # stone
 	Color(0.84, 0.78, 0.55, 1.0),  # sand
 ]

@@ -7,19 +7,37 @@ extends Node3D
 # main_bootstrap.
 
 const TEX_SIZE: int = 32
+const SHRUB_TILE: int = 32
+const SHRUB_VARIANTS: int = 3
+# How many distinct mesh+UV-offset buckets exist per shrub preset. Each
+# placed shrub picks one at random so a cluster of bushes shows real
+# silhouette variation instead of one repeated drawing.
+const SHRUB_BUCKETS: int = 5
 const GRASS_SHADER := preload("res://grass.gdshader")
+const GRASS_SHADOW_SHADER := preload("res://grass_shadow.gdshader")
 const DEFAULT_PRESET: String = "short_green"
 
 # Preset table. Each preset is one MultiMesh bucket — same shader/texture
 # but its own quad height + tint uniform. Tints picked to read against the
 # terrain paint colours (grass = green, dirt = dry/brown, sand = pale).
 const PRESETS: Array = [
-	{"id": "short_green", "label": "Short Green", "height": 0.4, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
-	{"id": "long_green",  "label": "Long Green",  "height": 0.7, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
-	{"id": "short_brown", "label": "Short Brown", "height": 0.4, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
-	{"id": "long_brown",  "label": "Long Brown",  "height": 0.7, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
-	{"id": "short_sand",  "label": "Short Sand",  "height": 0.4, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
-	{"id": "long_sand",   "label": "Long Sand",   "height": 0.7, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
+	{"id": "short_green", "label": "Short Green", "kind": "grass", "height": 0.4, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
+	{"id": "long_green",  "label": "Long Green",  "kind": "grass", "height": 0.7, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
+	{"id": "short_brown", "label": "Short Brown", "kind": "grass", "height": 0.4, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
+	{"id": "long_brown",  "label": "Long Brown",  "kind": "grass", "height": 0.7, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
+	{"id": "short_sand",  "label": "Short Sand",  "kind": "grass", "height": 0.4, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
+	{"id": "long_sand",   "label": "Long Sand",   "kind": "grass", "height": 0.7, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
+	# White tint — shrub textures bake brown branches + green leaves, so the
+	# shader multiply must preserve the painted colours instead of
+	# recolouring everything green. Each placed shrub_round picks one of
+	# SHRUB_BUCKETS internal mesh variants at random so neighbours don't
+	# look like carbon copies.
+	{"id": "shrub_round", "label": "Round Shrub", "kind": "shrub", "style": "round", "height": 0.9, "width": 0.9, "tint": Color(1, 1, 1, 1)},
+	{"id": "clover_patch", "label": "Clover Patch", "kind": "clover", "height": 0.0, "width": 0.45, "tint": Color(0.30, 0.62, 0.20, 1.0)},
+	# Daisy keeps a white tint so the texture's baked-in petal/centre/stem
+	# colours survive the shader multiply. Other presets use grayscale tex *
+	# coloured tint, but a daisy has more than one colour per blade.
+	{"id": "daisy", "label": "Daisy", "kind": "daisy", "height": 0.28, "width": 0.20, "tint": Color(1, 1, 1, 1)},
 ]
 
 # Per-instance state keyed by preset id:
@@ -30,9 +48,21 @@ var _multimeshes: Dictionary = {}
 var _materials: Dictionary = {}
 var _dirty: bool = false
 
-# Shared procedural blade texture (height comes from the mesh, not the
-# texture, so one bitmap fits every preset).
+# Shared procedural textures, one per kind. Height/colour vary per preset
+# via the mesh size + the shader's albedo_tint uniform, so a single bitmap
+# is enough per kind.
 var _shared_blade_tex: ImageTexture = null
+# Shrub atlases live per-preset so each style ("round", "tall", "wide",
+# "sparse") gets its own painted silhouette. Keyed by preset id.
+var _shrub_textures: Dictionary = {}
+var _shared_clover_tex: ImageTexture = null
+var _shared_daisy_tex: ImageTexture = null
+var _shared_shadow_tex: ImageTexture = null
+var _shared_shadow_mat: StandardMaterial3D = null
+# Per-grass shadow uses a ShaderMaterial (cone-cull in vertex) instead of the
+# shrub's StandardMaterial3D — every blade gets a disc, so the GPU has to be
+# able to throw away the ones outside the camera cone before rasterising.
+var _grass_shadow_mat: ShaderMaterial = null
 
 var _wind_dir: Vector2 = Vector2(1.0, 0.0)
 var _wind_min: float = 0.04
@@ -41,6 +71,14 @@ var _wind_speed: float = 1.8
 
 func _ready() -> void:
 	_shared_blade_tex = _build_blade_texture()
+	for p in PRESETS:
+		if String(p.get("kind", "grass")) == "shrub":
+			_shrub_textures[String(p.id)] = _build_shrub_texture(p)
+	_shared_clover_tex = _build_clover_texture()
+	_shared_daisy_tex = _build_daisy_texture()
+	_shared_shadow_tex = _build_shadow_texture()
+	_shared_shadow_mat = _make_shadow_material(_shared_shadow_tex)
+	_grass_shadow_mat = _make_grass_shadow_material(_shared_shadow_tex)
 	for p in PRESETS:
 		_init_preset(p)
 	_rebuild_all()
@@ -52,12 +90,37 @@ func _process(_delta: float) -> void:
 
 func _init_preset(p: Dictionary) -> void:
 	var pid: String = String(p.id)
+	var kind: String = String(p.get("kind", "grass"))
+	if kind == "shrub":
+		# One MMI per bucket. Each bucket uses the same atlas + material
+		# but pulls a different 3-tile slice. add_instance routes shrubs
+		# to a random bucket so neighbouring bushes look different.
+		for b in range(SHRUB_BUCKETS):
+			var key: String = _shrub_bucket_key(pid, b)
+			_instances[key] = []
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = false
+			mm.use_custom_data = false
+			mm.mesh = _build_shrub_mesh(p, b)
+			var mmi := MultiMeshInstance3D.new()
+			mmi.multimesh = mm
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(mmi)
+			_multimeshes[key] = mm
+			_mmis[key] = mmi
+		return
 	_instances[pid] = []
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
 	mm.use_colors = false
 	mm.use_custom_data = false
-	mm.mesh = _build_blade_mesh(p)
+	if kind == "clover":
+		mm.mesh = _build_clover_mesh(p)
+	elif kind == "daisy":
+		mm.mesh = _build_daisy_mesh(p)
+	else:
+		mm.mesh = _build_blade_mesh(p)
 	var mmi := MultiMeshInstance3D.new()
 	mmi.multimesh = mm
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -65,21 +128,373 @@ func _init_preset(p: Dictionary) -> void:
 	_multimeshes[pid] = mm
 	_mmis[pid] = mmi
 
-func _build_blade_mesh(p: Dictionary) -> Mesh:
-	var w: float = float(p.width)
-	var h: float = float(p.height)
-	var qm := QuadMesh.new()
-	qm.size = Vector2(w, h)
-	qm.center_offset = Vector3(0, h * 0.5, 0)
+func _shrub_bucket_key(pid: String, bucket: int) -> String:
+	return pid + "#" + str(bucket)
+
+func _is_shrub_preset(pid: String) -> bool:
+	for p in PRESETS:
+		if String(p.id) == pid:
+			return String(p.get("kind", "grass")) == "shrub"
+	return false
+
+func _make_foliage_material(p: Dictionary, tex: ImageTexture, billboard_mode: int) -> ShaderMaterial:
+	# Buckets reuse the same atlas + tint → reuse the cached material so
+	# wind uniform updates (keyed by preset id) reach every bucket mesh.
+	if _materials.has(String(p.id)):
+		return _materials[String(p.id)]
 	var mat := ShaderMaterial.new()
 	mat.shader = GRASS_SHADER
-	mat.set_shader_parameter("albedo_tex", _shared_blade_tex)
+	mat.set_shader_parameter("albedo_tex", tex)
 	mat.set_shader_parameter("albedo_tint", p.tint)
 	mat.set_shader_parameter("alpha_scissor", 0.5)
+	mat.set_shader_parameter("billboard_mode", billboard_mode)
+	# Shrubs are dense volumes — full blade-amplitude wind makes them look
+	# like they're flailing. Damp heavily so they breathe instead. Clover
+	# lies flat on the ground; sway on a flat quad would just shear the
+	# texture sideways, which reads as the patch sliding — disable entirely.
+	var kind: String = String(p.get("kind", "grass"))
+	var sway: float = 1.0
+	if kind == "shrub":
+		sway = 0.4
+	elif kind == "clover":
+		sway = 0.0
+	elif kind == "daisy":
+		# Daisy flower head is small + far from the root, so even a modest
+		# tip displacement reads as visible nodding. Damp to ~0.6 of blade
+		# amplitude so flowers bob instead of whipping.
+		sway = 0.6
+	mat.set_shader_parameter("sway_mult", sway)
+	# Grass tufts and clover patches hide behind-camera by collapsing to zero
+	# area. Shrubs are sparse enough that the cull cost outweighs the saving,
+	# plus they're tall enough that fringe instances clip into view from
+	# oblique angles — keep shrubs always-on.
+	var cull_dot: float = -1.0 if kind == "shrub" else -0.2
+	mat.set_shader_parameter("cull_back_dot", cull_dot)
 	_materials[String(p.id)] = mat
 	_apply_wind_uniforms_to(mat)
-	qm.material = mat
-	return qm
+	return mat
+
+func _build_blade_mesh(p: Dictionary) -> Mesh:
+	# Two crossed quads at 0° / 90° — full X gives a tuft from any angle but
+	# triples the vert/fragment cost; two perpendicular quads still cover
+	# every horizontal viewing direction without going edge-on, at 2/3 the
+	# cost of the shrub mesh.
+	var w: float = float(p.width)
+	var h: float = float(p.height)
+	var hw: float = w * 0.5
+	var verts := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	var angles: Array = [0.0, PI * 0.5]
+	var idx: int = 0
+	for a in angles:
+		var c: float = cos(a)
+		var s: float = sin(a)
+		var p0 := Vector3(-hw * c, 0.0, -hw * s)
+		var p1 := Vector3( hw * c, 0.0,  hw * s)
+		var p2 := Vector3( hw * c, h,    hw * s)
+		var p3 := Vector3(-hw * c, h,   -hw * s)
+		verts.push_back(p0); verts.push_back(p1); verts.push_back(p2); verts.push_back(p3)
+		uvs.push_back(Vector2(0, 1)); uvs.push_back(Vector2(1, 1))
+		uvs.push_back(Vector2(1, 0)); uvs.push_back(Vector2(0, 0))
+		indices.push_back(idx);     indices.push_back(idx + 1); indices.push_back(idx + 2)
+		indices.push_back(idx);     indices.push_back(idx + 2); indices.push_back(idx + 3)
+		idx += 4
+	var am := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	am.surface_set_material(0, _make_foliage_material(p, _shared_blade_tex, 0))
+	# Ground shadow disc — same idea as the shrub mesh, but the material is a
+	# ShaderMaterial that cone-culls behind the camera in the vertex stage so
+	# the per-blade cost is paid only for the discs the camera can actually
+	# see. Disc kept smaller than the blade footprint so tufts look pinched
+	# to the ground, not floating on saucers.
+	var sw: float = w * 1.4
+	var sh_verts := PackedVector3Array([
+		Vector3(-sw * 0.5, 0.01, -sw * 0.5),
+		Vector3( sw * 0.5, 0.01, -sw * 0.5),
+		Vector3( sw * 0.5, 0.01,  sw * 0.5),
+		Vector3(-sw * 0.5, 0.01,  sw * 0.5),
+	])
+	var sh_uvs := PackedVector2Array([
+		Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1),
+	])
+	var sh_indices := PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var sh_arrays: Array = []
+	sh_arrays.resize(Mesh.ARRAY_MAX)
+	sh_arrays[Mesh.ARRAY_VERTEX] = sh_verts
+	sh_arrays[Mesh.ARRAY_TEX_UV] = sh_uvs
+	sh_arrays[Mesh.ARRAY_INDEX] = sh_indices
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sh_arrays)
+	am.surface_set_material(1, _grass_shadow_mat)
+	return am
+
+func _build_shrub_mesh(p: Dictionary, bucket: int = 0) -> Mesh:
+	# Three quads intersecting at 0° / 60° / 120° around Y. Each quad UVs into
+	# a different column of the shrub atlas so the three silhouettes that
+	# make up the bush aren't carbon copies of each other — breaks up the
+	# bilateral-symmetry "screwhead" look the single-tile version had.
+	# The bucket index picks WHICH triplet of columns to use; placing 5
+	# variant buckets and routing instances at random gives per-bush
+	# silhouette variation across a cluster.
+	var w: float = float(p.width)
+	var h: float = float(p.height)
+	var hw: float = w * 0.5
+	# Sink the bottom edge below ground so the empty pixel band at the
+	# bottom of the elliptical texture mask (the ellipse doesn't reach the
+	# corners of the tile) ends up underground — visible silhouette lands
+	# on the ground instead of hovering.
+	var y_lo: float = -h * 0.12
+	var y_hi: float = h * 0.88
+	var verts := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	var angles: Array = [0.0, PI / 3.0, 2.0 * PI / 3.0]
+	var total_tiles: float = float(SHRUB_BUCKETS * SHRUB_VARIANTS)
+	var col_base: int = bucket * SHRUB_VARIANTS
+	var idx: int = 0
+	for vi in range(angles.size()):
+		var a: float = angles[vi]
+		var c: float = cos(a)
+		var s: float = sin(a)
+		var p0 := Vector3(-hw * c, y_lo, -hw * s)
+		var p1 := Vector3( hw * c, y_lo,  hw * s)
+		var p2 := Vector3( hw * c, y_hi,  hw * s)
+		var p3 := Vector3(-hw * c, y_hi, -hw * s)
+		verts.push_back(p0); verts.push_back(p1); verts.push_back(p2); verts.push_back(p3)
+		# Slice U into the matching column of the atlas. UV V=0 stays at the
+		# top so the wind sway top_factor still bends the bush dome.
+		var u0: float = float(col_base + vi) / total_tiles
+		var u1: float = float(col_base + vi + 1) / total_tiles
+		uvs.push_back(Vector2(u0, 1)); uvs.push_back(Vector2(u1, 1))
+		uvs.push_back(Vector2(u1, 0)); uvs.push_back(Vector2(u0, 0))
+		indices.push_back(idx);     indices.push_back(idx + 1); indices.push_back(idx + 2)
+		indices.push_back(idx);     indices.push_back(idx + 2); indices.push_back(idx + 3)
+		idx += 4
+	var am := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	am.surface_set_material(0, _make_foliage_material(p, _shrub_textures[String(p.id)], 0))
+	# Ground shadow disc — flat XZ quad just above the ground, soft radial
+	# alpha. Uses a separate StandardMaterial3D so it sits in the transparent
+	# queue and blends instead of getting clipped by the foliage alpha-scissor.
+	# Shadow disc width tuned to the visible bush base (pear_bot * 0.5 * w ≈
+	# 0.53w) plus a small skirt — bigger discs read as the bush sitting on a
+	# saucer rather than as a grounded shadow.
+	var sw: float = w * 1.05
+	var sh_verts := PackedVector3Array([
+		Vector3(-sw * 0.5, 0.01, -sw * 0.5),
+		Vector3( sw * 0.5, 0.01, -sw * 0.5),
+		Vector3( sw * 0.5, 0.01,  sw * 0.5),
+		Vector3(-sw * 0.5, 0.01,  sw * 0.5),
+	])
+	var sh_uvs := PackedVector2Array([
+		Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1),
+	])
+	var sh_indices := PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var sh_arrays: Array = []
+	sh_arrays.resize(Mesh.ARRAY_MAX)
+	sh_arrays[Mesh.ARRAY_VERTEX] = sh_verts
+	sh_arrays[Mesh.ARRAY_TEX_UV] = sh_uvs
+	sh_arrays[Mesh.ARRAY_INDEX] = sh_indices
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sh_arrays)
+	am.surface_set_material(1, _shared_shadow_mat)
+	return am
+
+func _build_clover_mesh(p: Dictionary) -> Mesh:
+	# Single flat quad lying on the XZ plane just above the ground — clover
+	# patches read as a decal, not as a billboard. y=0.015 to clear the grass
+	# shadow disc (0.01) below and any sub-pixel z-fight against the terrain.
+	var w: float = float(p.width)
+	var hw: float = w * 0.5
+	var verts := PackedVector3Array([
+		Vector3(-hw, 0.015, -hw),
+		Vector3( hw, 0.015, -hw),
+		Vector3( hw, 0.015,  hw),
+		Vector3(-hw, 0.015,  hw),
+	])
+	var uvs := PackedVector2Array([
+		Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1),
+	])
+	var indices := PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var am := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	am.surface_set_material(0, _make_foliage_material(p, _shared_clover_tex, 0))
+	return am
+
+func _build_clover_texture() -> ImageTexture:
+	# Top-down view of a small clover cluster — 3-4 trefoil leaves placed
+	# around the patch with random rotation. Each trefoil = three heart
+	# leaflets arranged at 120°. Cluster sits centred so the quad's edges
+	# fade out to transparent and the patch reads as a soft tuft, not a
+	# square decal.
+	var size: int = TEX_SIZE
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1.0, 1.0, 1.0, 0.0))
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 0xC10E
+	# 3 trefoils dotted around the centre. Each trefoil's centre stays
+	# inside the inner 60% of the tile so leaflets don't get clipped.
+	var trefoils: Array = []
+	for i in range(3):
+		var ang: float = rng.randf() * TAU
+		var rr: float = rng.randf_range(0.0, float(size) * 0.18)
+		var cx: float = float(size - 1) * 0.5 + cos(ang) * rr
+		var cy: float = float(size - 1) * 0.5 + sin(ang) * rr
+		var rot: float = rng.randf() * TAU
+		# Leaflet radial offset from trefoil centre and per-leaflet radius.
+		var leaf_off: float = float(size) * 0.16
+		var leaf_r: float = float(size) * 0.14
+		trefoils.append({"cx": cx, "cy": cy, "rot": rot, "off": leaf_off, "r": leaf_r})
+	for x in range(size):
+		for y in range(size):
+			var best: float = -1.0
+			# Score = leaflet coverage. A leaflet is a circle with a small
+			# notch toward the trefoil centre — fake the heart-shape by
+			# subtracting a smaller circle at the inner edge.
+			for t in trefoils:
+				for li in range(3):
+					var la: float = t.rot + float(li) * TAU / 3.0
+					var lx: float = t.cx + cos(la) * t.off
+					var ly: float = t.cy + sin(la) * t.off
+					var dx: float = float(x) - lx
+					var dy: float = float(y) - ly
+					var d: float = sqrt(dx * dx + dy * dy)
+					if d >= t.r:
+						continue
+					# Notch: subtract a small inner disc on the side
+					# nearest the trefoil centre to carve the heart cleft.
+					var nx: float = lx - cos(la) * t.r * 0.55
+					var ny: float = ly - sin(la) * t.r * 0.55
+					var nd: float = sqrt((float(x) - nx) * (float(x) - nx) + (float(y) - ny) * (float(y) - ny))
+					if nd < t.r * 0.42:
+						continue
+					var t_norm: float = 1.0 - d / t.r
+					# Brighter at leaflet centre, mid-vein hint along the
+					# axis toward the trefoil centre.
+					var vein_t: float = clamp(1.0 - (absf(dx * sin(la) - dy * cos(la)) / (t.r * 0.18)), 0.0, 1.0)
+					var s: float = lerp(0.6, 0.95, t_norm) + vein_t * 0.08
+					if s > best:
+						best = s
+			if best < 0.0:
+				continue
+			var shade: float = clamp(best, 0.0, 1.0)
+			img.set_pixel(x, y, Color(shade, shade, shade, 1.0))
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+func _build_daisy_mesh(p: Dictionary) -> Mesh:
+	# Single Y-billboard quad — the grass shader rebuilds the basis from cam
+	# direction when billboard_mode=1, so crossed quads buy nothing here.
+	# Texture carries baked petal/centre/stem colours so we skip the tint.
+	var w: float = float(p.width)
+	var h: float = float(p.height)
+	var hw: float = w * 0.5
+	var verts := PackedVector3Array([
+		Vector3(-hw, 0.0, 0.0),
+		Vector3( hw, 0.0, 0.0),
+		Vector3( hw, h,   0.0),
+		Vector3(-hw, h,   0.0),
+	])
+	var uvs := PackedVector2Array([
+		Vector2(0, 1), Vector2(1, 1), Vector2(1, 0), Vector2(0, 0),
+	])
+	var indices := PackedInt32Array([0, 1, 2, 0, 2, 3])
+	var am := ArrayMesh.new()
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = indices
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	am.surface_set_material(0, _make_foliage_material(p, _shared_daisy_tex, 1))
+	return am
+
+func _build_daisy_texture() -> ImageTexture:
+	# Daisy painted into a single 32px tile. UV.y=0 is the top (flower head),
+	# UV.y=1 the root, matching the shader's top_factor so wind nods the
+	# bloom while the stem base stays put.
+	#
+	# Layout (in UV space):
+	#   stem  : thin green column at u ≈ 0.5, v 0.45 → 0.95
+	#   head  : centred at (u=0.5, v=0.22), petal radius ≈ 0.25
+	#   centre: yellow disc, radius ≈ 0.08
+	var size: int = TEX_SIZE
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1.0, 1.0, 1.0, 0.0))
+	var fs: float = float(size)
+	var cx_px: float = fs * 0.5
+	var head_y_px: float = fs * 0.22
+	var petal_outer: float = fs * 0.25
+	var petal_inner: float = fs * 0.085
+	var stem_x_w: float = fs * 0.04
+	var stem_top: float = fs * 0.45
+	var stem_bot: float = fs * 0.95
+	# Eight petals stamped as elongated ellipses radiating from the centre.
+	# Each petal is a circular brush smeared along the petal's axis so it
+	# reads as a tongue, not a perfect disc.
+	var petal_count: int = 8
+	var petal_len: float = petal_outer - petal_inner * 0.5
+	var petal_half_w: float = fs * 0.06
+	for x in range(size):
+		for y in range(size):
+			var px: float = float(x) + 0.5
+			var py: float = float(y) + 0.5
+			# Stem first (drawn under petals — petals overwrite).
+			if py >= stem_top and py <= stem_bot and absf(px - cx_px) <= stem_x_w:
+				var stem_t: float = (py - stem_top) / (stem_bot - stem_top)
+				var stem_shade: float = lerp(0.45, 0.30, stem_t)
+				img.set_pixel(x, y, Color(stem_shade * 0.35, stem_shade, stem_shade * 0.30, 1.0))
+			# Now the head — covers stem near the top if any pixel overlap.
+			var dx: float = px - cx_px
+			var dy: float = py - head_y_px
+			var dist: float = sqrt(dx * dx + dy * dy)
+			if dist < petal_inner:
+				# Yellow centre disc. Slight darkening at the edge for shape.
+				var c_t: float = clamp(dist / petal_inner, 0.0, 1.0)
+				var y_shade: float = lerp(1.0, 0.78, c_t)
+				img.set_pixel(x, y, Color(1.0 * y_shade, 0.85 * y_shade, 0.25 * y_shade, 1.0))
+				continue
+			# Petal pass: for each radial direction, project the pixel onto
+			# the petal axis. If we're within the petal's length AND within
+			# its half-width, we're inside that petal.
+			var hit: bool = false
+			for pi in range(petal_count):
+				var pa: float = float(pi) * TAU / float(petal_count)
+				var ax: float = cos(pa)
+				var ay: float = sin(pa)
+				# Along-axis distance from petal start (just outside centre).
+				var along: float = dx * ax + dy * ay - petal_inner * 0.6
+				if along < 0.0 or along > petal_len:
+					continue
+				var across: float = absf(dx * (-ay) + dy * ax)
+				# Petal narrows toward the tip — half-width tapers from
+				# petal_half_w at the base to ~30% of that at the tip.
+				var along_t: float = along / petal_len
+				var hw_at_t: float = petal_half_w * lerp(1.0, 0.35, along_t)
+				if across <= hw_at_t:
+					# White with a tiny falloff toward the tip.
+					var pshade: float = lerp(1.0, 0.88, along_t)
+					img.set_pixel(x, y, Color(pshade, pshade, pshade, 1.0))
+					hit = true
+					break
+			if hit:
+				continue
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
 
 func _build_blade_texture() -> ImageTexture:
 	var img := Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
@@ -110,6 +525,306 @@ func _build_blade_texture() -> ImageTexture:
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
 
+func _build_shrub_texture(p: Dictionary) -> ImageTexture:
+	# Atlas wide enough to hold every bucket's 3-tile triplet side by side:
+	# SHRUB_BUCKETS * SHRUB_VARIANTS columns total. Each bucket mesh UVs
+	# into its own contiguous 3-tile slice. Style config is shared across
+	# the whole atlas (so all buckets read as the same species) while seed
+	# varies per tile so individual silhouettes don't repeat.
+	var tile: int = SHRUB_TILE
+	var total_tiles: int = SHRUB_BUCKETS * SHRUB_VARIANTS
+	var atlas_w: int = tile * total_tiles
+	var img := Image.create(atlas_w, tile, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1.0, 1.0, 1.0, 0.0))
+	var style: String = String(p.get("style", "round"))
+	var cfg: Dictionary = _shrub_style_config(style)
+	var base_seed: int = int(hash(String(p.id)))
+	for ti in range(total_tiles):
+		_paint_shrub_tile(img, ti * tile, 0, tile, base_seed + ti * 17, cfg)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+func _shrub_style_config(style: String) -> Dictionary:
+	# Style → painter parameters. Tweaking these reshapes the canopy
+	# silhouette + branch + leaf density without changing the mesh; the
+	# mesh's per-preset width/height stretches whichever silhouette this
+	# emits to fit the bush footprint in world space.
+	match style:
+		"tall":
+			# Slim columnar bush — narrow mask, sub-branches kept short and
+			# leaf clusters stacked vertically along the trunk.
+			return {
+				"mask_rx": 0.30, "mask_ry": 0.48, "mask_cy_frac": 0.45,
+				"sub_count": 3, "sub_len_min": 0.10, "sub_len_max": 0.18,
+				"sub_ang_min": 0.35, "sub_ang_max": 0.70,
+				"crown_r": 0.14, "crown_n": 5,
+				"tip_r": 0.10, "tip_n": 4,
+				"mid_r": 0.08, "mid_n": 2,
+				"trunk_extra_clusters": true,
+			}
+		"wide":
+			# Squat, sprawling bush — many sub-branches at wide angles, low
+			# crown. Mask flatter than it is tall.
+			return {
+				"mask_rx": 0.48, "mask_ry": 0.30, "mask_cy_frac": 0.55,
+				"sub_count": 6, "sub_len_min": 0.18, "sub_len_max": 0.28,
+				"sub_ang_min": 0.80, "sub_ang_max": 1.30,
+				"crown_r": 0.10, "crown_n": 3,
+				"tip_r": 0.11, "tip_n": 5,
+				"mid_r": 0.09, "mid_n": 3,
+				"trunk_extra_clusters": false,
+			}
+		"sparse":
+			# Same footprint as round but ~60% leaf density — branches show
+			# through prominently for a dead/winter-bramble look.
+			return {
+				"mask_rx": 0.45, "mask_ry": 0.42, "mask_cy_frac": 0.48,
+				"sub_count": 5, "sub_len_min": 0.18, "sub_len_max": 0.30,
+				"sub_ang_min": 0.55, "sub_ang_max": 1.05,
+				"crown_r": 0.10, "crown_n": 3,
+				"tip_r": 0.09, "tip_n": 2,
+				"mid_r": 0.08, "mid_n": 1,
+				"trunk_extra_clusters": false,
+			}
+		_:
+			# "round" — baseline. Mask pulled fully inside tile so the canopy
+			# top has a curved dome instead of getting clipped flat by the
+			# texture boundary. mask_edge_jitter perturbs the per-blob
+			# accept threshold so the silhouette edge wavers instead of
+			# tracing a clean ellipse → no straight edges along any tile
+			# border.
+			return {
+				"mask_rx": 0.44, "mask_ry": 0.42, "mask_cy_frac": 0.49,
+				"mask_edge_jitter": 0.22,
+				"sub_count": 4, "sub_len_min": 0.16, "sub_len_max": 0.26,
+				"sub_ang_min": 0.55, "sub_ang_max": 1.05,
+				"crown_r": 0.16, "crown_n": 10,
+				"crown_y_frac": 0.13,
+				"crown_dome_off_x": 0.16, "crown_dome_off_y": 0.07,
+				"crown_dome_r": 0.12, "crown_dome_n": 4,
+				"tip_r": 0.12, "tip_n": 7,
+				"mid_r": 0.10, "mid_n": 4,
+				"trunk_extra_clusters": false,
+			}
+
+func _paint_shrub_tile(img: Image, ox: int, oy: int, tile: int, seed: int, cfg: Dictionary) -> void:
+	# Skeletal shrub painter — replaces the old pear-blob silhouette with a
+	# trunk + sub-branches + clumped leaves so the bush reads as a sparse
+	# bramble. Texture bakes both brown (twig) and green (leaf) colours
+	# directly, so the foliage material tints with white to preserve them.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed
+	var t_f: float = float(tile)
+	var cx: float = (t_f - 1.0) * 0.5
+	# Trunk polyline — sampled root→tip. UV.y=0 is the top of the texture
+	# (mesh top edge), so tip lives at small y, root at large y. Trunk tip
+	# stops a hair below the crown anchor so the brown branch never pokes
+	# out above the leaf canopy.
+	var trunk_top_y_frac: float = float(cfg.get("crown_y_frac", 0.0))
+	if trunk_top_y_frac <= 0.0:
+		trunk_top_y_frac = 0.04
+	trunk_top_y_frac += 0.03
+	var trunk_top_y: float = t_f * trunk_top_y_frac
+	var trunk: Array = []
+	var lean: float = rng.randf_range(-0.10, 0.10)
+	var samples: int = 9
+	for i in range(samples):
+		var v: float = float(i) / float(samples - 1)  # 0=root, 1=tip
+		var tx: float = cx + sin(v * PI) * t_f * lean + sin(v * 5.0 + float(seed) * 0.07) * t_f * 0.04
+		var ty: float = lerp(t_f - 1.0, trunk_top_y, v)
+		trunk.append(Vector2(tx, ty))
+	# Branch segments — main trunk (wide) + 4 sub-branches sprouting outward
+	# and slightly upward. Wider segments paint a chunkier brown.
+	var segments: Array = []
+	for i in range(samples - 1):
+		segments.append({"a": trunk[i], "b": trunk[i + 1], "w": 1.1})
+	# Leaf anchors get paired with each sub-branch tip + a mid-branch cluster.
+	# Crown of the trunk also gets a small cluster so the top isn't bald.
+	var leaf_anchors: Array = []
+	# Crown anchor — if crown_y_frac > 0, place the crown explicitly below
+	# the top edge of the tile (so leaf blobs jittered upward stay inside
+	# the texture and form a dome) and add two shoulder anchors fanning
+	# down-and-out for dome curvature. Otherwise fall back to the trunk
+	# tip directly.
+	var crown_y_frac: float = float(cfg.get("crown_y_frac", 0.0))
+	if crown_y_frac > 0.0:
+		var crown_pt := Vector2(cx, t_f * crown_y_frac)
+		leaf_anchors.append({"p": crown_pt, "r": t_f * float(cfg.crown_r), "n": int(cfg.crown_n)})
+		var dome_off_x: float = t_f * float(cfg.get("crown_dome_off_x", 0.15))
+		var dome_off_y: float = t_f * float(cfg.get("crown_dome_off_y", 0.06))
+		var dome_r: float = t_f * float(cfg.get("crown_dome_r", 0.12))
+		var dome_n: int = int(cfg.get("crown_dome_n", 5))
+		leaf_anchors.append({"p": crown_pt + Vector2(-dome_off_x, dome_off_y), "r": dome_r, "n": dome_n})
+		leaf_anchors.append({"p": crown_pt + Vector2( dome_off_x, dome_off_y), "r": dome_r, "n": dome_n})
+	else:
+		leaf_anchors.append({"p": trunk[samples - 1], "r": t_f * float(cfg.crown_r), "n": int(cfg.crown_n)})
+	var sub_count: int = int(cfg.sub_count)
+	var sub_len_min: float = float(cfg.sub_len_min)
+	var sub_len_max: float = float(cfg.sub_len_max)
+	var sub_ang_min: float = float(cfg.sub_ang_min)
+	var sub_ang_max: float = float(cfg.sub_ang_max)
+	for i in range(sub_count):
+		var idx: int = rng.randi_range(2, samples - 2)
+		var start: Vector2 = trunk[idx]
+		var side: float = 1.0 if rng.randf() < 0.5 else -1.0
+		# Angle measured against +x; -PI*0.5 = straight up, so the per-style
+		# range tilts the sub-branch outward — wide styles use a bigger range.
+		var ang: float = side * rng.randf_range(sub_ang_min, sub_ang_max) - PI * 0.5
+		var sub_len: float = rng.randf_range(t_f * sub_len_min, t_f * sub_len_max)
+		var sub_steps: int = 4
+		var prev: Vector2 = start
+		for s in range(1, sub_steps + 1):
+			var t_s: float = float(s) / float(sub_steps)
+			var ex: float = start.x + cos(ang) * sub_len * t_s
+			var ey: float = start.y + sin(ang) * sub_len * t_s
+			var endpt := Vector2(ex, ey)
+			segments.append({"a": prev, "b": endpt, "w": 0.85})
+			prev = endpt
+		leaf_anchors.append({"p": prev, "r": t_f * float(cfg.tip_r), "n": int(cfg.tip_n)})
+		var mid_t: float = rng.randf_range(0.55, 0.85)
+		var mid_pt := Vector2(start.x + cos(ang) * sub_len * mid_t, start.y + sin(ang) * sub_len * mid_t)
+		leaf_anchors.append({"p": mid_pt, "r": t_f * float(cfg.mid_r), "n": int(cfg.mid_n)})
+	# Tall styles want leaf clusters stacked along the trunk between the
+	# root and the crown so the vertical column doesn't have a bald midriff.
+	if bool(cfg.get("trunk_extra_clusters", false)):
+		for trunk_i in [3, 5, 7]:
+			if trunk_i < samples:
+				leaf_anchors.append({"p": trunk[trunk_i], "r": t_f * 0.09, "n": 2})
+	# Materialise leaf clumps from each anchor — many small blobs jittered
+	# inside the anchor radius. Reject any blob whose centre sits outside a
+	# soft canopy ellipse: keeps the silhouette rounded so corners read as
+	# sky, not as a square bush outline.
+	var leaves: Array = []
+	var mask_rx: float = t_f * float(cfg.mask_rx)
+	var mask_ry: float = t_f * float(cfg.mask_ry)
+	var mask_cy: float = (t_f - 1.0) * float(cfg.mask_cy_frac)
+	var mask_edge_jitter: float = float(cfg.get("mask_edge_jitter", 0.0))
+	for a in leaf_anchors:
+		var pp: Vector2 = a.p
+		var ar: float = float(a.r)
+		var nleaves: int = int(a.n)
+		for li in range(nleaves):
+			var dang: float = rng.randf() * TAU
+			var drr: float = sqrt(rng.randf()) * ar
+			var lx: float = pp.x + cos(dang) * drr
+			var ly: float = pp.y + sin(dang) * drr
+			var mdx: float = (lx - cx) / mask_rx
+			var mdy: float = (ly - mask_cy) / mask_ry
+			# Per-blob threshold noise breaks the clean ellipse boundary
+			# so the canopy outline doesn't read as a circle drawn against
+			# the square texture edge — keeps the silhouette organic.
+			var threshold: float = 1.0
+			if mask_edge_jitter > 0.0:
+				threshold = 1.0 + rng.randf_range(-mask_edge_jitter, mask_edge_jitter)
+			if mdx * mdx + mdy * mdy > threshold:
+				continue
+			var lr: float = rng.randf_range(t_f * 0.09, t_f * 0.13)
+			# Reject blobs whose disc would extend past the tile boundary.
+			# Without this, blobs near the edge get clipped along the tile
+			# border and the silhouette gains a visible straight line where
+			# the disc meets the texture edge.
+			var edge_margin: float = 1.0
+			if lx - lr < edge_margin or lx + lr > t_f - edge_margin:
+				continue
+			if ly - lr < edge_margin or ly + lr > t_f - edge_margin:
+				continue
+			var ls: float = rng.randf_range(0.78, 1.0)
+			leaves.append({"x": lx, "y": ly, "r": lr, "s": ls})
+	for x in range(tile):
+		for y in range(tile):
+			var px: float = float(x) + 0.5
+			var py: float = float(y) + 0.5
+			# Distance to nearest branch segment (and the segment's width).
+			var d_branch: float = INF
+			var branch_w: float = 0.0
+			for seg in segments:
+				var sa: Vector2 = seg.a
+				var sb: Vector2 = seg.b
+				var vx: float = sb.x - sa.x
+				var vy: float = sb.y - sa.y
+				var wx: float = px - sa.x
+				var wy: float = py - sa.y
+				var len2: float = vx * vx + vy * vy
+				var tt: float = 0.0
+				if len2 > 0.0001:
+					tt = clamp((wx * vx + wy * vy) / len2, 0.0, 1.0)
+				var cxp: float = sa.x + vx * tt
+				var cyp: float = sa.y + vy * tt
+				var dd: float = sqrt((px - cxp) * (px - cxp) + (py - cyp) * (py - cyp))
+				if dd < d_branch:
+					d_branch = dd
+					branch_w = float(seg.w)
+			# Leaf coverage (max over all blobs). Leaves draw on top of
+			# branches so leaf-covered twig pixels read as foliage.
+			var leaf_best: float = -1.0
+			for lf in leaves:
+				var ddx: float = px - lf.x
+				var ddy: float = py - lf.y
+				var d: float = sqrt(ddx * ddx + ddy * ddy)
+				if d < lf.r:
+					var lt: float = 1.0 - d / lf.r
+					var sc: float = lf.s * lerp(0.78, 1.0, lt)
+					if sc > leaf_best:
+						leaf_best = sc
+			if leaf_best > 0.0:
+				var g: float = clamp(leaf_best, 0.0, 1.0)
+				var r_c: float = lerp(0.14, 0.30, g)
+				var g_c: float = lerp(0.32, 0.62, g)
+				var b_c: float = lerp(0.10, 0.22, g)
+				img.set_pixel(ox + x, oy + y, Color(r_c, g_c, b_c, 1.0))
+				continue
+			if d_branch <= branch_w:
+				# Brown twig. Slight variation along the trunk via segment
+				# centre y would be nice but a flat brown reads fine at 32px.
+				img.set_pixel(ox + x, oy + y, Color(0.36, 0.22, 0.10, 1.0))
+
+func _build_shadow_texture() -> ImageTexture:
+	# Soft radial gradient — white RGB so the material's albedo_color tints
+	# to whatever shade we want, falling alpha from centre to edge.
+	var size: int = 32
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	img.fill(Color(1, 1, 1, 0))
+	var cx: float = float(size - 1) * 0.5
+	var cy: float = float(size - 1) * 0.5
+	for x in range(size):
+		for y in range(size):
+			var dx: float = (float(x) - cx) / cx
+			var dy: float = (float(y) - cy) / cy
+			var r: float = sqrt(dx * dx + dy * dy)
+			if r >= 1.0:
+				continue
+			# smoothstep gives a nicely tapered edge — pure 1/0 lerp produces
+			# a hard outer ring that catches the eye.
+			var a: float = (1.0 - smoothstep(0.0, 1.0, r)) * 0.55
+			img.set_pixel(x, y, Color(1, 1, 1, a))
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+func _make_grass_shadow_material(tex: ImageTexture) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = GRASS_SHADOW_SHADER
+	mat.set_shader_parameter("albedo_tex", tex)
+	# 7m range matches roughly the visible blade horizon at the editor's
+	# default FOV; fov_cos 0.55 ≈ 56° half-angle, a bit wider than the camera
+	# so blades at the edge of view still get their shadow drawn.
+	mat.set_shader_parameter("max_range", 7.0)
+	mat.set_shader_parameter("fov_cos", 0.55)
+	mat.set_shader_parameter("opacity", 0.4)
+	return mat
+
+func _make_shadow_material(tex: ImageTexture) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0, 0, 0, 1)
+	m.albedo_texture = tex
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# Negative priority so the disc draws before the bush surfaces — keeps
+	# the shadow under the bush silhouette instead of competing for the
+	# same screen pixels.
+	m.render_priority = -1
+	return m
+
 func _rebuild_all() -> void:
 	for pid in _instances.keys():
 		var mm: MultiMesh = _multimeshes[pid]
@@ -124,10 +839,15 @@ func _rebuild_all() -> void:
 			mm.set_instance_transform(i, t)
 
 func _resolve_preset(preset_id: String) -> String:
-	# Unknown preset ids fall back to the default so a stale save can still
-	# load without dropping instances.
+	# Direct hit on an _instances key (already a leaf — either a non-shrub
+	# preset or an already-bucketed shrub key like "shrub_round#2").
 	if _instances.has(preset_id):
 		return preset_id
+	# Public shrub id → pick a random bucket so a cluster of placements
+	# spreads across all SHRUB_BUCKETS silhouette variants.
+	if _is_shrub_preset(preset_id):
+		var b: int = randi() % SHRUB_BUCKETS
+		return _shrub_bucket_key(preset_id, b)
 	return DEFAULT_PRESET
 
 func get_preset_height(preset_id: String) -> float:
@@ -202,11 +922,14 @@ func clear_all() -> void:
 func get_state() -> Array:
 	# Flattened list — one dict per instance with preset id, so loaders can
 	# restore each into the right bucket without knowing about MultiMeshes.
+	# Shrub bucket suffixes are stripped — saves shouldn't lock a placement
+	# to a specific silhouette variant; reloads re-roll across buckets.
 	var out: Array = []
 	for pid in _instances.keys():
+		var public_id: String = pid.split("#")[0]
 		for inst in _instances[pid]:
 			out.append({
-				"preset": pid,
+				"preset": public_id,
 				"pos":   inst.get("pos", Vector3.ZERO),
 				"scale": float(inst.get("scale", 1.0)),
 				"rot_y": float(inst.get("rot_y", 0.0)),
