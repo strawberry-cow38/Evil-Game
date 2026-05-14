@@ -46,12 +46,12 @@ const LEAN_ADS_MULT := 0.2
 # (body compresses + drives off), landing fires a bigger downward
 # impulse scaled by impact speed and the kick rebounds back to zero.
 # Stiff/damp pair sits just past critical so it doesn't ring forever.
-const KICK_STIFFNESS := 90.0        # ω ≈ 9.5 rad/s → noticeable but not floaty
-const KICK_DAMPING := 14.0
-const KICK_JUMP_IMPULSE := -3.0     # m/s of camera dip on takeoff
-const KICK_LAND_GAIN := 0.5         # multiplied by impact y-speed
+const KICK_STIFFNESS := 80.0        # ω ≈ 8.9 rad/s → noticeable but not floaty
+const KICK_DAMPING := 13.0
+const KICK_JUMP_IMPULSE := -4.5     # m/s of camera dip on takeoff
+const KICK_LAND_GAIN := 0.75        # multiplied by impact y-speed
 const KICK_LAND_MIN_SPEED := 2.5    # below this, no land kick (avoid stair noise)
-const KICK_LAND_MAX_IMPULSE := -12.0 # cap so terminal-velocity drops don't bottom out
+const KICK_LAND_MAX_IMPULSE := -16.0 # cap so terminal-velocity drops don't bottom out
 
 const INTERACT_RANGE := 3.0
 # Hit everything (1 << 32 - 1); we filter by meta below so walls properly block.
@@ -180,6 +180,26 @@ var _prev_vy: float = 0.0
 # don't leak into the crouch/TP height lerp (would cause the camera to
 # slowly ride up while oscillating).
 var _cam_base_y: float = CAMERA_HEIGHT_STAND
+# Footstep distance accumulator. Resets after each step trigger; the
+# next step fires once this exceeds STEP_DISTANCE (scaled by stance).
+var _step_dist: float = 0.0
+const STEP_DISTANCE_WALK: float = 1.7
+const STEP_DISTANCE_SPRINT: float = 2.4
+const STEP_DISTANCE_CROUCH: float = 1.1
+const STEP_PITCH_MIN: float = 0.92
+const STEP_PITCH_MAX: float = 1.08
+const STEP_VOL_DB: float = -6.0
+const LAND_VOL_DB: float = -2.0
+const JUMP_VOL_DB: float = -8.0
+# Audio bank — loaded lazily so missing files don't crash boot.
+# Material ids match editor_terrain.sample_material (0=dirt, 1=grass,
+# 2=stone, 3=sand). Each entry is an Array of AudioStream.
+var _step_bank: Dictionary = {}
+var _land_bank: Dictionary = {}
+var _jump_start_stream: AudioStream = null
+var _footstep_player: AudioStreamPlayer = null
+var _land_player: AudioStreamPlayer = null
+var _jump_player: AudioStreamPlayer = null
 # Mouse motion accumulators applied in _physics_process. With physics
 # interpolation enabled, setting rotation outside the physics tick lets
 # the engine lerp between old and new transforms — feels like yaw lag.
@@ -217,6 +237,16 @@ func _ready() -> void:
 	_rng.randomize()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_initial_spawn = global_position
+	_load_footstep_bank()
+	_footstep_player = AudioStreamPlayer.new()
+	_footstep_player.bus = "Master"
+	add_child(_footstep_player)
+	_land_player = AudioStreamPlayer.new()
+	_land_player.bus = "Master"
+	add_child(_land_player)
+	_jump_player = AudioStreamPlayer.new()
+	_jump_player.bus = "Master"
+	add_child(_jump_player)
 	if menu_path != NodePath():
 		_menu = get_node(menu_path)
 	if inventory_path != NodePath():
@@ -298,6 +328,83 @@ func is_ads() -> bool:
 #  1. random authored player_spawn marker (positioned at terrain
 #     height + 1.2m so we don't clip)
 #  2. fallback to the position the player started at this scene
+# Pull every step/land WAV that exists under res://assets/audio/footsteps/
+# into the per-material banks. Missing files are silently skipped so the
+# game still boots before the audio gen pass lands.
+func _load_footstep_bank() -> void:
+	var mats: Array = ["dirt", "grass", "stone", "sand"]
+	for mi in range(mats.size()):
+		var key: String = mats[mi]
+		var steps: Array = []
+		for i in range(1, 5):
+			var p: String = "res://assets/audio/footsteps/step_%s_%d.wav" % [key, i]
+			if ResourceLoader.exists(p):
+				steps.append(load(p))
+		if not steps.is_empty():
+			_step_bank[mi] = steps
+		var lp: String = "res://assets/audio/footsteps/land_%s.wav" % key
+		if ResourceLoader.exists(lp):
+			_land_bank[mi] = load(lp)
+	var jp: String = "res://assets/audio/footsteps/jump_start.wav"
+	if ResourceLoader.exists(jp):
+		_jump_start_stream = load(jp)
+
+func _current_material_id() -> int:
+	var terrain := get_node_or_null("../EditorTerrain")
+	if terrain == null or not terrain.has_method("sample_material"):
+		return 1  # grass fallback
+	return int(terrain.call("sample_material", global_position))
+
+func _play_footstep() -> void:
+	if _footstep_player == null:
+		return
+	var mid: int = _current_material_id()
+	var pool: Array = _step_bank.get(mid, [])
+	if pool.is_empty():
+		# Fallback chain: grass → dirt → any. Lets a partial bank still cover
+		# unpainted ground without going silent.
+		pool = _step_bank.get(1, [])
+		if pool.is_empty():
+			pool = _step_bank.get(0, [])
+		if pool.is_empty():
+			for v in _step_bank.values():
+				if not v.is_empty():
+					pool = v
+					break
+	if pool.is_empty():
+		return
+	var clip: AudioStream = pool[_rng.randi() % pool.size()]
+	_footstep_player.stream = clip
+	_footstep_player.pitch_scale = _rng.randf_range(STEP_PITCH_MIN, STEP_PITCH_MAX)
+	_footstep_player.volume_db = STEP_VOL_DB
+	_footstep_player.play()
+
+func _play_land() -> void:
+	if _land_player == null:
+		return
+	var mid: int = _current_material_id()
+	var clip = _land_bank.get(mid, null)
+	if clip == null:
+		clip = _land_bank.get(1, null)
+		if clip == null:
+			for v in _land_bank.values():
+				clip = v
+				break
+	if clip == null:
+		return
+	_land_player.stream = clip
+	_land_player.pitch_scale = _rng.randf_range(0.88, 1.04)
+	_land_player.volume_db = LAND_VOL_DB
+	_land_player.play()
+
+func _play_jump_start() -> void:
+	if _jump_player == null or _jump_start_stream == null:
+		return
+	_jump_player.stream = _jump_start_stream
+	_jump_player.pitch_scale = _rng.randf_range(0.95, 1.05)
+	_jump_player.volume_db = JUMP_VOL_DB
+	_jump_player.play()
+
 func _emit_grass_wake() -> void:
 	# Drop a wake puff every WAKE_STEP metres of horizontal travel. The
 	# foliage node decays + composes these into the shader uniform; no
@@ -524,6 +631,23 @@ func _physics_process(delta: float) -> void:
 		_bob_phase += xz_speed * BOB_FREQ * delta
 		if _bob_phase > TAU * 64.0:
 			_bob_phase -= TAU * 64.0
+	# Footstep cadence — distance-based so faster movement = faster steps
+	# without a hardcoded freq. Stride length scales with stance: crouch
+	# shortens, sprint lengthens (longer push-off per step).
+	if moving:
+		_step_dist += xz_speed * delta
+		var stride: float = STEP_DISTANCE_WALK
+		if _crouched:
+			stride = STEP_DISTANCE_CROUCH
+		elif Input.is_action_pressed("sprint"):
+			stride = STEP_DISTANCE_SPRINT
+		if _step_dist >= stride:
+			_step_dist = 0.0
+			_play_footstep()
+	else:
+		# Reset accumulator when stopped so the next first step doesn't
+		# fire immediately after a pause.
+		_step_dist = 0.0
 	var bob_y: float = _bob_amp * sin(_bob_phase) * BOB_AMP_VERT
 	var bob_x: float = _bob_amp * sin(_bob_phase * 0.5) * BOB_AMP_LAT
 	# Jump/land kick spring step. Critically-damped oscillator: impulses
@@ -591,6 +715,7 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("jump") and is_on_floor() and not _crouched and mg_spin <= 0.0:
 		velocity.y = JUMP_VELOCITY
 		_kick_vel += KICK_JUMP_IMPULSE
+		_play_jump_start()
 
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var sprinting := Input.is_action_pressed("sprint") and input_dir.y < 0.0 and not _crouched and mg_spin <= 0.0
@@ -632,6 +757,7 @@ func _check_landing() -> void:
 		return
 	var impulse: float = max(KICK_LAND_MAX_IMPULSE, -impact * KICK_LAND_GAIN)
 	_kick_vel += impulse
+	_play_land()
 
 func _update_interact_target() -> void:
 	if is_menu_open():

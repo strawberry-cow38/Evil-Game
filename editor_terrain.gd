@@ -355,6 +355,34 @@ func sample_height(world_pos: Vector3) -> float:
 	var hx1: float = lerpf(h01, h11, fx)
 	return lerpf(hx0, hx1, fy)
 
+# Sample the dominant paint channel at a world position. Returns the rgba
+# index that wins after bilinearly blending the four surrounding paint
+# weights — 0=dirt, 1=grass, 2=stone, 3=sand. Out-of-bounds samples fall
+# back to grass (the editor's default fill).
+func sample_material(world_pos: Vector3) -> int:
+	var g := world_to_grid(world_pos)
+	if g.x < 0.0 or g.y < 0.0 or g.x > float(GRID_W - 1) or g.y > float(GRID_H - 1):
+		return 1
+	var x0: int = clampi(int(floor(g.x)), 0, GRID_W - 2)
+	var y0: int = clampi(int(floor(g.y)), 0, GRID_H - 2)
+	var fx: float = clampf(g.x - x0, 0.0, 1.0)
+	var fy: float = clampf(g.y - y0, 0.0, 1.0)
+	var c00: Color = paint[_idx(x0,     y0)]
+	var c10: Color = paint[_idx(x0 + 1, y0)]
+	var c01: Color = paint[_idx(x0,     y0 + 1)]
+	var c11: Color = paint[_idx(x0 + 1, y0 + 1)]
+	var cx0: Color = c00.lerp(c10, fx)
+	var cx1: Color = c01.lerp(c11, fx)
+	var c: Color = cx0.lerp(cx1, fy)
+	var w: Array = [c.r, c.g, c.b, c.a]
+	var best: int = 0
+	var best_v: float = w[0]
+	for i in range(1, 4):
+		if w[i] > best_v:
+			best_v = w[i]
+			best = i
+	return best
+
 # Public entry — call after a brush stroke ends (LMB up) to rebuild
 # the collider. Cheap enough to do once per stroke; far too slow per
 # frame.
