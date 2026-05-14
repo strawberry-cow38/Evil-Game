@@ -914,6 +914,67 @@ func instance_count() -> int:
 		total += (_instances[pid] as Array).size()
 	return total
 
+# Per-bucket breakdown for the F2 profiler overlay. Each row is one
+# MultiMesh (= 1+ drawcalls depending on surface count). Shrub buckets are
+# kept separate so the overlay can show drawcall amortisation cost.
+#
+# Tris per instance (sum across surfaces):
+#   grass  = 2 crossed quads (4 tri foliage) + shadow disc (2 tri) = 6
+#   shrub  = 3 quads (6 tri foliage) + shadow disc (2 tri) = 8
+#   clover = 1 flat quad (2 tri)
+#   daisy  = 1 Y-billboard quad (2 tri)
+#
+# Surface count drives the MMI's drawcall count — MultiMesh batches all
+# instances into one draw per surface, so total drawcalls = surfaces.
+func get_profile_breakdown() -> Array:
+	var rows: Array = []
+	var kind_by_public: Dictionary = {}
+	for p in PRESETS:
+		kind_by_public[String(p.id)] = String(p.kind)
+	# Stable order: walk PRESETS, expand shrub buckets in index order.
+	for p in PRESETS:
+		var public_id: String = String(p.id)
+		var kind: String = String(p.kind)
+		if kind == "shrub":
+			for b in range(SHRUB_BUCKETS):
+				var key: String = _shrub_bucket_key(public_id, b)
+				if _instances.has(key):
+					rows.append(_profile_row(key, public_id, kind))
+		else:
+			if _instances.has(public_id):
+				rows.append(_profile_row(public_id, public_id, kind))
+	return rows
+
+func _profile_row(pid: String, public_id: String, kind: String) -> Dictionary:
+	var count: int = (_instances[pid] as Array).size()
+	var tris_per: int
+	var surfaces: int
+	match kind:
+		"grass":
+			tris_per = 6
+			surfaces = 2
+		"shrub":
+			tris_per = 8
+			surfaces = 2
+		"clover":
+			tris_per = 2
+			surfaces = 1
+		"daisy":
+			tris_per = 2
+			surfaces = 1
+		_:
+			tris_per = 2
+			surfaces = 1
+	return {
+		"pid": pid,
+		"public_id": public_id,
+		"kind": kind,
+		"count": count,
+		"tris_per": tris_per,
+		"tris_total": count * tris_per,
+		"surfaces": surfaces,
+	}
+
 func clear_all() -> void:
 	for pid in _instances.keys():
 		_instances[pid] = []

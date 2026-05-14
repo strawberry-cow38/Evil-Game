@@ -47,6 +47,7 @@ const ROADS_PANEL_SCRIPT := preload("res://editor_roads_panel.gd")
 const PAINT_PANEL_SCRIPT := preload("res://editor_terrain_paint_panel.gd")
 const FOLIAGE_PANEL_SCRIPT := preload("res://editor_foliage_panel.gd")
 const FOLIAGE_SCRIPT := preload("res://editor_foliage.gd")
+const FOLIAGE_PROFILER_SCRIPT := preload("res://editor_foliage_profiler.gd")
 const SNAP_WIDGET_SCRIPT := preload("res://editor_snap_widget.gd")
 const EVENTS_PANEL_SCRIPT := preload("res://editor_events_panel.gd")
 const TRIGGER_PANEL_SCRIPT := preload("res://editor_trigger_panel.gd")
@@ -197,6 +198,8 @@ var _foliage_preset: String = "short_green"
 var _foliage_ghost: MeshInstance3D = null
 var _foliage_ghost_mat: StandardMaterial3D = null
 var _foliage_ghost_quad: QuadMesh = null
+# F2 toggleable overlay — per-preset instance/tri/drawcall breakdown.
+var _foliage_profiler: CanvasLayer = null
 # Snap settings panel — bottom-left, shown while placement tools are active.
 var _snap_widget: PanelContainer = null
 var _rotation_snap_deg: float = 15.0
@@ -512,6 +515,12 @@ func _ready() -> void:
 	_foliage_panel.mode_changed.connect(_on_foliage_mode)
 	_foliage_panel.wind_changed.connect(_on_foliage_wind)
 	_foliage_panel.preset_changed.connect(_on_foliage_preset)
+	# Foliage profiler overlay — hidden by default, F2 toggles.
+	_foliage_profiler = CanvasLayer.new()
+	_foliage_profiler.set_script(FOLIAGE_PROFILER_SCRIPT)
+	_foliage_profiler.name = "FoliageProfiler"
+	add_child(_foliage_profiler)
+	_foliage_profiler.call("set_foliage", _foliage_node)
 	# Exact-mode ghost: a single translucent grass quad that follows the
 	# cursor so the user can preview placement before committing. Geometry
 	# + tint are re-synced from the active preset whenever it changes.
@@ -720,6 +729,10 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
 		if _roads_node != null:
 			_roads_node.set_overlays_visible(not _roads_node.overlays_visible())
+	# F2 → toggle foliage cost profiler overlay (top-left).
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2:
+		if _foliage_profiler != null:
+			_foliage_profiler.call("toggle")
 	# Ctrl+C / Ctrl+X / Ctrl+V on object boxes. Effects + spawns aren't
 	# clipboard-eligible (no good "what does it mean" story for those yet).
 	if event is InputEventKey and event.pressed and not event.echo and event.ctrl_pressed:
