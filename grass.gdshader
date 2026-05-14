@@ -49,6 +49,15 @@ uniform int disp_count = 0;
 uniform float disp_radius : hint_range(0.05, 4.0) = 0.7;
 uniform float disp_push : hint_range(0.0, 1.0) = 0.35;
 
+// Distance LOD for crossed-quad grass blades. From lod_start → lod_end
+// (XZ distance from cam), the cross quad (UV2.x ≈ 1) fades to zero size
+// and the base quad (UV2.x ≈ 0) blends from its authored Y rotation to
+// a Y-billboard facing the camera. Past lod_end the blade is a single
+// always-facing-cam quad — half the verts, half the fragment area. Set
+// lod_end < 0 to disable (shrubs/clover/daisy stay always-on).
+uniform float lod_start : hint_range(-1.0, 60.0) = -1.0;
+uniform float lod_end : hint_range(-1.0, 60.0) = -1.0;
+
 void vertex() {
 	vec3 inst_origin = MODEL_MATRIX[3].xyz;
 	// Behind-camera cull check. Done once per vertex but the result is the
@@ -105,6 +114,37 @@ void vertex() {
 		world_pos = inst_origin
 			+ right * VERTEX.x * sx
 			+ up * VERTEX.y * sy;
+	} else if (lod_end > 0.0) {
+		// Crossed-quad → single-billboard LOD. UV2.x picks which quad we're
+		// in; lod_t is the same for every vertex of an instance so the GPU
+		// can re-use the result. Authored-basis side keeps per-instance
+		// rot_y in close-up shots; billboard side wins at distance where
+		// rot_y is invisibly small anyway.
+		vec3 cam_pos_l = INV_VIEW_MATRIX[3].xyz;
+		vec2 to_xz = vec2(inst_origin.x - cam_pos_l.x, inst_origin.z - cam_pos_l.z);
+		float dist = length(to_xz);
+		float lod_t = clamp((dist - lod_start) / max(lod_end - lod_start, 0.0001), 0.0, 1.0);
+		float quad_idx = UV2.x;
+		if (quad_idx > 0.5) {
+			// Cross quad — scale the local offset by (1 - lod_t) so by
+			// lod_end it has zero area and the GPU drops its tris.
+			world_pos = (MODEL_MATRIX * vec4(VERTEX * (1.0 - lod_t), 1.0)).xyz;
+		} else {
+			// Base quad — interpolate the right-axis between authored
+			// rotation and a Y-billboard facing the camera.
+			vec3 auth_right = MODEL_MATRIX[0].xyz;
+			vec3 auth_up = MODEL_MATRIX[1].xyz;
+			float sx = length(auth_right);
+			vec3 to_cam = cam_pos_l - inst_origin;
+			to_cam.y = 0.0;
+			if (length(to_cam) < 0.0001) {
+				to_cam = vec3(0.0, 0.0, 1.0);
+			}
+			to_cam = normalize(to_cam);
+			vec3 bill_right = normalize(cross(vec3(0.0, 1.0, 0.0), to_cam)) * sx;
+			vec3 right = mix(auth_right, bill_right, lod_t);
+			world_pos = inst_origin + right * VERTEX.x + auth_up * VERTEX.y;
+		}
 	} else {
 		// Static meshes (crossed-quad shrubs) — keep their authored rotation
 		// + uniform scale by going through the model matrix verbatim.

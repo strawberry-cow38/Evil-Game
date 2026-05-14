@@ -235,7 +235,11 @@ func _make_foliage_material(p: Dictionary, tex: ImageTexture, billboard_mode: in
 	mat.shader = GRASS_SHADER
 	mat.set_shader_parameter("albedo_tex", tex)
 	mat.set_shader_parameter("albedo_tint", p.tint)
-	mat.set_shader_parameter("alpha_scissor", 0.5)
+	# 0.6 vs the old 0.5: discards alpha-tested pixels a touch earlier so
+	# the soft-edge halo around each blade contributes fewer rasterised
+	# fragments. Visible silhouette stays effectively identical at the
+	# 32-texel source resolution.
+	mat.set_shader_parameter("alpha_scissor", 0.6)
 	mat.set_shader_parameter("billboard_mode", billboard_mode)
 	# Shrubs are dense volumes — full blade-amplitude wind makes them look
 	# like they're flailing. Damp heavily so they breathe instead. Clover
@@ -266,6 +270,20 @@ func _make_foliage_material(p: Dictionary, tex: ImageTexture, billboard_mode: in
 	# enough that the cull check is a net loss).
 	var far_dist: float = 28.0 if kind == "grass" else -1.0
 	mat.set_shader_parameter("cull_far_dist", far_dist)
+	# Crossed-quad → single-billboard LOD for grass blades only. Window
+	# 4m → 9m: anything inside 4m keeps the two authored quads (rot_y
+	# variety visible), anything past 9m is a single Y-billboarded quad
+	# (half the tris, half the fragment fill). The 5m blend lets each
+	# blade pop out gradually instead of all at once — combined with the
+	# scale-down + rotation-blend, the LOD seam is below pixel-noise
+	# threshold at typical FOV.
+	var lod_start: float = -1.0
+	var lod_end: float = -1.0
+	if kind == "grass":
+		lod_start = 4.0
+		lod_end = 9.0
+	mat.set_shader_parameter("lod_start", lod_start)
+	mat.set_shader_parameter("lod_end", lod_end)
 	_materials[String(p.id)] = mat
 	_apply_wind_uniforms_to(mat)
 	return mat
@@ -275,15 +293,22 @@ func _build_blade_mesh(p: Dictionary) -> Mesh:
 	# triples the vert/fragment cost; two perpendicular quads still cover
 	# every horizontal viewing direction without going edge-on, at 2/3 the
 	# cost of the shrub mesh.
+	#
+	# UV2.x encodes the quad index (0 = base quad, 1 = cross quad). The
+	# shader fades the cross quad out + Y-billboards the base quad past
+	# a distance threshold so far blades are effectively single quads
+	# always facing the camera. UV2.y stays 0 (reserved).
 	var w: float = float(p.width)
 	var h: float = float(p.height)
 	var hw: float = w * 0.5
 	var verts := PackedVector3Array()
 	var uvs := PackedVector2Array()
+	var uv2s := PackedVector2Array()
 	var indices := PackedInt32Array()
 	var angles: Array = [0.0, PI * 0.5]
 	var idx: int = 0
-	for a in angles:
+	for qi in range(angles.size()):
+		var a: float = angles[qi]
 		var c: float = cos(a)
 		var s: float = sin(a)
 		var p0 := Vector3(-hw * c, 0.0, -hw * s)
@@ -293,6 +318,9 @@ func _build_blade_mesh(p: Dictionary) -> Mesh:
 		verts.push_back(p0); verts.push_back(p1); verts.push_back(p2); verts.push_back(p3)
 		uvs.push_back(Vector2(0, 1)); uvs.push_back(Vector2(1, 1))
 		uvs.push_back(Vector2(1, 0)); uvs.push_back(Vector2(0, 0))
+		var qf: float = float(qi)
+		uv2s.push_back(Vector2(qf, 0)); uv2s.push_back(Vector2(qf, 0))
+		uv2s.push_back(Vector2(qf, 0)); uv2s.push_back(Vector2(qf, 0))
 		indices.push_back(idx);     indices.push_back(idx + 1); indices.push_back(idx + 2)
 		indices.push_back(idx);     indices.push_back(idx + 2); indices.push_back(idx + 3)
 		idx += 4
@@ -301,6 +329,7 @@ func _build_blade_mesh(p: Dictionary) -> Mesh:
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
 	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
 	arrays[Mesh.ARRAY_INDEX] = indices
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	am.surface_set_material(0, _make_foliage_material(p, _shared_blade_tex, 0))
@@ -901,6 +930,8 @@ func _rebuild_all() -> void:
 		if n == 0:
 			continue
 		mm.instance_count = n
+		var min_p: Vector3 = Vector3.INF
+		var max_p: Vector3 = -Vector3.INF
 		for i in range(n):
 			var inst: Dictionary = list[i]
 			var pos: Vector3 = inst.get("pos", Vector3.ZERO)
@@ -908,6 +939,23 @@ func _rebuild_all() -> void:
 			var ry: float = float(inst.get("rot_y", 0.0))
 			var t: Transform3D = Transform3D(Basis(Vector3.UP, ry).scaled(Vector3.ONE * s), pos)
 			mm.set_instance_transform(i, t)
+			min_p = Vector3(min(min_p.x, pos.x), min(min_p.y, pos.y), min(min_p.z, pos.z))
+			max_p = Vector3(max(max_p.x, pos.x), max(max_p.y, pos.y), max(max_p.z, pos.z))
+		# Tight per-MMI custom_aabb. Default MultiMesh AABB grows to the
+		# union of all instance world-space mesh AABBs — for one MMI per
+		# preset spanning a whole map, that's "the entire map" and Godot
+		# can never frustum-cull it. Setting it explicitly to the instance
+		# spread + height + sway/wind margin lets the engine skip the
+		# whole batch when none of the patch is on-screen, which only
+		# pays off once patches are spatially clustered (small islands of
+		# foliage with empty space between them).
+		var height_margin: float = 2.0
+		var sway_pad: float = 1.0
+		var aabb := AABB(
+			min_p - Vector3(sway_pad, 0.1, sway_pad),
+			(max_p - min_p) + Vector3(sway_pad * 2.0, height_margin, sway_pad * 2.0),
+		)
+		mmi.custom_aabb = aabb
 
 func _resolve_preset(preset_id: String) -> String:
 	# Direct hit on an _instances key (already a leaf — either a non-shrub
