@@ -15,16 +15,19 @@ uniform float opacity : hint_range(0.0, 1.0) = 0.4;
 void vertex() {
 	vec3 inst_origin = MODEL_MATRIX[3].xyz;
 	vec3 cam_pos = INV_VIEW_MATRIX[3].xyz;
-	vec3 to_inst = inst_origin - cam_pos;
-	to_inst.y = 0.0;
-	float dist = length(to_inst);
+	// Full-3D cone check. The earlier XZ-projection version flickered when
+	// the camera pitched down (horizontal cam_fwd shrinks to zero, fwd_dot
+	// = noise). Range check uses XZ distance so the cull radius stays
+	// independent of camera height.
+	vec3 to_inst_xz = inst_origin - cam_pos;
+	to_inst_xz.y = 0.0;
+	float dist = length(to_inst_xz);
+	vec3 to_inst_3d = inst_origin - cam_pos;
+	float to_len_3d = length(to_inst_3d);
 	vec3 cam_fwd = -INV_VIEW_MATRIX[2].xyz;
-	cam_fwd.y = 0.0;
-	float fwd_len = length(cam_fwd);
-	bool degenerate = (fwd_len < 0.0001) || (dist < 0.0001);
 	float fwd_dot = 0.0;
-	if (!degenerate) {
-		fwd_dot = dot(cam_fwd / fwd_len, to_inst / dist);
+	if (to_len_3d > 0.0001) {
+		fwd_dot = dot(cam_fwd, to_inst_3d / to_len_3d);
 	}
 	bool cull = (dist > max_range) || (fwd_dot < fov_cos);
 	vec3 world_pos;

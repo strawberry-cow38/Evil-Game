@@ -40,15 +40,23 @@ void vertex() {
 	// before the fragment stage.
 	bool cull = false;
 	if (cull_back_dot > -0.999) {
+		// Full-3D check: previously we projected both vectors to XZ so the
+		// cull was "is this instance behind me on the ground plane?", but
+		// that falls apart when the camera pitches down — at near-vertical
+		// pitch the horizontal cam_fwd shrinks to zero, fwd_dot becomes
+		// noise, and instances under/behind the player flicker out.
+		// Use raw 3D direction instead — cull_back_dot near -0.2 keeps a
+		// ~100° forward cone regardless of camera pitch.
 		vec3 cam_pos_c = INV_VIEW_MATRIX[3].xyz;
-		vec3 to_inst = inst_origin - cam_pos_c;
-		to_inst.y = 0.0;
+		// Sample the cone at the middle of the blade, not the root, so a
+		// blade right under the camera (root behind, tip in front when
+		// looking down) doesn't flip-cull on the root position alone.
+		vec3 sample_pt = inst_origin + vec3(0.0, 0.2, 0.0);
+		vec3 to_inst = sample_pt - cam_pos_c;
 		float to_inst_len = length(to_inst);
 		vec3 cam_fwd = -INV_VIEW_MATRIX[2].xyz;
-		cam_fwd.y = 0.0;
-		float fwd_len = length(cam_fwd);
-		if (to_inst_len > 0.0001 && fwd_len > 0.0001) {
-			float fwd_dot = dot(cam_fwd / fwd_len, to_inst / to_inst_len);
+		if (to_inst_len > 0.0001) {
+			float fwd_dot = dot(cam_fwd, to_inst / to_inst_len);
 			cull = fwd_dot < cull_back_dot;
 		}
 	}
