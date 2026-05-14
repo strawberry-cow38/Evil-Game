@@ -93,8 +93,14 @@ void vertex() {
 	if (!cull) {
 		float top_factor = 1.0 - UV.y;
 		float seed = (inst_origin.x * 0.21 + inst_origin.z * 0.17) * phase_scatter;
-		float pulse = 0.5 + 0.5 * sin(TIME * wind_speed + seed);
-		float amp = mix(wind_min, wind_max, pulse);
+		// Bipolar sway. Previously pulse was 0..1 so amp was always
+		// positive — blades only bent downwind, then sprang back, which
+		// reads as "tugged" instead of "swayed". Splitting the amplitude
+		// into a steady downwind component (wind_min) plus an oscillating
+		// component (wind_max) lets the tip overshoot the rest pose in
+		// both directions: gust forward, ease past neutral, recoil back.
+		float osc = sin(TIME * wind_speed + seed);
+		float amp = wind_min + wind_max * osc;
 		world_pos += vec3(wind_dir.x, 0.0, wind_dir.y) * amp * top_factor * sway_mult;
 	}
 	POSITION = PROJECTION_MATRIX * VIEW_MATRIX * vec4(world_pos, 1.0);

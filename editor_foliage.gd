@@ -805,8 +805,18 @@ func _rebuild_all() -> void:
 	for pid in _instances.keys():
 		var mm: MultiMesh = _multimeshes[pid]
 		var list: Array = _instances[pid]
-		mm.instance_count = list.size()
-		for i in range(list.size()):
+		var n: int = list.size()
+		# Empty MultiMesh spams "Buffer argument is not a valid buffer of any
+		# type" once per frame in 4.6.x — Godot's rendering device tries to
+		# bind a zero-length transform buffer. Hiding the MMI when empty
+		# stops the draw call (and the error) entirely; we re-show it on
+		# the next non-empty rebuild.
+		var mmi: MultiMeshInstance3D = _mmis[pid]
+		mmi.visible = n > 0
+		if n == 0:
+			continue
+		mm.instance_count = n
+		for i in range(n):
 			var inst: Dictionary = list[i]
 			var pos: Vector3 = inst.get("pos", Vector3.ZERO)
 			var s: float = float(inst.get("scale", 1.0))
