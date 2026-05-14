@@ -135,10 +135,24 @@ func _rebuild() -> void:
 	# inside the brush footprint, projected to the surface. Lets the user
 	# see exactly which verts a paint / smooth / hole stroke will touch.
 	if _show_vert_dots and not _mode_flat and terrain != null and "VERT_SPACING" in terrain:
+		# Dots ALWAYS sit on real terrain grid verts (x + y*GRID_W
+		# samples). Brush center lives between verts, so we walk the
+		# integer grid window around it instead of stepping by vs from
+		# the float center — that's what made dots float between verts
+		# the first time around.
 		var vs: float = float(terrain.VERT_SPACING)
+		var gw: int = int(terrain.GRID_W)
+		var gh: int = int(terrain.GRID_H)
+		var origin: Vector3 = terrain.global_position + terrain.ORIGIN_OFFSET
+		var bx_local: float = global_position.x - origin.x
+		var bz_local: float = global_position.z - origin.z
 		var rg: int = int(ceil(radius / vs)) + 1
-		var cgx: int = int(round((global_position.x - terrain.global_position.x - terrain.ORIGIN_OFFSET.x) / vs))
-		var cgy: int = int(round((global_position.z - terrain.global_position.z - terrain.ORIGIN_OFFSET.z) / vs))
+		var cgx: int = int(floor(bx_local / vs))
+		var cgy: int = int(floor(bz_local / vs))
+		var gx0: int = max(0, cgx - rg)
+		var gx1: int = min(gw - 1, cgx + rg + 1)
+		var gy0: int = max(0, cgy - rg)
+		var gy1: int = min(gh - 1, cgy + rg + 1)
 		var dot_mat := StandardMaterial3D.new()
 		dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		dot_mat.albedo_color = _vert_dot_color
@@ -148,10 +162,11 @@ func _rebuild() -> void:
 		var mark: float = 0.12
 		var r2: float = radius * radius
 		var is_square: bool = (shape == "square")
-		for dyi in range(-rg, rg + 1):
-			for dxi in range(-rg, rg + 1):
-				var wx: float = float(dxi) * vs
-				var wz: float = float(dyi) * vs
+		for gy in range(gy0, gy1 + 1):
+			for gx in range(gx0, gx1 + 1):
+				# World-space vertex position relative to brush center.
+				var wx: float = (origin.x + float(gx) * vs) - global_position.x
+				var wz: float = (origin.z + float(gy) * vs) - global_position.z
 				var inside: bool
 				if is_square:
 					inside = absf(wx) <= radius and absf(wz) <= radius
@@ -159,12 +174,11 @@ func _rebuild() -> void:
 					inside = (wx * wx + wz * wz) <= r2
 				if not inside:
 					continue
-				var world_pos := global_position + Vector3(wx, 0.0, wz)
-				var y: float = terrain.sample_height(world_pos) - global_position.y + 0.06
-				im.surface_add_vertex(Vector3(wx - mark, y, wz))
-				im.surface_add_vertex(Vector3(wx + mark, y, wz))
-				im.surface_add_vertex(Vector3(wx, y, wz - mark))
-				im.surface_add_vertex(Vector3(wx, y, wz + mark))
+				var vy: float = float(terrain.heights[gx + gy * gw]) + (terrain.global_position.y - global_position.y) + 0.06
+				im.surface_add_vertex(Vector3(wx - mark, vy, wz))
+				im.surface_add_vertex(Vector3(wx + mark, vy, wz))
+				im.surface_add_vertex(Vector3(wx, vy, wz - mark))
+				im.surface_add_vertex(Vector3(wx, vy, wz + mark))
 		im.surface_end()
 	_mesh_instance.mesh = im
 
