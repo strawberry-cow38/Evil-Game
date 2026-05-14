@@ -19,10 +19,15 @@ const CORPSE_SCRIPT := preload("res://corpse.gd")
 const TRIGGER_RUNTIME := preload("res://trigger_runtime.gd")
 const TRIGGER_BOX_SCRIPT := preload("res://editor_trigger_box.gd")
 const FOLIAGE_SCRIPT := preload("res://editor_foliage.gd")
+const FOLIAGE_PROFILER_SCRIPT := preload("res://editor_foliage_profiler.gd")
 const NOTHING_ITEM_ID := "nothing"
 # Loot rolls per actor death — drop_table_id is rolled this many times
 # and each non-nothing result is shoved into the corpse container.
 const CORPSE_LOOT_ROLLS := 4
+
+# F2-toggled foliage cost overlay. Only created when a foliage tree is
+# actually instantiated; null on legacy flat-ground play.
+var _foliage_profiler: CanvasLayer = null
 
 # Fixed vehicle spawn — sits a few meters off the player spawn so it's findable.
 const VEHICLE_SPAWN_OFFSET := Vector3(6.0, 0.0, 0.0)
@@ -72,6 +77,14 @@ func _ready() -> void:
 				float(w.get("max", 0.18)),
 				float(w.get("speed", 1.8)),
 			)
+		# F2 profiler overlay — mirrors the editor's. Same script reads
+		# get_profile_breakdown() off the foliage node + engine Performance
+		# monitors so play-mode shows the same per-preset cost table.
+		_foliage_profiler = CanvasLayer.new()
+		_foliage_profiler.set_script(FOLIAGE_PROFILER_SCRIPT)
+		_foliage_profiler.name = "FoliageProfiler"
+		add_child(_foliage_profiler)
+		_foliage_profiler.call("set_foliage", foliage_root)
 	# Roads — extruded slab over the authored bezier chains. Needs the
 	# terrain reference so its samples match the surface the editor previewed.
 	if not MapState.roads.is_empty():
@@ -448,3 +461,7 @@ func _input(event: InputEvent) -> void:
 		or (event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F9)
 	if is_f9:
 		get_tree().change_scene_to_file("res://editor.tscn")
+	# F2 → toggle the foliage profiler if one was spawned.
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2:
+		if _foliage_profiler != null:
+			_foliage_profiler.call("toggle")
