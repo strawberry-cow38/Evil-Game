@@ -20,26 +20,39 @@ var paint: PackedColorArray = PackedColorArray()
 # so the player falls through. Repair brush flips bytes back to 0.
 var holes: PackedByteArray = PackedByteArray()
 
-# Material palette for the 4 paint channels. Order matches paint rgba.
-const PAINT_COLORS: Array = [
-	Color(0.42, 0.30, 0.18, 1.0),  # dirt
-	Color(0.14, 0.42, 0.11, 1.0),  # grass — pre-darkened so sun+ambient lights it back up to roughly match the unshaded foliage tint (0.26, 0.68, 0.21)
-	Color(0.55, 0.55, 0.55, 1.0),  # stone
-	Color(0.84, 0.78, 0.55, 1.0),  # sand
+# Texture palette for the 4 paint channels. Order matches paint rgba.
+# Tiled in world-space xz at TILE_SIZE metres per repeat — independent of
+# the terrain's 1m vertex spacing, so paint blending stays smooth.
+const PAINT_TEX_PATHS: Array = [
+	"res://assets/textures/ground/ground_dirt.png",
+	"res://assets/textures/ground/ground_grass.png",
+	"res://assets/textures/ground/ground_stone.png",
+	"res://assets/textures/ground/ground_sand.png",
 ]
+const TILE_SIZE: float = 2.0
 
 const PAINT_SHADER_CODE := """
 shader_type spatial;
 render_mode cull_back;
-uniform vec3 color_dirt  : source_color;
-uniform vec3 color_grass : source_color;
-uniform vec3 color_stone : source_color;
-uniform vec3 color_sand  : source_color;
+uniform sampler2D tex_dirt  : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D tex_grass : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D tex_stone : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D tex_sand  : source_color, filter_linear_mipmap, repeat_enable;
+uniform float tile_size = 2.0;
+varying vec2 world_uv;
+void vertex() {
+	vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	world_uv = wp.xz / tile_size;
+}
 void fragment() {
 	vec4 w = COLOR;
 	float s = max(0.001, w.r + w.g + w.b + w.a);
 	w /= s;
-	vec3 c = color_dirt * w.r + color_grass * w.g + color_stone * w.b + color_sand * w.a;
+	vec3 c =
+		texture(tex_dirt,  world_uv).rgb * w.r +
+		texture(tex_grass, world_uv).rgb * w.g +
+		texture(tex_stone, world_uv).rgb * w.b +
+		texture(tex_sand,  world_uv).rgb * w.a;
 	ALBEDO = c;
 	ROUGHNESS = 0.9;
 }
@@ -87,10 +100,11 @@ func _ready() -> void:
 	sh.code = PAINT_SHADER_CODE
 	_material = ShaderMaterial.new()
 	_material.shader = sh
-	_material.set_shader_parameter("color_dirt",  PAINT_COLORS[0])
-	_material.set_shader_parameter("color_grass", PAINT_COLORS[1])
-	_material.set_shader_parameter("color_stone", PAINT_COLORS[2])
-	_material.set_shader_parameter("color_sand",  PAINT_COLORS[3])
+	_material.set_shader_parameter("tex_dirt",  load(PAINT_TEX_PATHS[0]))
+	_material.set_shader_parameter("tex_grass", load(PAINT_TEX_PATHS[1]))
+	_material.set_shader_parameter("tex_stone", load(PAINT_TEX_PATHS[2]))
+	_material.set_shader_parameter("tex_sand",  load(PAINT_TEX_PATHS[3]))
+	_material.set_shader_parameter("tile_size", TILE_SIZE)
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
 	_body = StaticBody3D.new()
