@@ -29,7 +29,7 @@ const PAINT_TEX_PATHS: Array = [
 	"res://assets/textures/ground/ground_stone.png",
 	"res://assets/textures/ground/ground_sand.png",
 ]
-const TILE_SIZE: float = 2.0
+const TILE_SIZE: float = 6.0
 
 const PAINT_SHADER_CODE := """
 shader_type spatial;
@@ -47,15 +47,36 @@ void vertex() {
 	vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_uv = wp.xz / tile_size;
 }
+// Anti-tile: sample each texture twice at offset+rotated UVs and blend
+// by a low-freq noise hash. Even though it's the same texture, the
+// offset+rotation makes periodic structure unrecognisable across the
+// terrain — kills the obvious 'this is the same patch repeated' look.
+vec2 hash22(vec2 p) {
+	p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+	return fract(sin(p) * 43758.5453);
+}
+vec3 sample_detiled(sampler2D tex, vec2 uv) {
+	vec2 cell = floor(uv);
+	vec2 h = hash22(cell);
+	float ang = h.x * 6.2831853;
+	mat2 rot = mat2(vec2(cos(ang), -sin(ang)), vec2(sin(ang), cos(ang)));
+	vec2 uv_a = uv + h * 8.0;
+	vec2 uv_b = (rot * uv) + h.yx * 8.0;
+	vec3 sa = texture(tex, uv_a).rgb;
+	vec3 sb = texture(tex, uv_b).rgb;
+	float fr_x = fract(uv.x); float fr_y = fract(uv.y);
+	float blend = smoothstep(0.0, 1.0, fr_x) * smoothstep(0.0, 1.0, fr_y);
+	return mix(sa, sb, blend);
+}
 void fragment() {
 	vec4 w = COLOR;
 	float s = max(0.001, w.r + w.g + w.b + w.a);
 	w /= s;
 	vec3 c =
-		texture(tex_dirt,  world_uv).rgb * w.r +
-		texture(tex_grass, world_uv).rgb * w.g +
-		texture(tex_stone, world_uv).rgb * w.b +
-		texture(tex_sand,  world_uv).rgb * w.a;
+		sample_detiled(tex_dirt,  world_uv) * w.r +
+		sample_detiled(tex_grass, world_uv) * w.g +
+		sample_detiled(tex_stone, world_uv) * w.b +
+		sample_detiled(tex_sand,  world_uv) * w.a;
 	ALBEDO = c;
 	ROUGHNESS = 1.0;
 	METALLIC = 0.0;
