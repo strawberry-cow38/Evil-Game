@@ -33,6 +33,8 @@ static func build(object_id: String) -> Node3D:
 			return _build_computer_station()
 		"obj_cctv_camera":
 			return _build_cctv_camera()
+		"obj_plate":
+			return _build_glb_prop("res://assets/models/plate.glb")
 		_:
 			return null
 
@@ -131,6 +133,31 @@ static func _build_lootable_crate(label: String, size: Vector3, max_w: float, ro
 	holder.set("max_weight", max_w)
 	holder.set("roll_count", rolls)
 	return holder
+
+static func _build_glb_prop(path: String) -> Node3D:
+	var holder := Node3D.new()
+	var scene: PackedScene = load(path)
+	if scene == null:
+		push_warning("editor_objects_catalog: missing glb at %s" % path)
+		return holder
+	var inst := scene.instantiate()
+	holder.add_child(inst)
+	var body := StaticBody3D.new()
+	holder.add_child(body)
+	for mi in _find_mesh_instances(inst):
+		var shape := CollisionShape3D.new()
+		shape.shape = mi.mesh.create_trimesh_shape()
+		shape.transform = mi.transform
+		body.add_child(shape)
+	return holder
+
+static func _find_mesh_instances(node: Node) -> Array:
+	var out: Array = []
+	if node is MeshInstance3D and node.mesh != null:
+		out.append(node)
+	for c in node.get_children():
+		out.append_array(_find_mesh_instances(c))
+	return out
 
 static func _build_demo_crate() -> Node3D:
 	var holder := Node3D.new()

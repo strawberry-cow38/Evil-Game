@@ -39,6 +39,7 @@ const OBJECTS: Array = [
 	{"id": "obj_dumpster",      "label": "Dumpster"},
 	{"id": "obj_computer_station", "label": "Computer Station"},
 	{"id": "obj_cctv_camera",      "label": "CCTV Camera"},
+	{"id": "obj_plate",            "label": "Plate"},
 ]
 
 static func all_sorted() -> Array:
