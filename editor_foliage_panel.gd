@@ -33,6 +33,7 @@ const PRESETS: Array = [
 	{"id": "clover_patch", "label": "Clover Patch", "color": Color(0.30, 0.62, 0.22, 1.0)},
 	{"id": "daisy",        "label": "Daisy",        "color": Color(0.95, 0.92, 0.70, 1.0)},
 	{"id": "tree_maple",   "label": "Maple Tree",   "color": Color(0.25, 0.55, 0.22, 1.0)},
+	{"id": "tree_stump",   "label": "Stump",        "color": Color(0.38, 0.24, 0.13, 1.0)},
 ]
 
 var _mat_buttons: Array[Button] = []

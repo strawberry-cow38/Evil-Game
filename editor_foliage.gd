@@ -60,6 +60,14 @@ const PRESETS: Array = [
 	# instances of the merged mesh — no per-instance scale variation here
 	# beyond the global jitter applied by the spray brush.
 	{"id": "tree_maple", "label": "Maple Tree", "kind": "tree", "glb": "res://assets/models/maple.glb", "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1)},
+	# Stump preset bundles 3 baked .glb variants — each placement routes
+	# to a random variant bucket (mirrors SHRUB_BUCKETS pattern) so a
+	# spray of stumps reads as three distinct silhouettes.
+	{"id": "tree_stump", "label": "Stump", "kind": "tree", "glb_variants": [
+		"res://assets/models/stump_0.glb",
+		"res://assets/models/stump_1.glb",
+		"res://assets/models/stump_2.glb",
+	], "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1)},
 ]
 
 # Per-instance state keyed by preset id:
@@ -185,6 +193,23 @@ func _update_displacer_uniforms() -> void:
 func _init_preset(p: Dictionary) -> void:
 	var pid: String = String(p.id)
 	var kind: String = String(p.get("kind", "grass"))
+	var tree_variants: Array = p.get("glb_variants", []) as Array if kind == "tree" else []
+	if kind == "tree" and tree_variants.size() > 0:
+		for vi in range(tree_variants.size()):
+			var key: String = _tree_variant_key(pid, vi)
+			_instances[key] = []
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = false
+			mm.use_custom_data = false
+			mm.mesh = _build_tree_mesh_from_path(String(tree_variants[vi]))
+			var mmi := MultiMeshInstance3D.new()
+			mmi.multimesh = mm
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			add_child(mmi)
+			_multimeshes[key] = mm
+			_mmis[key] = mmi
+		return
 	if kind == "shrub":
 		# One MMI per bucket. Each bucket uses the same atlas + material
 		# but pulls a different 3-tile slice. add_instance routes shrubs
@@ -230,11 +255,21 @@ func _init_preset(p: Dictionary) -> void:
 func _shrub_bucket_key(pid: String, bucket: int) -> String:
 	return pid + "#" + str(bucket)
 
+func _tree_variant_key(pid: String, variant: int) -> String:
+	return pid + "#" + str(variant)
+
 func _is_shrub_preset(pid: String) -> bool:
 	for p in PRESETS:
 		if String(p.id) == pid:
 			return String(p.get("kind", "grass")) == "shrub"
 	return false
+
+func _tree_variant_count(pid: String) -> int:
+	for p in PRESETS:
+		if String(p.id) == pid and String(p.get("kind", "")) == "tree":
+			var v: Array = p.get("glb_variants", []) as Array
+			return v.size()
+	return 0
 
 func _make_foliage_material(p: Dictionary, tex: ImageTexture, billboard_mode: int) -> ShaderMaterial:
 	# Buckets reuse the same atlas + tint → reuse the cached material so
@@ -512,10 +547,12 @@ func _build_tree_mesh(p: Dictionary) -> Mesh:
 	# Load merged tree mesh from baked .glb (assets/models/*.glb). GLTF
 	# pull at runtime (not res:// PackedScene load) so the launcher
 	# source-pull works without Godot's .import sidecars.
-	var path: String = String(p.get("glb", ""))
+	return _build_tree_mesh_from_path(String(p.get("glb", "")))
+
+func _build_tree_mesh_from_path(path: String) -> Mesh:
 	var am := ArrayMesh.new()
 	if path.is_empty():
-		push_warning("editor_foliage: tree preset %s missing glb path" % String(p.id))
+		push_warning("editor_foliage: tree mesh missing glb path")
 		return am
 	var abs_path: String = ProjectSettings.globalize_path(path)
 	var doc := GLTFDocument.new()
@@ -1033,6 +1070,10 @@ func _resolve_preset(preset_id: String) -> String:
 	if _is_shrub_preset(preset_id):
 		var b: int = randi() % SHRUB_BUCKETS
 		return _shrub_bucket_key(preset_id, b)
+	# Public tree id with glb_variants → pick a random variant bucket.
+	var tv_count: int = _tree_variant_count(preset_id)
+	if tv_count > 0:
+		return _tree_variant_key(preset_id, randi() % tv_count)
 	return DEFAULT_PRESET
 
 func get_preset_height(preset_id: String) -> float:
@@ -1154,6 +1195,11 @@ func get_profile_breakdown() -> Array:
 				var key: String = _shrub_bucket_key(public_id, b)
 				if _instances.has(key):
 					rows.append(_profile_row(key, public_id, kind))
+		elif kind == "tree" and _tree_variant_count(public_id) > 0:
+			for v in range(_tree_variant_count(public_id)):
+				var tkey: String = _tree_variant_key(public_id, v)
+				if _instances.has(tkey):
+					rows.append(_profile_row(tkey, public_id, kind))
 		else:
 			if _instances.has(public_id):
 				rows.append(_profile_row(public_id, public_id, kind))
