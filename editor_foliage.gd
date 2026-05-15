@@ -56,6 +56,10 @@ const PRESETS: Array = [
 	# colours survive the shader multiply. Other presets use grayscale tex *
 	# coloured tint, but a daisy has more than one colour per blade.
 	{"id": "daisy", "label": "Daisy", "kind": "daisy", "height": 0.28, "width": 0.20, "tint": Color(1, 1, 1, 1)},
+	# Trees come from a baked .glb (assets/models/maple.glb). Multimesh
+	# instances of the merged mesh — no per-instance scale variation here
+	# beyond the global jitter applied by the spray brush.
+	{"id": "tree_maple", "label": "Maple Tree", "kind": "tree", "glb": "res://assets/models/maple.glb", "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1)},
 ]
 
 # Per-instance state keyed by preset id:
@@ -209,11 +213,16 @@ func _init_preset(p: Dictionary) -> void:
 		mm.mesh = _build_clover_mesh(p)
 	elif kind == "daisy":
 		mm.mesh = _build_daisy_mesh(p)
+	elif kind == "tree":
+		mm.mesh = _build_tree_mesh(p)
 	else:
 		mm.mesh = _build_blade_mesh(p)
 	var mmi := MultiMeshInstance3D.new()
 	mmi.multimesh = mm
-	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# Trees cast real shadows (unlike grass blades which use baked shadow
+	# decals) — turn shadow casting back on for tree presets.
+	mmi.cast_shadow = (GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		if kind == "tree" else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
 	add_child(mmi)
 	_multimeshes[pid] = mm
 	_mmis[pid] = mmi
@@ -498,6 +507,62 @@ func _build_clover_texture() -> ImageTexture:
 			img.set_pixel(x, y, Color(shade, shade, shade, 1.0))
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
+
+func _build_tree_mesh(p: Dictionary) -> Mesh:
+	# Load merged tree mesh from baked .glb (assets/models/*.glb). GLTF
+	# pull at runtime (not res:// PackedScene load) so the launcher
+	# source-pull works without Godot's .import sidecars.
+	var path: String = String(p.get("glb", ""))
+	var am := ArrayMesh.new()
+	if path.is_empty():
+		push_warning("editor_foliage: tree preset %s missing glb path" % String(p.id))
+		return am
+	var abs_path: String = ProjectSettings.globalize_path(path)
+	var doc := GLTFDocument.new()
+	var state := GLTFState.new()
+	var err := doc.append_from_file(abs_path, state)
+	if err != OK:
+		push_warning("editor_foliage: glb load failed (%d) for %s" % [err, abs_path])
+		return am
+	var scene := doc.generate_scene(state)
+	if scene == null:
+		push_warning("editor_foliage: glb produced no scene: %s" % abs_path)
+		return am
+	# Merge every MeshInstance3D surface under the imported root into one
+	# ArrayMesh so a single MultiMeshInstance3D can draw the whole forest.
+	_merge_into(scene, Transform3D.IDENTITY, am)
+	scene.queue_free()
+	return am
+
+func _merge_into(node: Node, parent_xform: Transform3D, into: ArrayMesh) -> void:
+	var xform: Transform3D = parent_xform
+	if node is Node3D:
+		xform = parent_xform * (node as Node3D).transform
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+		var mi := node as MeshInstance3D
+		var src := mi.mesh
+		for s in range(src.get_surface_count()):
+			var arrays: Array = src.surface_get_arrays(s)
+			# transform vertex positions + normals into merged space
+			if arrays.size() > Mesh.ARRAY_VERTEX and arrays[Mesh.ARRAY_VERTEX] != null:
+				var positions: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+				for i in range(positions.size()):
+					positions[i] = xform * positions[i]
+				arrays[Mesh.ARRAY_VERTEX] = positions
+			if arrays.size() > Mesh.ARRAY_NORMAL and arrays[Mesh.ARRAY_NORMAL] != null:
+				var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+				var basis := xform.basis.inverse().transposed()
+				for i in range(normals.size()):
+					normals[i] = (basis * normals[i]).normalized()
+				arrays[Mesh.ARRAY_NORMAL] = normals
+			into.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+			var mat: Material = mi.get_active_material(s)
+			if mat == null:
+				mat = src.surface_get_material(s)
+			if mat != null:
+				into.surface_set_material(into.get_surface_count() - 1, mat)
+	for c in node.get_children():
+		_merge_into(c, xform, into)
 
 func _build_daisy_mesh(p: Dictionary) -> Mesh:
 	# Single Y-billboard quad — the grass shader rebuilds the basis from cam
