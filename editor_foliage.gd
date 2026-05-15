@@ -40,17 +40,17 @@ const DEFAULT_WAKE_LIFETIME: float = 3.0
 # terrain paint colours (grass = green, dirt = dry/brown, sand = pale).
 const PRESETS: Array = [
 	{"id": "short_green", "label": "Short Green", "kind": "grass", "height": 0.4, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
-	{"id": "long_green",  "label": "Long Green",  "kind": "grass", "height": 0.7, "width": 0.6, "tint": Color(0.26, 0.68, 0.21, 1.0)},
+	{"id": "long_green",  "label": "Long Green",  "kind": "grass", "height": 0.875, "width": 0.75, "tint": Color(0.26, 0.68, 0.21, 1.0)},
 	{"id": "short_brown", "label": "Short Brown", "kind": "grass", "height": 0.4, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
-	{"id": "long_brown",  "label": "Long Brown",  "kind": "grass", "height": 0.7, "width": 0.6, "tint": Color(0.55, 0.40, 0.18, 1.0)},
+	{"id": "long_brown",  "label": "Long Brown",  "kind": "grass", "height": 0.875, "width": 0.75, "tint": Color(0.55, 0.40, 0.18, 1.0)},
 	{"id": "short_sand",  "label": "Short Sand",  "kind": "grass", "height": 0.4, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
-	{"id": "long_sand",   "label": "Long Sand",   "kind": "grass", "height": 0.7, "width": 0.6, "tint": Color(0.80, 0.72, 0.45, 1.0)},
+	{"id": "long_sand",   "label": "Long Sand",   "kind": "grass", "height": 0.875, "width": 0.75, "tint": Color(0.80, 0.72, 0.45, 1.0)},
 	# White tint — shrub textures bake brown branches + green leaves, so the
 	# shader multiply must preserve the painted colours instead of
 	# recolouring everything green. Each placed shrub_round picks one of
 	# SHRUB_BUCKETS internal mesh variants at random so neighbours don't
 	# look like carbon copies.
-	{"id": "shrub_round", "label": "Round Shrub", "kind": "shrub", "style": "round", "height": 0.9, "width": 0.9, "tint": Color(1, 1, 1, 1)},
+	{"id": "shrub_round", "label": "Round Shrub", "kind": "shrub", "style": "round", "height": 1.8, "width": 1.8, "tint": Color(1, 1, 1, 1)},
 	{"id": "clover_patch", "label": "Clover Patch", "kind": "clover", "height": 0.0, "width": 0.45, "tint": Color(0.30, 0.62, 0.20, 1.0)},
 	# Daisy keeps a white tint so the texture's baked-in petal/centre/stem
 	# colours survive the shader multiply. Other presets use grayscale tex *
