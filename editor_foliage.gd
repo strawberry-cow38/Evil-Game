@@ -71,7 +71,12 @@ const PRESETS: Array = [
 		"res://assets/models/stump_1.glb",
 		"res://assets/models/stump_2.glb",
 	], "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1),
-	 "display_scale": 1.8, "clear_grass_radius": 0.9},
+	 # collision_radius/height match the stump silhouette at display_scale.
+	 # Native stump is ~0.6m wide × ~0.5m tall at scale 1.0 — scale 2.7 →
+	 # radius ≈ 0.4, height ≈ 1.35. Clearance radius tightened so we don't
+	 # carve out a bald ring around each stump.
+	 "display_scale": 2.7, "clear_grass_radius": 0.55,
+	 "collision_radius": 0.4, "collision_height": 1.35},
 ]
 
 # Per-instance state keyed by preset id:
@@ -99,6 +104,12 @@ var _shared_shadow_mat: StandardMaterial3D = null
 # presets. Kept in sync inside add_instance / remove_in_radius / clear_all
 # / set_state so any caller path stays honest.
 var _density_grid: Dictionary = {}
+
+# Tree collider parents — one Node3D per tree variant key. Rebuilt
+# alongside the MultiMesh during _rebuild_all so collision shapes stay
+# in lockstep with the visible instance list. Stumps need real physics
+# so the player can't walk through them.
+var _tree_collider_holders: Dictionary = {}
 
 # Persistent displacers — Node3Ds that flatten grass around themselves
 # until they leave the scene tree. Pickups register here so a dropped
@@ -1027,6 +1038,8 @@ func _rebuild_all() -> void:
 		var mm: MultiMesh = _multimeshes[pid]
 		var list: Array = _instances[pid]
 		var n: int = list.size()
+		if _preset_kind(pid) == "tree":
+			_rebuild_tree_colliders(pid, list)
 		# Empty MultiMesh spams "Buffer argument is not a valid buffer of any
 		# type" once per frame in 4.6.x — Godot's rendering device tries to
 		# bind a zero-length transform buffer. Hiding the MMI when empty
@@ -1121,6 +1134,41 @@ func add_instance(preset_id: String, world_pos: Vector3, scale: float, rot_y: fl
 		_density_grid[key] = int(_density_grid.get(key, 0)) + 1
 	_dirty = true
 	return true
+
+func _rebuild_tree_colliders(pid: String, list: Array) -> void:
+	# Tear down any existing colliders under this variant key, then spawn
+	# fresh ones to match the current instance list. Trees are sparse —
+	# rebuilding on every dirty pass is cheaper than diffing.
+	var holder: Node3D = _tree_collider_holders.get(pid)
+	if holder == null:
+		holder = Node3D.new()
+		holder.name = "TreeColliders_" + pid
+		add_child(holder)
+		_tree_collider_holders[pid] = holder
+	for c in holder.get_children():
+		c.queue_free()
+	if list.is_empty():
+		return
+	var p_data: Dictionary = _preset_data(pid)
+	var radius: float = float(p_data.get("collision_radius", 0.0))
+	if radius <= 0.0:
+		return
+	var height: float = float(p_data.get("collision_height", radius * 2.0))
+	for inst in list:
+		var pos: Vector3 = inst.get("pos", Vector3.ZERO)
+		var s: float = float(inst.get("scale", 1.0))
+		var body := StaticBody3D.new()
+		var shape := CollisionShape3D.new()
+		var cyl := CylinderShape3D.new()
+		# scale already baked the display_scale at add_instance, so the
+		# radius/height constants in the preset assume that factor.
+		cyl.radius = radius * (s / float(p_data.get("display_scale", 1.0)))
+		cyl.height = height * (s / float(p_data.get("display_scale", 1.0)))
+		shape.shape = cyl
+		body.add_child(shape)
+		# Lift body up so the cylinder centre sits at half-height above ground.
+		body.position = pos + Vector3(0.0, cyl.height * 0.5, 0.0)
+		holder.add_child(body)
 
 func _preset_data(preset_id: String) -> Dictionary:
 	var base: String = preset_id
