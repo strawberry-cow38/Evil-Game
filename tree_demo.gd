@@ -66,7 +66,7 @@ func _ready() -> void:
 
 	# Sprinkle some grass between trees so the "less dense than grass"
 	# point reads visually.
-	for _i in range(220):
+	for _i in range(900):
 		var gx: float = rng.randf_range(-14, 14)
 		var gz: float = rng.randf_range(-14, 14)
 		fol.add_instance("long_green", Vector3(gx, 0, gz),
