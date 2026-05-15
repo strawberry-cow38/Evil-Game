@@ -66,18 +66,18 @@ func _ready() -> void:
 
 	# Sprinkle some grass between trees so the "less dense than grass"
 	# point reads visually.
-	for _i in range(900):
-		var gx: float = rng.randf_range(-14, 14)
-		var gz: float = rng.randf_range(-14, 14)
+	for _i in range(9000):
+		var gx: float = rng.randf_range(-22, 22)
+		var gz: float = rng.randf_range(-22, 22)
 		fol.add_instance("long_green", Vector3(gx, 0, gz),
 			rng.randf_range(0.7, 1.3), rng.randf_range(0.0, TAU))
 
-	# Camera pointed at the cluster.
+	# Camera at ground / eye level.
 	var cam := Camera3D.new()
-	cam.position = Vector3(0, 7, 18)
-	cam.look_at(Vector3(0, 2, 0), Vector3.UP)
-	cam.current = true
+	cam.position = Vector3(0, 1.6, 14)
 	add_child(cam)
+	cam.look_at(Vector3(0, 1.6, 0), Vector3.UP)
+	cam.current = true
 
 	# Auto-screenshot if env asks.
 	if OS.get_environment("COW_SCREENSHOT") == "1":
