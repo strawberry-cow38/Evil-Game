@@ -1094,14 +1094,30 @@ func add_instance(preset_id: String, world_pos: Vector3, scale: float, rot_y: fl
 	# bool return as "did this actually land". Spray loops use it to count
 	# real placements; exact-mode placement currently ignores it (single
 	# clicks are infrequent enough that overflow doesn't matter).
+	# Trees are large + sparse — counting them against the same 0.5m grass
+	# cap means a single stump steals a slot a whole tuft of grass needs.
+	# Skip the cap for tree presets.
+	var is_tree: bool = _preset_kind(preset_id) == "tree"
 	var key: Vector2i = _density_cell(world_pos)
-	if int(_density_grid.get(key, 0)) >= MAX_PER_CELL:
+	if not is_tree and int(_density_grid.get(key, 0)) >= MAX_PER_CELL:
 		return false
 	var pid: String = _resolve_preset(preset_id)
 	_instances[pid].append({"pos": world_pos, "scale": scale, "rot_y": rot_y})
-	_density_grid[key] = int(_density_grid.get(key, 0)) + 1
+	if not is_tree:
+		_density_grid[key] = int(_density_grid.get(key, 0)) + 1
 	_dirty = true
 	return true
+
+func _preset_kind(preset_id: String) -> String:
+	# Accepts public id or bucketed key (strips "#<n>" suffix).
+	var base: String = preset_id
+	var hash_idx: int = preset_id.find("#")
+	if hash_idx >= 0:
+		base = preset_id.substr(0, hash_idx)
+	for p in PRESETS:
+		if String(p.id) == base:
+			return String(p.get("kind", "grass"))
+	return "grass"
 
 func _density_cell(world_pos: Vector3) -> Vector2i:
 	return Vector2i(
@@ -1112,6 +1128,8 @@ func _density_cell(world_pos: Vector3) -> Vector2i:
 func _rebuild_density_grid() -> void:
 	_density_grid.clear()
 	for pid in _instances.keys():
+		if _preset_kind(pid) == "tree":
+			continue
 		for inst in _instances[pid]:
 			var key: Vector2i = _density_cell(inst.get("pos", Vector3.ZERO))
 			_density_grid[key] = int(_density_grid.get(key, 0)) + 1
@@ -1133,12 +1151,13 @@ func remove_in_radius(world_pos: Vector3, radius: float, shape: String) -> int:
 				inside = dx * dx + dz * dz <= r2
 			if inside:
 				dropped += 1
-				var key: Vector2i = _density_cell(p)
-				var c: int = int(_density_grid.get(key, 0)) - 1
-				if c <= 0:
-					_density_grid.erase(key)
-				else:
-					_density_grid[key] = c
+				if _preset_kind(pid) != "tree":
+					var key: Vector2i = _density_cell(p)
+					var c: int = int(_density_grid.get(key, 0)) - 1
+					if c <= 0:
+						_density_grid.erase(key)
+					else:
+						_density_grid[key] = c
 			else:
 				keep.append(inst)
 		if keep.size() != _instances[pid].size():
