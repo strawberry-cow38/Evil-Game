@@ -33,7 +33,10 @@ const TILE_SIZE: float = 2.0
 
 const PAINT_SHADER_CODE := """
 shader_type spatial;
-render_mode cull_back;
+// specular_disabled kills the glossy highlight every channel was picking
+// up from the sun. The textures are all dry/matte surfaces, none of them
+// should ever have a specular hit.
+render_mode cull_back, specular_disabled;
 uniform sampler2D tex_dirt  : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D tex_grass : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D tex_stone : source_color, filter_linear_mipmap, repeat_enable;
@@ -54,7 +57,8 @@ void fragment() {
 		texture(tex_stone, world_uv).rgb * w.b +
 		texture(tex_sand,  world_uv).rgb * w.a;
 	ALBEDO = c;
-	ROUGHNESS = 0.9;
+	ROUGHNESS = 1.0;
+	METALLIC = 0.0;
 }
 """
 
