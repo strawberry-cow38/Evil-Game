@@ -158,6 +158,9 @@ func register_persistent_displacer(node: Node3D) -> void:
 func _on_displacer_tree_exited(node: Node3D) -> void:
 	_persistent_displacers.erase(node)
 
+func unregister_persistent_displacer(node: Node3D) -> void:
+	_persistent_displacers.erase(node)
+
 func push_wake(pos: Vector3, lifetime: float = DEFAULT_WAKE_LIFETIME) -> void:
 	_wake_trail.append({"pos": pos, "born": Time.get_ticks_msec() / 1000.0, "lifetime": lifetime})
 

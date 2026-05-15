@@ -158,11 +158,8 @@ var _pitch := 0.0
 # WAKE_STEP metres travelled so the trail behind a moving player looks
 # continuous instead of teleporting.
 var _last_wake_pos: Vector3 = Vector3.INF
-var _last_wake_time: float = 0.0
+var _is_stand_displacer: bool = false
 const WAKE_STEP: float = 0.4
-# Refresh standstill wake faster than wake lifetime (3.0s) so the
-# squash under a planted player never fades to nothing.
-const WAKE_STAND_INTERVAL: float = 1.0
 # View-bob state. `_bob_phase` accumulates with horizontal travel so phase
 # is tied to distance, not time — stop walking and the camera freezes
 # mid-stride instead of continuing to oscillate. `_bob_amp` eases the
@@ -510,35 +507,33 @@ func _play_jump_start() -> void:
 	_jump_player.play()
 
 func _emit_grass_wake() -> void:
-	# Drop a wake puff every WAKE_STEP metres of horizontal travel while
-	# grounded, OR a fresh "stand" puff every WAKE_STAND_INTERVAL while
-	# stationary. Airborne players skip both — grass shouldn't squash
-	# under a player floating overhead. Foliage node decays + composes
-	# these into the shader uniform; no foliage on map = silent no-op.
+	# Grounded: keep the player registered as a persistent grass
+	# displacer (smush under you, no flash since persistent doesn't
+	# decay) AND drop a fading wake puff every WAKE_STEP metres of
+	# horizontal travel for the trail effect behind movement.
+	# Airborne: unregister so grass under a jumping player stays
+	# upright instead of squashing under a body in the air.
+	var fol := get_tree().get_first_node_in_group("foliage")
+	if fol == null:
+		return
 	if not is_on_floor():
-		# Reset the move anchor so the first ground frame doesn't drop a
-		# huge backlog of skipped wakes.
+		if _is_stand_displacer and fol.has_method("unregister_persistent_displacer"):
+			fol.call("unregister_persistent_displacer", self)
+			_is_stand_displacer = false
 		_last_wake_pos = Vector3.INF
 		return
+	if not _is_stand_displacer and fol.has_method("register_persistent_displacer"):
+		fol.call("register_persistent_displacer", self)
+		_is_stand_displacer = true
 	var p: Vector3 = global_position
 	if _last_wake_pos == Vector3.INF:
 		_last_wake_pos = p
-		_last_wake_time = Time.get_ticks_msec() / 1000.0
-		_push_grass_wake(p)
 		return
 	var d: Vector2 = Vector2(p.x - _last_wake_pos.x, p.z - _last_wake_pos.z)
-	var moved: bool = d.length() >= WAKE_STEP
-	var now: float = Time.get_ticks_msec() / 1000.0
-	var stale: bool = (now - _last_wake_time) >= WAKE_STAND_INTERVAL
-	if not moved and not stale:
+	if d.length() < WAKE_STEP:
 		return
 	_last_wake_pos = p
-	_last_wake_time = now
-	_push_grass_wake(p)
-
-func _push_grass_wake(p: Vector3) -> void:
-	var fol := get_tree().get_first_node_in_group("foliage")
-	if fol != null and fol.has_method("push_wake"):
+	if fol.has_method("push_wake"):
 		fol.call("push_wake", p, 3.0)
 
 func _respawn_at_safe_point() -> void:

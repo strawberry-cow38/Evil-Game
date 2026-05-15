@@ -157,20 +157,11 @@ void vertex() {
 	if (!cull) {
 		float top_factor = 1.0 - UV.y;
 		float seed = (inst_origin.x * 0.21 + inst_origin.z * 0.17) * phase_scatter;
-		// Bipolar sway. Previously pulse was 0..1 so amp was always
-		// positive — blades only bent downwind, then sprang back, which
-		// reads as "tugged" instead of "swayed". Splitting the amplitude
-		// into a steady downwind component (wind_min) plus an oscillating
-		// component (wind_max) lets the tip overshoot the rest pose in
-		// both directions: gust forward, ease past neutral, recoil back.
-		float osc = sin(TIME * wind_speed + seed);
-		float amp = wind_min + wind_max * osc;
-		world_pos += vec3(wind_dir.x, 0.0, wind_dir.y) * amp * top_factor * sway_mult;
-		// Displacement from player / items / vehicles. Each active
-		// displacer shoves the tip radially outward (anchor stays put)
-		// with a linear falloff inside disp_radius. We sum contributions
-		// so two overlapping wakes stack rather than fight.
+		// Pass 1: walk displacers and accumulate push + the max falloff
+		// strength on this instance. The max strength gates the sway
+		// amplitude so a flattened blade doesn't keep waving in the wind.
 		vec3 push_total = vec3(0.0);
+		float max_strength = 0.0;
 		for (int i = 0; i < disp_count; i++) {
 			vec4 d = displacers[i];
 			if (d.w <= 0.0) {
@@ -183,8 +174,20 @@ void vertex() {
 				vec2 dir = to_inst / dist;
 				push_total.x += dir.x * falloff * disp_push;
 				push_total.z += dir.y * falloff * disp_push;
+				if (falloff > max_strength) {
+					max_strength = falloff;
+				}
 			}
 		}
+		float sway_gate = clamp(1.0 - max_strength, 0.0, 1.0);
+		// Bipolar sway, gated by displacement so a smushed blade stays
+		// down instead of waving in the wind. Splitting the amplitude
+		// into a steady downwind component (wind_min) plus an oscillating
+		// component (wind_max) lets the tip overshoot the rest pose in
+		// both directions: gust forward, ease past neutral, recoil back.
+		float osc = sin(TIME * wind_speed + seed);
+		float amp = wind_min + wind_max * osc;
+		world_pos += vec3(wind_dir.x, 0.0, wind_dir.y) * amp * top_factor * sway_mult * sway_gate;
 		// Multiply by sway_mult so clover patches (sway_mult=0) don't slide
 		// underfoot, shrubs (0.4) get a gentle nudge, and grass blades
 		// (1.0) take the full push.
