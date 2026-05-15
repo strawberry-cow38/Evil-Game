@@ -100,10 +100,13 @@ func _ready() -> void:
 	sh.code = PAINT_SHADER_CODE
 	_material = ShaderMaterial.new()
 	_material.shader = sh
-	_material.set_shader_parameter("tex_dirt",  load(PAINT_TEX_PATHS[0]))
-	_material.set_shader_parameter("tex_grass", load(PAINT_TEX_PATHS[1]))
-	_material.set_shader_parameter("tex_stone", load(PAINT_TEX_PATHS[2]))
-	_material.set_shader_parameter("tex_sand",  load(PAINT_TEX_PATHS[3]))
+	# Runtime-load via Image — source-pull launcher pulls the repo as plain
+	# files, so .png.import sidecars aren't present and load() returns null.
+	# Image.load + ImageTexture.create_from_image skips Godot's import step.
+	_material.set_shader_parameter("tex_dirt",  _load_runtime_texture(PAINT_TEX_PATHS[0]))
+	_material.set_shader_parameter("tex_grass", _load_runtime_texture(PAINT_TEX_PATHS[1]))
+	_material.set_shader_parameter("tex_stone", _load_runtime_texture(PAINT_TEX_PATHS[2]))
+	_material.set_shader_parameter("tex_sand",  _load_runtime_texture(PAINT_TEX_PATHS[3]))
 	_material.set_shader_parameter("tile_size", TILE_SIZE)
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
@@ -116,6 +119,16 @@ func _ready() -> void:
 	_mesh_instance.mesh = _array_mesh
 	_rebuild_mesh_now()
 	_rebuild_collision_now()
+
+func _load_runtime_texture(res_path: String) -> ImageTexture:
+	var fs_path := ProjectSettings.globalize_path(res_path)
+	var img := Image.new()
+	var err := img.load(fs_path)
+	if err != OK:
+		push_warning("ground texture load failed: %s (err %d)" % [res_path, err])
+		return null
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
 
 func _process(_delta: float) -> void:
 	if _mesh_dirty:
