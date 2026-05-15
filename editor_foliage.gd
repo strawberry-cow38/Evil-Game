@@ -26,7 +26,7 @@ const DEFAULT_PRESET: String = "short_green"
 # still be built by painting a wider area instead of stacking. Bump if
 # a future tuning pass wants denser carpets.
 const DENSITY_CELL_SIZE: float = 0.5
-const MAX_PER_CELL: int = 8
+const MAX_PER_CELL: int = 5
 
 # Grass displacement budget. Shader iterates this many slots per vertex,
 # so bumping it costs real GPU. Persistent registrants (items) live in
@@ -63,11 +63,15 @@ const PRESETS: Array = [
 	# Stump preset bundles 3 baked .glb variants — each placement routes
 	# to a random variant bucket (mirrors SHRUB_BUCKETS pattern) so a
 	# spray of stumps reads as three distinct silhouettes.
+	# display_scale: per-instance scale multiplier applied at add_instance.
+	# clear_grass_radius: when a stump lands, every grass instance inside
+	# this XZ radius is deleted so the stump isn't sitting in a tuft.
 	{"id": "tree_stump", "label": "Stump", "kind": "tree", "glb_variants": [
 		"res://assets/models/stump_0.glb",
 		"res://assets/models/stump_1.glb",
 		"res://assets/models/stump_2.glb",
-	], "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1)},
+	], "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1),
+	 "display_scale": 1.8, "clear_grass_radius": 0.9},
 ]
 
 # Per-instance state keyed by preset id:
@@ -1101,12 +1105,53 @@ func add_instance(preset_id: String, world_pos: Vector3, scale: float, rot_y: fl
 	var key: Vector2i = _density_cell(world_pos)
 	if not is_tree and int(_density_grid.get(key, 0)) >= MAX_PER_CELL:
 		return false
+	# Apply preset display_scale multiplier (lets stumps render at 1.8x
+	# native mesh size without rebaking the .glb).
+	var p_data: Dictionary = _preset_data(preset_id)
+	var display_scale: float = float(p_data.get("display_scale", 1.0))
+	var final_scale: float = scale * display_scale
+	# Trees clear grass underneath so a stump doesn't grow out of a tuft.
+	if is_tree:
+		var clear_r: float = float(p_data.get("clear_grass_radius", 0.0))
+		if clear_r > 0.0:
+			_clear_grass_in_radius(world_pos, clear_r)
 	var pid: String = _resolve_preset(preset_id)
-	_instances[pid].append({"pos": world_pos, "scale": scale, "rot_y": rot_y})
+	_instances[pid].append({"pos": world_pos, "scale": final_scale, "rot_y": rot_y})
 	if not is_tree:
 		_density_grid[key] = int(_density_grid.get(key, 0)) + 1
 	_dirty = true
 	return true
+
+func _preset_data(preset_id: String) -> Dictionary:
+	var base: String = preset_id
+	var hash_idx: int = preset_id.find("#")
+	if hash_idx >= 0:
+		base = preset_id.substr(0, hash_idx)
+	for p in PRESETS:
+		if String(p.id) == base:
+			return p
+	return {}
+
+func _clear_grass_in_radius(world_pos: Vector3, radius: float) -> void:
+	var r2: float = radius * radius
+	for pid in _instances.keys():
+		if _preset_kind(pid) != "grass":
+			continue
+		var keep: Array = []
+		for inst in _instances[pid]:
+			var ip: Vector3 = inst.get("pos", Vector3.ZERO)
+			var dx: float = ip.x - world_pos.x
+			var dz: float = ip.z - world_pos.z
+			if dx * dx + dz * dz <= r2:
+				var ck: Vector2i = _density_cell(ip)
+				var c: int = int(_density_grid.get(ck, 0)) - 1
+				if c <= 0:
+					_density_grid.erase(ck)
+				else:
+					_density_grid[ck] = c
+			else:
+				keep.append(inst)
+		_instances[pid] = keep
 
 func _preset_kind(preset_id: String) -> String:
 	# Accepts public id or bucketed key (strips "#<n>" suffix).
