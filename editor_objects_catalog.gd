@@ -135,12 +135,21 @@ static func _build_lootable_crate(label: String, size: Vector3, max_w: float, ro
 	return holder
 
 static func _build_glb_prop(path: String) -> Node3D:
+	# Launcher source-pull does not include Godot's .import sidecars, so
+	# load(path) returns null on a fresh checkout. Load the glb at runtime
+	# via GLTFDocument so the prop works without an editor preprocess pass.
 	var holder := Node3D.new()
-	var scene: PackedScene = load(path)
-	if scene == null:
-		push_warning("editor_objects_catalog: missing glb at %s" % path)
+	var abs_path: String = ProjectSettings.globalize_path(path)
+	var doc := GLTFDocument.new()
+	var state := GLTFState.new()
+	var err := doc.append_from_file(abs_path, state)
+	if err != OK:
+		push_warning("editor_objects_catalog: glb load failed (%d) at %s" % [err, abs_path])
 		return holder
-	var inst := scene.instantiate()
+	var inst := doc.generate_scene(state)
+	if inst == null:
+		push_warning("editor_objects_catalog: glb produced no scene: %s" % abs_path)
+		return holder
 	holder.add_child(inst)
 	var body := StaticBody3D.new()
 	holder.add_child(body)
