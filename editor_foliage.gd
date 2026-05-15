@@ -72,11 +72,11 @@ const PRESETS: Array = [
 		"res://assets/models/stump_2.glb",
 	], "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1),
 	 # collision_radius/height match the stump silhouette at display_scale.
-	 # Native stump is ~0.6m wide × ~0.5m tall at scale 1.0 — scale 2.7 →
-	 # radius ≈ 0.4, height ≈ 1.35. Clearance radius tightened so we don't
-	 # carve out a bald ring around each stump.
-	 "display_scale": 2.7, "clear_grass_radius": 0.55,
-	 "collision_radius": 0.4, "collision_height": 1.35},
+	 # Native stump is ~0.6m wide × ~0.5m tall at scale 1.0 — scale 1.4 →
+	 # radius ≈ 0.42, height ≈ 0.7. Clear radius tight so we don't carve
+	 # a bald ring around each stump.
+	 "display_scale": 1.4, "clear_grass_radius": 0.65,
+	 "collision_radius": 0.42, "collision_height": 0.7},
 ]
 
 # Per-instance state keyed by preset id:
