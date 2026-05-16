@@ -35,6 +35,8 @@ const OBJECTS: Array = [
 	{"id": "obj_rock_large",    "label": "Rock (Large)"},
 	{"id": "obj_rock_small",    "label": "Rock (Small)"},
 	{"id": "obj_fence_post",    "label": "Fence Post"},
+	{"id": "obj_fence_picket",  "label": "Fence Picket"},
+	{"id": "obj_fence_rail",    "label": "Fence Rail"},
 	{"id": "obj_streetlight",   "label": "Streetlight"},
 	{"id": "obj_dumpster",      "label": "Dumpster"},
 	{"id": "obj_computer_station", "label": "Computer Station"},

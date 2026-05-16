@@ -35,6 +35,12 @@ static func build(object_id: String) -> Node3D:
 			return _build_cctv_camera()
 		"obj_plate":
 			return _build_glb_prop("res://assets/models/plate.glb")
+		"obj_fence_post":
+			return _build_glb_prop("res://assets/models/fence_post.glb")
+		"obj_fence_picket":
+			return _build_glb_prop("res://assets/models/fence_picket.glb")
+		"obj_fence_rail":
+			return _build_glb_prop("res://assets/models/fence_rail.glb")
 		_:
 			return null
 
