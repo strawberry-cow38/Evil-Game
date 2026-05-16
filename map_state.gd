@@ -47,6 +47,10 @@ var lighting: Dictionary = {}
 #     out_tangent:Vector3, ignore_terrain:bool} ] }
 # Empty array = no roads, play scene draws nothing.
 var roads: Array = []
+# Fences authored via Environment → Fences. Each entry:
+#   { "start": Vector3, "end": Vector3, "post_spacing": float }
+# Play scene rebuilds posts/pickets/rails from this list at runtime.
+var fences: Array = []
 # Trigger volumes authored via Level → Triggers. Each entry mirrors
 # editor_trigger_box's persisted fields (prop_id, trigger_id, xform,
 # conditions, logic_op, fire_event_ids, delay, inter_event_delay,
@@ -81,6 +85,7 @@ func clear() -> void:
 	actor_spawn_points.clear()
 	lighting.clear()
 	roads.clear()
+	fences.clear()
 	placed_triggers.clear()
 	map_events.clear()
 	foliage_instances.clear()

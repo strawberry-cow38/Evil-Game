@@ -28,6 +28,7 @@ const TOOL_L_TRIGGERS := "l_triggers"
 const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
 const TOOL_E_ROADS := "e_roads"
+const TOOL_E_FENCES := "e_fences"
 const TOOL_E_PAINT := "e_paint"
 const TOOL_T_MAT_SMOOTH := "t_mat_smooth"
 const TOOL_T_HOLE := "t_hole"
@@ -46,6 +47,8 @@ const OBJECT_PROPS_PANEL_SCRIPT := preload("res://editor_object_props_panel.gd")
 const PAUSE_MENU_SCRIPT := preload("res://editor_pause_menu.gd")
 const ROADS_SCRIPT := preload("res://editor_roads.gd")
 const ROADS_PANEL_SCRIPT := preload("res://editor_roads_panel.gd")
+const FENCES_SCRIPT := preload("res://editor_fences.gd")
+const FENCES_PANEL_SCRIPT := preload("res://editor_fences_panel.gd")
 const PAINT_PANEL_SCRIPT := preload("res://editor_terrain_paint_panel.gd")
 const FOLIAGE_PANEL_SCRIPT := preload("res://editor_foliage_panel.gd")
 const FOLIAGE_SCRIPT := preload("res://editor_foliage.gd")
@@ -183,6 +186,9 @@ const UNDO_LIMIT: int = 200
 # while the Environment → Roads tool is active.
 var _roads_node: Node3D = null
 var _roads_panel: PanelContainer = null
+# Fence authoring node + panel. Mirrors the roads pair.
+var _fences_node: Node3D = null
+var _fences_panel: PanelContainer = null
 # Terrain Paint panel — runtime-built same as the roads panel.
 var _paint_panel: PanelContainer = null
 var _paint_material_id: int = 1   # 1 = grass
@@ -486,6 +492,27 @@ func _ready() -> void:
 		var spec: Dictionary = ROADS_SCRIPT.SURFACES[sid]
 		surf_entries.append({"id": sid, "label": String(spec.get("label", sid))})
 	_roads_panel.populate_surfaces(surf_entries)
+	# Fences node. Owns its own visuals; we proxy LMB drag while the
+	# Environment → Fences tool is active.
+	_fences_node = Node3D.new()
+	_fences_node.set_script(FENCES_SCRIPT)
+	add_child(_fences_node)
+	_fences_node.setup(_terrain)
+	if MapState.fences.size() > 0:
+		_fences_node.set_state(MapState.fences)
+	_fences_node.fence_state_changed.connect(_on_fences_changed)
+	_fences_panel = PanelContainer.new()
+	_fences_panel.set_script(FENCES_PANEL_SCRIPT)
+	_fences_panel.anchor_left = 1.0
+	_fences_panel.anchor_right = 1.0
+	_fences_panel.anchor_top = 0.0
+	_fences_panel.anchor_bottom = 0.0
+	_fences_panel.offset_left = -260
+	_fences_panel.offset_right = -16
+	_fences_panel.offset_top = 90
+	_fences_panel.offset_bottom = 320
+	$UI.add_child(_fences_panel)
+	_fences_panel.post_spacing_changed.connect(_on_fences_panel_spacing)
 	# Paint panel — runtime-built like the roads panel. Anchored to the
 	# right edge under the sub-bar.
 	_paint_panel = PanelContainer.new()
@@ -652,6 +679,16 @@ func _on_roads_panel_decal_remove(index: int) -> void:
 
 func _on_roads_panel_decal_change(index: int, field: String, value) -> void:
 	_roads_node.update_decal_on_selected(index, field, value)
+
+func _on_fences_changed() -> void:
+	if _fences_node == null:
+		return
+	MapState.fences = _fences_node.get_state()
+
+func _on_fences_panel_spacing(_v: float) -> void:
+	# Slider value is read live during begin/update/commit_drag; nothing
+	# to do here unless we ever decide to live-edit a selected fence.
+	pass
 
 func _input(event: InputEvent) -> void:
 	# Esc toggles the pause menu. While it's open we swallow other shortcuts
@@ -945,6 +982,8 @@ func _snapshot_to_mapstate() -> void:
 		})
 	if _roads_node != null:
 		MapState.roads = _roads_node.get_state()
+	if _fences_node != null:
+		MapState.fences = _fences_node.get_state()
 	# Foliage — copy the live instance list out so play / save catches it.
 	if _foliage_node != null:
 		MapState.foliage_instances = _foliage_node.get_state()
@@ -1078,6 +1117,8 @@ func _restore_from_mapstate() -> void:
 		_apply_lighting(MapState.lighting)
 	if _roads_node != null:
 		_roads_node.set_state(MapState.roads)
+	if _fences_node != null:
+		_fences_node.set_state(MapState.fences)
 	# Foliage rehydrate — wipe + replay the persisted instance list.
 	if _foliage_node != null:
 		_foliage_node.set_state(MapState.foliage_instances)
@@ -1160,6 +1201,16 @@ func _process(delta: float) -> void:
 			var grab_hit := _raycast_cursor()
 			if not grab_hit.is_empty():
 				_roads_node.on_cursor_world(grab_hit.position)
+	# Fences ghost-follow: while LMB is held the run preview tracks the
+	# cursor. Alt/Shift modifier state is read live so snap toggles update
+	# the ghost without releasing the mouse.
+	if _active_tool == TOOL_E_FENCES and _fences_node != null and _fences_node.is_dragging():
+		if not _camera.is_looking() and not _is_over_ui():
+			var fhit := _raycast_cursor()
+			if not fhit.is_empty():
+				var fp: Vector3 = fhit.position
+				fp.y = _terrain.sample_height(fp)
+				_fences_node.update_drag(fp, Input.is_key_pressed(KEY_ALT), Input.is_key_pressed(KEY_SHIFT), _fences_panel.get_post_spacing())
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
 	if _camera.is_looking() or _active_tool == TOOL_NONE:
@@ -1304,6 +1355,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _active_tool == TOOL_E_ROADS and not _is_over_ui() and _camera.consume_tap():
 			_roads_node.deselect()
 			return
+		if _active_tool == TOOL_E_FENCES and _fences_node != null and _fences_node.is_dragging():
+			_fences_node.cancel_drag()
+			return
 	if event.button_index != MOUSE_BUTTON_LEFT:
 		return
 	# In-progress drag always consumes the release, even over UI / look-mode.
@@ -1399,6 +1453,25 @@ func _unhandled_input(event: InputEvent) -> void:
 		pr.y = _terrain.sample_height(pr)
 		_roads_node.on_click(pr, Vector3i(-1, -1, -1))
 		return
+	# Fences: LMB press starts a drag at the cursor; release commits a
+	# straight run from drag-start to release-point. Alt disables all
+	# snapping; Shift disables hard-snap to existing posts.
+	if _active_tool == TOOL_E_FENCES:
+		var spacing: float = _fences_panel.get_post_spacing()
+		var alt: bool = event.alt_pressed
+		var shift: bool = event.shift_pressed
+		var hit_f := _raycast_cursor()
+		if hit_f.is_empty():
+			if not event.pressed and _fences_node.is_dragging():
+				_fences_node.cancel_drag()
+			return
+		var pf: Vector3 = hit_f.position
+		pf.y = _terrain.sample_height(pf)
+		if event.pressed:
+			_fences_node.begin_drag(pf, alt, shift, spacing)
+		else:
+			_fences_node.commit_drag(pf, alt, shift, spacing)
+		return
 	# Foliage exact-place: each LMB press drops a single billboard at the
 	# cursor. Spray mode is handled by the per-frame _apply_tool path.
 	if _active_tool == TOOL_F_PAINT and _foliage_mode == "exact" and event.pressed:
@@ -1489,7 +1562,7 @@ func _raycast_cursor() -> Dictionary:
 
 func _is_over_ui() -> bool:
 	var mp := get_viewport().get_mouse_position()
-	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _actor_tables_panel, _clothing_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel, _paint_panel, _foliage_panel, _roads_panel, _snap_widget, _events_panel, _trigger_panel]:
+	for c in [_top_bar, _sub_bar, _radius_widget, _effects_panel, _objects_panel, _item_tables_panel, _item_picker_panel, _actor_tables_panel, _clothing_picker_panel, _space_toggle, _container_panel, _lighting_panel, _object_props_panel, _paint_panel, _foliage_panel, _roads_panel, _fences_panel, _snap_widget, _events_panel, _trigger_panel]:
 		if c == null or not c.visible:
 			continue
 		var r: Rect2 = c.get_global_rect()
@@ -1569,6 +1642,10 @@ func _on_tool_picked(tool_id: String) -> void:
 		_roads_panel.visible = (tool_id == TOOL_E_ROADS)
 		if tool_id == TOOL_E_ROADS:
 			_refresh_roads_panel()
+	if _fences_panel != null:
+		_fences_panel.visible = (tool_id == TOOL_E_FENCES)
+	if _fences_node != null and tool_id != TOOL_E_FENCES:
+		_fences_node.cancel_drag()
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
 	_objects_panel.visible = (tool_id == TOOL_O_OBJECTS)
 	_item_tables_panel.visible = (tool_id == TOOL_S_ITEMS)
