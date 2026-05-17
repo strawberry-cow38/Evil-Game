@@ -350,6 +350,7 @@ func _ready() -> void:
 	_object_props_panel.no_collide_changed.connect(_on_no_collide_changed)
 	_object_props_panel.destructible_changed.connect(_on_destructible_changed)
 	_object_props_panel.hp_changed.connect(_on_hp_changed)
+	_object_props_panel.frozen_changed.connect(_on_frozen_changed)
 	_object_props_panel.object_state_changed.connect(_on_object_state_changed)
 	# Snap widget — sits in the bottom-left corner, just above the brush
 	# widget. Visible while a placement tool is active.
@@ -428,6 +429,10 @@ func _ready() -> void:
 					box.destructible = bool(entry["destructible"])
 				if entry.has("hp_max"):
 					box.hp_max = int(entry["hp_max"])
+				if entry.has("frozen"):
+					box.frozen = bool(entry["frozen"])
+				else:
+					box.frozen = OBJECTS_CATALOG.default_frozen(String(box.object_id))
 				if entry.has("object_state"):
 					box.object_state = (entry["object_state"] as Dictionary).duplicate(true)
 				else:
@@ -943,6 +948,8 @@ func _snapshot_to_mapstate() -> void:
 		if kind == "object" and "destructible" in box:
 			entry["destructible"] = bool(box.destructible)
 			entry["hp_max"] = int(box.hp_max)
+		if kind == "object" and "frozen" in box:
+			entry["frozen"] = bool(box.frozen)
 		if kind == "object" and "object_state" in box:
 			var st: Dictionary = box.object_state
 			if not st.is_empty():
@@ -1095,6 +1102,10 @@ func _restore_from_mapstate() -> void:
 				box.destructible = bool(entry["destructible"])
 			if entry.has("hp_max"):
 				box.hp_max = int(entry["hp_max"])
+			if entry.has("frozen"):
+				box.frozen = bool(entry["frozen"])
+			else:
+				box.frozen = OBJECTS_CATALOG.default_frozen(String(box.object_id))
 			if entry.has("object_state"):
 				box.object_state = (entry["object_state"] as Dictionary).duplicate(true)
 			else:
@@ -2042,6 +2053,7 @@ func _spawn_object_at(object_id: String, world_pos: Vector3) -> void:
 	box.set_script(OBJECT_BOX_SCRIPT)
 	box.object_id = object_id
 	box.object_state = _default_object_state(object_id)
+	box.frozen = OBJECTS_CATALOG.default_frozen(object_id)
 	add_child(box)
 	box.global_position = world_pos
 	_placed_props.append(box)
@@ -2056,6 +2068,8 @@ func _default_object_state(object_id: String) -> Dictionary:
 			return {"pre_added_cams": [], "allow_add": true}
 		"obj_cctv_camera":
 			return {"cam_id": "", "ptz_enabled": false}
+		"obj_glass_sheet":
+			return {"variant": "fancy", "tint": Color(0.75, 0.88, 0.95, 0.35), "frosted": false}
 	return {}
 
 func _select_prop(box: Node3D) -> void:
@@ -2166,6 +2180,7 @@ func _refresh_object_props_panel() -> void:
 		events,
 		oid,
 		ostate,
+		bool(_selected_prop.get("frozen")) if "frozen" in _selected_prop else true,
 	)
 	_object_props_panel.visible = true
 
@@ -2280,6 +2295,11 @@ func _on_hp_changed(v: int) -> void:
 	if _selected_prop == null or not "hp_max" in _selected_prop:
 		return
 	_selected_prop.hp_max = v
+
+func _on_frozen_changed(v: bool) -> void:
+	if _selected_prop == null or not "frozen" in _selected_prop:
+		return
+	_selected_prop.frozen = v
 
 func _on_object_state_changed(state: Dictionary) -> void:
 	# Panel pushes the full per-type extras dict on every sub-edit; we
@@ -2415,6 +2435,7 @@ func _snapshot_object_box(box: Node3D) -> Dictionary:
 		"no_collide":          bool(box.get("no_collide")),
 		"destructible":        bool(box.get("destructible")),
 		"hp_max":              int(box.get("hp_max")),
+		"frozen":              bool(box.get("frozen")) if "frozen" in box else true,
 		"object_state":        (box.get("object_state") as Dictionary).duplicate(true) if box.get("object_state") != null else {},
 	}
 
@@ -2578,6 +2599,7 @@ func _spawn_from_snapshot(snap: Dictionary) -> Node3D:
 		box.no_collide = bool(snap.get("no_collide", false))
 		box.destructible = bool(snap.get("destructible", false))
 		box.hp_max = int(snap.get("hp_max", 100))
+		box.frozen = bool(snap.get("frozen", OBJECTS_CATALOG.default_frozen(box.object_id)))
 		var st_in: Dictionary = snap.get("object_state", {})
 		box.object_state = st_in.duplicate(true) if not st_in.is_empty() else _default_object_state(box.object_id)
 	_placed_props.append(box)

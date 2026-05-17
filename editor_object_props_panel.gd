@@ -8,6 +8,7 @@ extends PanelContainer
 signal no_collide_changed(value: bool)
 signal destructible_changed(value: bool)
 signal hp_changed(value: int)
+signal frozen_changed(value: bool)
 # Emitted when the user picks one of the named-events from the dropdown.
 signal event_focused(event_id: String)
 # Emitted whenever a type-specific field in the extras section changes.
@@ -18,6 +19,7 @@ signal object_state_changed(state: Dictionary)
 var _title: Label
 var _no_collide_chk: CheckBox
 var _destructible_chk: CheckBox
+var _frozen_chk: CheckBox
 var _hp_spin: SpinBox
 var _events_btn: OptionButton
 var _suppress: bool = false
@@ -57,6 +59,12 @@ func _ready() -> void:
 			destructible_changed.emit(v)
 		_hp_spin.editable = v)
 	vb.add_child(_destructible_chk)
+	_frozen_chk = CheckBox.new()
+	_frozen_chk.text = "Frozen (no physics)"
+	_frozen_chk.toggled.connect(func(v: bool):
+		if not _suppress:
+			frozen_changed.emit(v))
+	vb.add_child(_frozen_chk)
 	var hp_row := HBoxContainer.new()
 	var hp_lbl := Label.new()
 	hp_lbl.text = "HP"
@@ -91,11 +99,12 @@ func _ready() -> void:
 	_extras.add_theme_constant_override("separation", 4)
 	vb.add_child(_extras)
 
-func bind(label_text: String, no_collide: bool, destructible: bool, hp: int, events: Array = [], object_id: String = "", object_state: Dictionary = {}) -> void:
+func bind(label_text: String, no_collide: bool, destructible: bool, hp: int, events: Array = [], object_id: String = "", object_state: Dictionary = {}, frozen: bool = true) -> void:
 	_suppress = true
 	_title.text = label_text
 	_no_collide_chk.button_pressed = no_collide
 	_destructible_chk.button_pressed = destructible
+	_frozen_chk.button_pressed = frozen
 	_hp_spin.value = hp
 	_hp_spin.editable = destructible
 	_events_btn.clear()
@@ -133,6 +142,8 @@ func _rebuild_extras(object_id: String, state: Dictionary) -> void:
 			_build_station_extras()
 		"obj_cctv_camera":
 			_build_camera_extras()
+		"obj_glass_sheet":
+			_build_glass_extras()
 
 func _emit_state() -> void:
 	if _suppress:
@@ -231,6 +242,51 @@ func _build_camera_extras() -> void:
 		_extras_state["ptz_enabled"] = v
 		_emit_state())
 	_extras.add_child(_ex_ptz_chk)
+
+func _build_glass_extras() -> void:
+	var hdr := Label.new()
+	hdr.text = "Glass Sheet"
+	hdr.add_theme_font_size_override("font_size", 14)
+	_extras.add_child(hdr)
+	# Variant — fancy (refractive PBR + clearcoat) or cheap (alpha only).
+	var var_row := HBoxContainer.new()
+	var var_lbl := Label.new()
+	var_lbl.text = "Variant"
+	var_lbl.custom_minimum_size = Vector2(80, 0)
+	var_row.add_child(var_lbl)
+	var var_btn := OptionButton.new()
+	var_btn.add_item("Fancy (refractive)", 0)
+	var_btn.add_item("Cheap (alpha)", 1)
+	var current_variant: String = String(_extras_state.get("variant", "fancy"))
+	var_btn.select(0 if current_variant == "fancy" else 1)
+	var_btn.item_selected.connect(func(idx: int):
+		_extras_state["variant"] = "fancy" if idx == 0 else "cheap"
+		_emit_state())
+	var_row.add_child(var_btn)
+	_extras.add_child(var_row)
+	# Tint — RGBA. ColorPickerButton handles its own popup.
+	var tint_row := HBoxContainer.new()
+	var tint_lbl := Label.new()
+	tint_lbl.text = "Tint"
+	tint_lbl.custom_minimum_size = Vector2(80, 0)
+	tint_row.add_child(tint_lbl)
+	var cpb := ColorPickerButton.new()
+	cpb.color = _extras_state.get("tint", Color(0.75, 0.88, 0.95, 0.35))
+	cpb.edit_alpha = true
+	cpb.custom_minimum_size = Vector2(120, 0)
+	cpb.color_changed.connect(func(c: Color):
+		_extras_state["tint"] = c
+		_emit_state())
+	tint_row.add_child(cpb)
+	_extras.add_child(tint_row)
+	# Frosted toggle — bumps roughness, scales refraction for diffuse look.
+	var frost := CheckBox.new()
+	frost.text = "Frosted"
+	frost.button_pressed = bool(_extras_state.get("frosted", false))
+	frost.toggled.connect(func(v: bool):
+		_extras_state["frosted"] = v
+		_emit_state())
+	_extras.add_child(frost)
 
 func _is_alnum(s: String) -> bool:
 	for ch in s:

@@ -12,14 +12,22 @@ extends RefCounted
 const CRATE := preload("res://crate.gd")
 const COMPUTER_STATION := preload("res://computer_station.gd")
 const CCTV_CAMERA := preload("res://cctv_camera.gd")
+const GLASS_SHEET := preload("res://glass_sheet.gd")
 
 # Set of object ids whose build() returns a crate.gd node. Editor uses
 # this to decide when to show the loot-table picker on the selected
 # wireframe box.
 const CONTAINER_IDS := ["obj_crate_small", "obj_crate_large"]
 
+# Props that ship as physics toys by default (Frozen unchecked). Everything
+# else defaults frozen so set-dressing doesn't roll off the table.
+const UNFROZEN_BY_DEFAULT := ["obj_ball"]
+
 static func is_container(object_id: String) -> bool:
 	return CONTAINER_IDS.has(object_id)
+
+static func default_frozen(object_id: String) -> bool:
+	return not UNFROZEN_BY_DEFAULT.has(object_id)
 
 static func build(object_id: String) -> Node3D:
 	match object_id:
@@ -35,6 +43,10 @@ static func build(object_id: String) -> Node3D:
 			return _build_cctv_camera()
 		"obj_plate":
 			return _build_glb_prop("res://assets/models/plate.glb")
+		"obj_ball":
+			return _build_ball()
+		"obj_glass_sheet":
+			return _build_glass_sheet()
 		"obj_fence_post":
 			return _build_glb_prop("res://assets/models/fence_post.glb")
 		"obj_fence_picket":
@@ -173,6 +185,48 @@ static func _find_mesh_instances(node: Node) -> Array:
 	for c in node.get_children():
 		out.append_array(_find_mesh_instances(c))
 	return out
+
+static func _build_glass_sheet() -> Node3D:
+	# Wraps glass_sheet.gd. apply_state() drives variant/tint/frosted at
+	# bootstrap; the script builds its mesh + collision on _ready().
+	var holder := Node3D.new()
+	holder.set_script(GLASS_SHEET)
+	return holder
+
+static func _build_ball() -> Node3D:
+	# Beach-ball sized sphere. StaticBody3D placeholder — bootstrap swaps
+	# it for a RigidBody3D when the Frozen flag is off (default for ball).
+	var holder := Node3D.new()
+	var radius: float = 0.35
+	var mi := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = radius
+	sm.height = radius * 2.0
+	sm.radial_segments = 24
+	sm.rings = 12
+	mi.mesh = sm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.95, 0.25, 0.30, 1.0)
+	mat.roughness = 0.45
+	mat.metallic = 0.0
+	mi.material_override = mat
+	mi.position = Vector3(0, radius, 0)
+	holder.add_child(mi)
+	var body := StaticBody3D.new()
+	body.position = Vector3(0, radius, 0)
+	var cs := CollisionShape3D.new()
+	var shape := SphereShape3D.new()
+	shape.radius = radius
+	cs.shape = shape
+	body.add_child(cs)
+	holder.add_child(body)
+	# Bootstrap reads these when converting to RigidBody3D so the toy bounces
+	# realistically. Frozen props ignore them.
+	holder.set_meta("ball_radius", radius)
+	holder.set_meta("rb_mass", 1.2)
+	holder.set_meta("rb_bounce", 0.55)
+	holder.set_meta("rb_friction", 0.6)
+	return holder
 
 static func _build_demo_crate() -> Node3D:
 	var holder := Node3D.new()

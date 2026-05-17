@@ -5,30 +5,7 @@ extends RefCounted
 # wired in once the gizmo system lands. Each entry is {id, label}.
 
 const EFFECTS: Array = [
-	{"id": "demo_cube",       "label": "Demo: Cube"},
-	{"id": "fx_fire_small",   "label": "Fire (Small)"},
-	{"id": "fx_fire_large",   "label": "Fire (Large)"},
-	{"id": "fx_smoke_column", "label": "Smoke Column"},
-	{"id": "fx_smoke_thin",   "label": "Smoke (Thin)"},
-	{"id": "fx_steam",        "label": "Steam"},
-	{"id": "fx_mist",         "label": "Mist"},
-	{"id": "fx_dust_motes",   "label": "Dust Motes"},
-	{"id": "fx_sparks",       "label": "Sparks"},
-	{"id": "fx_embers",       "label": "Embers"},
-	{"id": "fx_fog_volume",   "label": "Fog Volume"},
-	{"id": "fx_godrays",      "label": "God Rays"},
-	{"id": "fx_water_spray",  "label": "Water Spray"},
-	{"id": "fx_blood_pool",   "label": "Blood Pool"},
-	{"id": "fx_decal_burn",   "label": "Decal: Burn"},
-	{"id": "fx_decal_crack",  "label": "Decal: Crack"},
-	{"id": "fx_decal_blood",  "label": "Decal: Blood"},
-	{"id": "fx_light_torch",  "label": "Light: Torch"},
-	{"id": "fx_light_lamp",   "label": "Light: Lamp"},
-	{"id": "fx_light_neon",   "label": "Light: Neon"},
-	{"id": "fx_sound_ambient","label": "Sound: Ambient"},
-	{"id": "fx_sound_loop",   "label": "Sound: Loop"},
-	{"id": "fx_wind_zone",    "label": "Wind Zone"},
-	{"id": "fx_radiation",    "label": "Radiation Zone"},
+	{"id": "demo_cube", "label": "Demo: Cube"},
 ]
 
 static func all_sorted() -> Array:

@@ -32,6 +32,11 @@ var no_collide: bool = false
 # metadata; gameplay damage code reads/decrements it.
 var destructible: bool = false
 var hp_max: int = 100
+# When true (default for most props), bootstrap keeps the StaticBody3D
+# the catalog built. When false, bootstrap converts it into a RigidBody3D
+# so the prop reacts to explosions / player pushes. Per-id defaults via
+# CATALOG.default_frozen — physics toys (ball) ship unfrozen.
+var frozen: bool = true
 # Free-form per-object-type state bag. Keys depend on object_id:
 #   obj_computer_station → { pre_added_cams: Array[String], allow_add: bool }
 #   obj_cctv_camera      → { cam_id: String, ptz_enabled: bool }

@@ -10,6 +10,8 @@ const MAX_LIFETIME := 8.0
 
 const EXPLOSION_PARTICLE_COUNT := 80
 const EXPLOSION_RADIUS := 5.0
+const EXPLOSION_DAMAGE := 220        # damage at the epicentre; tapers linearly to 0 at EXPLOSION_RADIUS
+const EXPLOSION_IMPULSE := 18.0      # peak knockback impulse for dynamic props at the epicentre
 const EXPLOSION_LIGHT_ENERGY := 8.0
 const EXPLOSION_LIGHT_RANGE := 12.0
 const EXPLOSION_LIGHT_FADE := 0.25
@@ -46,6 +48,65 @@ func _ready() -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 
+func _apply_splash(world_pos: Vector3) -> void:
+	var tree := get_tree()
+	if tree == null:
+		return
+	# Damage: walk every node with a take_damage method that sits within
+	# EXPLOSION_RADIUS. Linear falloff. Headshots etc. flow through whatever
+	# the receiver's take_damage already does.
+	for n in tree.get_nodes_in_group("dynamic_prop"):
+		if not (n is RigidBody3D) or not is_instance_valid(n):
+			continue
+		var rb: RigidBody3D = n
+		var to_node: Vector3 = rb.global_position - world_pos
+		var dist: float = to_node.length()
+		if dist >= EXPLOSION_RADIUS:
+			continue
+		var falloff: float = 1.0 - (dist / EXPLOSION_RADIUS)
+		var dir: Vector3 = (to_node + Vector3(0.0, 0.3, 0.0)).normalized()
+		var impulse: Vector3 = dir * EXPLOSION_IMPULSE * falloff * rb.mass
+		rb.apply_central_impulse(impulse)
+	# Damage receivers — dummies live as StaticBody3D w/ a take_damage method.
+	# Walk the whole scene tree once and dispatch. Cheap enough for the prop
+	# counts we ship; if it grows we can swap in a spatial query.
+	_apply_damage_recursive(tree.current_scene, world_pos)
+	# Fence destruction — every picket within radius takes a synthetic hit at
+	# its own position so the existing weapon-driven destruction path fires.
+	var fences_root := tree.current_scene.get_node_or_null("Fences")
+	if fences_root != null and fences_root.has_method("notify_picket_hit"):
+		for n in tree.get_nodes_in_group("fence_picket_destructible"):
+			if not (n is Node3D) or not is_instance_valid(n):
+				continue
+			var p: Node3D = n
+			var d: float = p.global_position.distance_to(world_pos)
+			if d > EXPLOSION_RADIUS:
+				continue
+			fences_root.notify_picket_hit(p, p.global_position)
+
+func _apply_damage_recursive(node: Node, world_pos: Vector3) -> void:
+	if node == null:
+		return
+	if node is Node3D:
+		var n3d: Node3D = node
+		var d: float = n3d.global_position.distance_to(world_pos)
+		if d < EXPLOSION_RADIUS:
+			var falloff: float = 1.0 - (d / EXPLOSION_RADIUS)
+			var dmg: int = int(round(EXPLOSION_DAMAGE * falloff))
+			if dmg > 0:
+				if node.has_method("take_damage"):
+					node.call("take_damage", dmg)
+				elif node.has_meta("destructible") and bool(node.get_meta("destructible")):
+					var hp: int = int(node.get_meta("hp", 0))
+					hp = max(hp - dmg, 0)
+					node.set_meta("hp", hp)
+					if hp <= 0:
+						node.queue_free()
+						# Skip recursion — children freed alongside parent.
+						return
+	for c in node.get_children():
+		_apply_damage_recursive(c, world_pos)
+
 func _physics_process(delta: float) -> void:
 	if _exploded:
 		return
@@ -76,6 +137,11 @@ func _explode(world_pos: Vector3, normal: Vector3) -> void:
 	if scene == null:
 		queue_free()
 		return
+
+	# Area damage + knockback. Distance-tapered falloff so a near-miss is
+	# survivable. Damage hits anything with take_damage(int); impulse hits
+	# anything in the dynamic_prop group (props with frozen=false).
+	_apply_splash(world_pos)
 
 	# Fireball / debris particles.
 	var p := CPUParticles3D.new()

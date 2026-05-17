@@ -237,6 +237,7 @@ var _initial_spawn: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
 	_rng.randomize()
+	add_to_group("player")
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_initial_spawn = global_position
 	_load_footstep_bank()
@@ -887,8 +888,41 @@ func _physics_process(delta: float) -> void:
 
 	_prev_vy = velocity.y
 	move_and_slide()
+	_push_dynamic_props()
 	_check_landing()
 	_was_grounded = is_on_floor()
+
+# Walks this frame's slide collisions and shoves any RigidBody3D in the
+# dynamic_prop group with an impulse proportional to player speed. The
+# CharacterBody3D doesn't push RBs automatically — we have to read the
+# slide-collision list and apply the impulse ourselves.
+const PUSH_IMPULSE_GAIN := 2.4   # multiplied by player horizontal speed
+const PUSH_IMPULSE_MIN := 0.5    # below this the prop barely moves; floor it
+
+func _push_dynamic_props() -> void:
+	var hsp: float = Vector2(velocity.x, velocity.z).length()
+	if hsp < 0.05:
+		return
+	for i in range(get_slide_collision_count()):
+		var col := get_slide_collision(i)
+		if col == null:
+			continue
+		var hit := col.get_collider()
+		if hit == null or not (hit is RigidBody3D):
+			continue
+		if not (hit as Node).is_in_group("dynamic_prop"):
+			continue
+		var rb: RigidBody3D = hit
+		var contact: Vector3 = col.get_position()
+		# Push away from the player on the XZ plane. col.get_normal()
+		# points from prop back at the player, so flip it for the shove.
+		var dir: Vector3 = -col.get_normal()
+		dir.y = 0.0
+		if dir.length_squared() < 0.001:
+			continue
+		dir = dir.normalized()
+		var mag: float = max(hsp * PUSH_IMPULSE_GAIN, PUSH_IMPULSE_MIN) * rb.mass
+		rb.apply_impulse(dir * mag, contact - rb.global_position)
 
 # Edge-detected landing: fires when this tick's move_and_slide put us
 # back on the floor after being airborne last tick. Uses _prev_vy

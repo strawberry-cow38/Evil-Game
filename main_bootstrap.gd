@@ -168,6 +168,12 @@ func _ready() -> void:
 					content.set_meta("destructible", true)
 					content.set_meta("hp_max", hpmax)
 					content.set_meta("hp", hpmax)
+				# Frozen flag default = true (most props stay put). When
+				# unchecked, swap the catalog's StaticBody3D for a RigidBody3D
+				# so explosions + player pushes shove the prop around.
+				var frozen: bool = bool(entry.get("frozen", OBJECT_CATALOG.default_frozen(id)))
+				if not frozen:
+					_make_dynamic(content)
 				# Type-specific per-instance state (Computer Station cam
 				# lists, CCTV cam_id/ptz). Catalog node opts in by
 				# defining apply_state(); generic objects skip this.
@@ -473,6 +479,58 @@ func _roll_clothing_for(body: Node3D, preset: Dictionary) -> void:
 				break
 	if not equipped.is_empty():
 		body.set_meta("clothing", equipped)
+
+# Swap any StaticBody3D in the prop's content for a RigidBody3D so it
+# responds to explosions + the player pushing into it. CollisionShape3Ds
+# are reparented onto the new body so existing shape data carries over.
+# Mass / friction / bounce can be tuned per-prop via meta on the holder
+# (rb_mass / rb_friction / rb_bounce).
+func _make_dynamic(content: Node3D) -> void:
+	var statics: Array = []
+	_collect_static_bodies(content, statics)
+	if statics.is_empty():
+		return
+	var mass: float = 1.0
+	var friction: float = 0.6
+	var bounce: float = 0.2
+	if content.has_meta("rb_mass"):
+		mass = float(content.get_meta("rb_mass"))
+	if content.has_meta("rb_friction"):
+		friction = float(content.get_meta("rb_friction"))
+	if content.has_meta("rb_bounce"):
+		bounce = float(content.get_meta("rb_bounce"))
+	for sb in statics:
+		var rb := RigidBody3D.new()
+		rb.mass = mass
+		rb.contact_monitor = false
+		rb.gravity_scale = 1.0
+		var pmat := PhysicsMaterial.new()
+		pmat.friction = friction
+		pmat.bounce = bounce
+		rb.physics_material_override = pmat
+		# Mark as dynamic prop so grenade splash + player push code can find it
+		# without walking metadata one node at a time.
+		rb.add_to_group("dynamic_prop")
+		var parent := sb.get_parent()
+		var xform: Transform3D = sb.transform
+		# Move collision shapes from the old static to the new rigid.
+		var shapes: Array = []
+		for ch in sb.get_children():
+			if ch is CollisionShape3D:
+				shapes.append(ch)
+		for ch in shapes:
+			sb.remove_child(ch)
+			rb.add_child(ch)
+		parent.remove_child(sb)
+		sb.queue_free()
+		parent.add_child(rb)
+		rb.transform = xform
+
+func _collect_static_bodies(n: Node, out: Array) -> void:
+	if n is StaticBody3D:
+		out.append(n)
+	for c in n.get_children():
+		_collect_static_bodies(c, out)
 
 func _disable_collision(root: Node) -> void:
 	# Walk the spawned object subtree and turn off every CollisionShape3D
