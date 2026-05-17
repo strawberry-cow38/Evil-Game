@@ -504,9 +504,6 @@ func _rebuild_all() -> void:
 	# user can see where their next drag can branch off.
 	for f in _fences:
 		_build_snap_hint(f.start, f.end)
-	if _collision_enabled:
-		for f in _fences:
-			_spawn_wall_collider(f, _variant_for(f))
 
 func _refresh_ghost() -> void:
 	_clear_ghost()
@@ -617,38 +614,32 @@ func _cardinality(f: Vector3) -> float:
 	# 1.0 for perfectly axis-aligned, 0.0 for 45deg diagonal.
 	return absf(absf(f.x) - absf(f.z))
 
-func _spawn_wall_collider(f: Dictionary, variant: Dictionary) -> void:
-	# Single box-shaped wall collider per run, oriented along the run, sized
-	# to (length, wall_height, wall_thickness). Subdivided into one box per
-	# segment so each segment sits on its own ground sample — keeps the
-	# collider following gentle terrain without warping a thin wall.
-	var height: float = float(variant.get("wall_height", 1.0))
-	var thickness: float = float(variant.get("wall_thickness", 0.20))
-	var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
-	var delta: Vector3 = f.end - f.start
-	delta.y = 0.0
-	var L: float = delta.length()
-	if L < MIN_RUN_LENGTH:
+func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis) -> void:
+	# Per-element AABB collider: one BoxShape3D sized to the spawned mesh's
+	# world-space bounds. Bullets / raycasts that pass between pickets, over
+	# rails, or through the gap on a beam fence cleanly miss every body.
+	if mesh == null:
 		return
-	var forward: Vector3 = delta.normalized()
-	var n_intervals: int = max(1, int(round(L / spacing)))
-	var seg_len: float = L / float(n_intervals)
-	for i in range(n_intervals):
-		var ps: Vector3 = f.start + forward * (i * seg_len)
-		var pe: Vector3 = f.start + forward * ((i + 1) * seg_len)
-		ps.y = _ground_y(ps)
-		pe.y = _ground_y(pe)
-		var mid: Vector3 = (ps + pe) * 0.5
-		mid.y += height * 0.5
-		var body := StaticBody3D.new()
-		body.position = mid
-		body.basis = _yaw_basis(forward)
-		var shape := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3(seg_len, height, thickness)
-		shape.shape = box
-		body.add_child(shape)
-		_visuals_root.add_child(body)
+	var aabb: AABB = mesh.get_aabb()
+	var scale_vec: Vector3 = basis.get_scale()
+	# Drop scale from the basis so the StaticBody3D stays unit-scaled and we
+	# apply the scale to the box size + center offset directly (avoids the
+	# physics-server warnings Godot logs for scaled bodies).
+	var ortho := Basis(basis.x.normalized(), basis.y.normalized(), basis.z.normalized())
+	var center_local: Vector3 = aabb.get_center() * scale_vec
+	var center_world: Vector3 = world_pos + ortho * center_local
+	var size: Vector3 = aabb.size * scale_vec
+	if size.x <= 0.0 or size.y <= 0.0 or size.z <= 0.0:
+		return
+	var body := StaticBody3D.new()
+	body.position = center_world
+	body.basis = ortho
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	shape.shape = box
+	body.add_child(shape)
+	root.add_child(body)
 
 func _post_position_taken(pos: Vector3) -> bool:
 	for p in _post_positions:
@@ -713,14 +704,9 @@ func _spawn_rail(root: Node3D, world_pos: Vector3, forward: Vector3, length: flo
 	var mesh: Mesh = _mesh_cache.get(variant["rail_glb"], null)
 	if mesh == null:
 		return
-	var mi := MeshInstance3D.new()
-	mi.mesh = mesh
-	mi.position = world_pos
 	# scaled_local (right-multiply) stretches the rail's local +X by length.
-	mi.basis = _yaw_basis(forward).scaled_local(Vector3(length, 1.0, 1.0))
-	if ghost:
-		mi.transparency = 0.55
-	root.add_child(mi)
+	var basis: Basis = _yaw_basis(forward).scaled_local(Vector3(length, 1.0, 1.0))
+	_spawn(root, mesh, world_pos, basis, ghost)
 
 func _spawn(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis, ghost: bool) -> void:
 	if mesh == null:
@@ -732,6 +718,8 @@ func _spawn(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis, ghost: b
 	if ghost:
 		mi.transparency = 0.55
 	root.add_child(mi)
+	if _collision_enabled and not ghost:
+		_attach_collider(root, mesh, world_pos, basis)
 
 func _yaw_basis(forward: Vector3) -> Basis:
 	# Build a basis whose local +X axis maps to `forward` (XZ-plane only),
