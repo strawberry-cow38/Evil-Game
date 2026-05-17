@@ -80,6 +80,11 @@ const SNAP_RADIUS := 0.6
 # which line-snap engages and snaps the cursor onto that run's nearest
 # post slot. Generous so the user only has to be vaguely near the line.
 const LINE_SNAP_RADIUS := 1.4
+# Extra pull radius around real post positions on the picket grid. When
+# the cursor is within this world-space distance of a post, the picket
+# slot is overridden to the post slot — biases snapping toward posts
+# over pickets without removing picket snap entirely.
+const POST_PULL_RADIUS := 0.75
 # Click-anywhere-on-a-fence radius for the per-section eraser. Measured
 # from the cursor to the fence line, regardless of which segment.
 const DELETE_LINE_RADIUS := 1.8
@@ -395,6 +400,19 @@ func _nearest_line_slot(world: Vector3, radius: float) -> Dictionary:
 		var slot_idx: int = clampi(int(round(raw_t * total_slots)), 0, total_slots)
 		var slot_t: float = float(slot_idx) / float(total_slots)
 		var p: Vector3 = a + ab * slot_t
+		# Heavier pull toward real posts: if the cursor is within
+		# POST_PULL_RADIUS of the nearest post slot, override the picket
+		# slot with that post slot. Keeps picket snap but lets posts win
+		# when the cursor is genuinely near them.
+		if sub_steps > 1:
+			var post_idx: int = clampi(int(round(float(slot_idx) / float(sub_steps))) * sub_steps, 0, total_slots)
+			if post_idx != slot_idx:
+				var post_t: float = float(post_idx) / float(total_slots)
+				var post_pt: Vector3 = a + ab * post_t
+				if post_pt.distance_to(wxz) <= POST_PULL_RADIUS:
+					slot_idx = post_idx
+					slot_t = post_t
+					p = post_pt
 		best_d = d_line
 		best_pos = Vector3(p.x, world.y, p.z)
 		best_fwd = (ab / L)
