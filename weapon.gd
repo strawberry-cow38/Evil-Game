@@ -2241,8 +2241,17 @@ func _classify_material(collider: Object) -> String:
 	var n: String = ""
 	if collider is Node:
 		n = (collider as Node).name
-	if n == "Ground":
+	var nl: String = n.to_lower()
+	if n == "Ground" or nl.begins_with("grass"):
+		return "grass"
+	if nl.begins_with("dirt") or nl.begins_with("soil") or nl.begins_with("mud"):
 		return "dirt"
+	if nl.begins_with("sand"):
+		return "sand"
+	if nl.begins_with("stone") or nl.begins_with("rock"):
+		return "stone"
+	if nl.begins_with("metal") or nl.begins_with("steel") or nl.begins_with("pipe"):
+		return "metal"
 	if n.begins_with("Wall"):
 		return "concrete"
 	return "concrete"
@@ -2304,6 +2313,37 @@ func _apply_bullet_impulse(collider: Object, bullet_vel: Vector3, hit_pos: Vecto
 			return
 		n = n.get_parent()
 
+func _build_disc_mesh(radius: float, segments: int) -> ArrayMesh:
+	# Flat disc in the XY plane (+Z faces forward). Used for round bullet
+	# holes; built once per spawn since size is small + segment count low.
+	var verts := PackedVector3Array()
+	var norms := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var idxs := PackedInt32Array()
+	verts.append(Vector3.ZERO)
+	norms.append(Vector3(0, 0, 1))
+	uvs.append(Vector2(0.5, 0.5))
+	for i in range(segments + 1):
+		var a: float = TAU * float(i) / float(segments)
+		var x: float = cos(a) * radius
+		var y: float = sin(a) * radius
+		verts.append(Vector3(x, y, 0.0))
+		norms.append(Vector3(0, 0, 1))
+		uvs.append(Vector2(0.5 + cos(a) * 0.5, 0.5 + sin(a) * 0.5))
+	for i in range(segments):
+		idxs.append(0)
+		idxs.append(i + 1)
+		idxs.append(i + 2)
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = norms
+	arrays[Mesh.ARRAY_TEX_UV] = uvs
+	arrays[Mesh.ARRAY_INDEX] = idxs
+	var am := ArrayMesh.new()
+	am.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return am
+
 func _find_movable_host(collider: Object) -> Node3D:
 	# Walk up the tree to find a RigidBody3D / VehicleBody3D / CharacterBody3D
 	# the decal can hang under so it tracks the moving body.
@@ -2316,24 +2356,29 @@ func _find_movable_host(collider: Object) -> Node3D:
 
 func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, collider: Object = null) -> void:
 	var n: Vector3 = normal.normalized()
-	var quad := QuadMesh.new()
-	quad.size = Vector2(BULLET_HOLE_SIZE, BULLET_HOLE_SIZE)
+	# Round bullet hole: ArrayMesh disc (triangle fan). Replaces the old
+	# square QuadMesh so impact marks read as actual bullet holes.
+	var disc := _build_disc_mesh(BULLET_HOLE_SIZE * 0.5, 18)
 	var mat := StandardMaterial3D.new()
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	match material:
-		"dirt":
+		"dirt", "grass":
 			mat.albedo_color = Color(0.08, 0.05, 0.03, 0.95)
-		"concrete":
+		"sand":
+			mat.albedo_color = Color(0.20, 0.15, 0.08, 0.9)
+		"concrete", "stone":
 			mat.albedo_color = Color(0.10, 0.10, 0.10, 0.95)
+		"metal":
+			mat.albedo_color = Color(0.05, 0.05, 0.05, 0.95)
 		_:
 			mat.albedo_color = Color(0.05, 0.05, 0.05, 0.95)
-	quad.material = mat
+	disc.surface_set_material(0, mat)
 
 	var mi := MeshInstance3D.new()
-	mi.mesh = quad
+	mi.mesh = disc
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# Parent the decal to whatever the bullet actually hit so it follows
 	# moving objects (vehicles, destructibles) and so we can wipe decals
@@ -2384,42 +2429,101 @@ func _play_impact_sound(world_pos: Vector3, material: String) -> void:
 	voice.play()
 
 func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: String) -> void:
+	# Material-specific particle profile. Each branch picks a mesh shape +
+	# colour + motion params that suits the surface — brown clumps for soil,
+	# fine grains for sand, angular chunks for stone/concrete, hot streaks
+	# for metal sparks, blue shards for glass, red blobs for flesh.
 	var mat := StandardMaterial3D.new()
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.disable_receive_shadows = true
+	var mesh: Mesh
+	var amount: int = 22
+	var lifetime: float = 0.6
+	var spread: float = 42.0
+	var v_min: float = 1.8
+	var v_max: float = 4.5
+	var grav: float = -7.0
+	var s_min: float = 0.6
+	var s_max: float = 1.4
 	match material:
-		"dirt":
-			mat.albedo_color = Color(0.42, 0.28, 0.18, 1.0)
-		"concrete":
-			mat.albedo_color = Color(0.85, 0.83, 0.78, 1.0)
 		"flesh":
 			mat.albedo_color = Color(0.55, 0.05, 0.05, 1.0)
+			var sm := SphereMesh.new()
+			sm.radius = 0.03; sm.height = 0.06; sm.radial_segments = 6; sm.rings = 3
+			mesh = sm
+			amount = 36; lifetime = 0.7; spread = 55.0
+			v_min = 2.4; v_max = 5.5; grav = -9.0
 		"glass":
 			mat.albedo_color = Color(0.88, 0.94, 1.0, 1.0)
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.025, 0.04, 0.004)
+			mesh = bm
+			amount = 28; lifetime = 0.8; spread = 60.0
+			v_min = 2.0; v_max = 4.8; grav = -9.0
+		"dirt", "grass":
+			# Brown crumbly clods. Boxes tumble + cluster — sells "dirt clump"
+			# better than smooth spheres did.
+			mat.albedo_color = Color(0.34, 0.22, 0.13, 1.0)
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.035, 0.035, 0.035)
+			mesh = bm
+			amount = 26; lifetime = 0.65; spread = 38.0
+			v_min = 1.6; v_max = 3.8; grav = -8.0
+			s_min = 0.7; s_max = 1.5
+		"sand":
+			# Fine grains: small + many, low spread, light gravity so they
+			# trickle rather than rocket out.
+			mat.albedo_color = Color(0.86, 0.74, 0.45, 1.0)
+			var sm := SphereMesh.new()
+			sm.radius = 0.012; sm.height = 0.024; sm.radial_segments = 4; sm.rings = 2
+			mesh = sm
+			amount = 50; lifetime = 0.55; spread = 32.0
+			v_min = 1.2; v_max = 2.8; grav = -8.5
+			s_min = 0.5; s_max = 1.1
+		"stone", "concrete":
+			# Angular grey chunks. Concrete reuses the stone profile — both
+			# read as "hard, breaks into shards".
+			mat.albedo_color = Color(0.62, 0.62, 0.60, 1.0) if material == "stone" else Color(0.78, 0.76, 0.72, 1.0)
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.04, 0.025, 0.03)
+			mesh = bm
+			amount = 24; lifetime = 0.7; spread = 45.0
+			v_min = 1.8; v_max = 4.6; grav = -8.5
+		"metal":
+			# Hot orange sparks: small thin streaks, emissive, fast, short-lived
+			# and very low gravity so they whip out and fade like sparks should.
+			mat.albedo_color = Color(1.0, 0.75, 0.25, 1.0)
+			mat.emission_enabled = true
+			mat.emission = Color(1.0, 0.55, 0.1, 1.0)
+			mat.emission_energy_multiplier = 3.5
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.005, 0.005, 0.05)
+			mesh = bm
+			amount = 38; lifetime = 0.45; spread = 50.0
+			v_min = 4.0; v_max = 8.0; grav = -2.0
+			s_min = 0.6; s_max = 1.2
 		_:
 			mat.albedo_color = Color(0.7, 0.7, 0.7, 1.0)
-	var mesh := SphereMesh.new()
-	mesh.radius = 0.03
-	mesh.height = 0.06
-	mesh.radial_segments = 6
-	mesh.rings = 3
-	mesh.material = mat
+			var sm := SphereMesh.new()
+			sm.radius = 0.03; sm.height = 0.06; sm.radial_segments = 6; sm.rings = 3
+			mesh = sm
+	(mesh as PrimitiveMesh).material = mat
 
 	var p := CPUParticles3D.new()
 	p.mesh = mesh
 	p.one_shot = true
 	p.explosiveness = 1.0
-	p.amount = 36 if material == "flesh" else 22
-	p.lifetime = 0.7 if material == "flesh" else 0.6
+	p.amount = amount
+	p.lifetime = lifetime
 	p.local_coords = false
 	p.direction = normal.normalized()
-	p.spread = 55.0 if material == "flesh" else 42.0
-	p.initial_velocity_min = 2.4 if material == "flesh" else 1.8
-	p.initial_velocity_max = 5.5 if material == "flesh" else 4.5
-	p.gravity = Vector3(0.0, -9.0 if material == "flesh" else -7.0, 0.0)
-	p.scale_amount_min = 0.5 if material == "flesh" else 0.6
-	p.scale_amount_max = 1.2 if material == "flesh" else 1.4
+	p.spread = spread
+	p.initial_velocity_min = v_min
+	p.initial_velocity_max = v_max
+	p.gravity = Vector3(0.0, grav, 0.0)
+	p.scale_amount_min = s_min
+	p.scale_amount_max = s_max
 	p.damping_min = 1.0
 	p.damping_max = 3.0
 	# Cast/receive flags off so unshaded specks don't blow out shadow maps.
