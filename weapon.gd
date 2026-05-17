@@ -2305,9 +2305,9 @@ func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, c
 	tween.tween_property(mat, "albedo_color:a", 0.0, BULLET_HOLE_FADE)
 	var mi_ref: WeakRef = weakref(mi)
 	tween.tween_callback(func():
-		var n: Node = mi_ref.get_ref() as Node
-		if n != null:
-			n.queue_free()
+		var mn: Node = mi_ref.get_ref() as Node
+		if mn != null:
+			mn.queue_free()
 	)
 
 func _play_impact_sound(world_pos: Vector3, material: String) -> void:
