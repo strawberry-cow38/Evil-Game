@@ -1027,6 +1027,18 @@ func _rebuild_all() -> void:
 		pw.y = _ground_y(pw)
 		_spawn_post(_visuals_root, pw, cl["forward"], cl["variant"], false, bool(cl.get("wallbang", false)))
 		_post_positions.append(pw)
+	# Clear segment tracking BEFORE rebuilding intervals — _build_interval
+	# repopulates _segment_holders, so clearing afterward (the old order)
+	# nuked the lookup that notify_rail_hit depends on. Initial rail-hit
+	# relays only worked post-respawn because _respawn_segment is the only
+	# other path that writes to _segment_holders.
+	for sk in _segment_state.keys():
+		var t: Timer = _segment_state[sk].get("timer", null)
+		if t != null and is_instance_valid(t):
+			t.queue_free()
+	_segment_state.clear()
+	_wall_bodies.clear()
+	_segment_holders.clear()
 	# Pickets + rails are per-interval and never overlap across runs, so
 	# they can run independently per segment.
 	for fi in range(_fences.size()):
@@ -1036,13 +1048,6 @@ func _rebuild_all() -> void:
 	# user can see where their next drag can branch off.
 	for f in _fences:
 		_build_snap_hint(f.start, f.end)
-	for sk in _segment_state.keys():
-		var t: Timer = _segment_state[sk].get("timer", null)
-		if t != null and is_instance_valid(t):
-			t.queue_free()
-	_segment_state.clear()
-	_wall_bodies.clear()
-	_segment_holders.clear()
 	if _collision_enabled:
 		for fi in range(_fences.size()):
 			_spawn_wall_collider(fi, _fences[fi], _variant_for(_fences[fi]))
