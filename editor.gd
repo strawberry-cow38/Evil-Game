@@ -1215,10 +1215,10 @@ func _process(delta: float) -> void:
 			if not fhit.is_empty():
 				var fp: Vector3 = fhit.position
 				fp.y = _terrain.sample_height(fp)
-				var falt := Input.is_key_pressed(KEY_ALT)
-				var fshift := Input.is_key_pressed(KEY_SHIFT)
-				var fctrl := Input.is_key_pressed(KEY_CTRL)
-				var fspc := _fences_panel.get_post_spacing()
+				var falt: bool = Input.is_key_pressed(KEY_ALT)
+				var fshift: bool = Input.is_key_pressed(KEY_SHIFT)
+				var fctrl: bool = Input.is_key_pressed(KEY_CTRL)
+				var fspc: float = _fences_panel.get_post_spacing()
 				if _fences_node.is_dragging():
 					_fences_node.update_drag(fp, falt, fshift, fspc, fctrl)
 				else:
