@@ -111,6 +111,13 @@ const SEG_DEFAULTS := {
 	"respawn_time": 10.0,
 	"wallbang": false,
 }
+# Per-variant overrides for segment defaults — applied on top of SEG_DEFAULTS
+# but below an explicit per-segment override stored on the fence. Picket and
+# tall_brown ship destructible + wallbang on by default; logs stay solid.
+const VARIANT_SEG_DEFAULTS := {
+	"picket":     {"destructible": true, "wallbang": true},
+	"tall_brown": {"destructible": true, "wallbang": true},
+}
 # Group every picket collider in a destructible segment joins so weapon.gd
 # can detect a fence-picket hit and route it back to this node.
 const PICKET_GROUP := "fence_picket_destructible"
@@ -138,7 +145,12 @@ var _last_snap_anchor: Vector3 = Vector3.ZERO
 var _visuals_root: Node3D = null
 var _ghost_root: Node3D = null
 var _snap_hint_root: Node3D = null
+var _debris_root: Node3D = null
 var _snap_hint_material: StandardMaterial3D = null
+# Active debris pieces — { mi, vel, spin_axis, spin_speed, life, max_life }.
+var _debris: Array = []
+const DEBRIS_LIFE := 1.8
+const DEBRIS_GRAVITY := 9.8
 
 # Cached world positions of every post placed so far — drives hard snap.
 var _post_positions: Array = []
@@ -172,6 +184,9 @@ func setup(terrain: Node3D) -> void:
 	_snap_hint_root.name = "FenceSnapHints"
 	_snap_hint_root.visible = false
 	add_child(_snap_hint_root)
+	_debris_root = Node3D.new()
+	_debris_root.name = "FenceDebris"
+	add_child(_debris_root)
 	_snap_hint_material = StandardMaterial3D.new()
 	_snap_hint_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_snap_hint_material.albedo_color = Color(1.0, 0.95, 0.35, 0.55)
@@ -543,10 +558,15 @@ func set_snap_hint_visible(b: bool) -> void:
 # --- Segment selection + per-segment props -----------------------------
 
 func get_segment_props(fence_idx: int, seg_idx: int) -> Dictionary:
-	# Merge stored overrides over defaults. Always returns every key.
+	# Layer order: SEG_DEFAULTS -> VARIANT_SEG_DEFAULTS[variant] -> per-segment
+	# override. Always returns every key.
 	var out: Dictionary = SEG_DEFAULTS.duplicate()
 	if fence_idx < 0 or fence_idx >= _fences.size():
 		return out
+	var variant_name: String = _fences[fence_idx].get("variant", "picket")
+	if VARIANT_SEG_DEFAULTS.has(variant_name):
+		for k in VARIANT_SEG_DEFAULTS[variant_name].keys():
+			out[k] = VARIANT_SEG_DEFAULTS[variant_name][k]
 	var segs: Dictionary = _fences[fence_idx].get("segments", {})
 	var key: String = str(seg_idx)
 	if segs.has(key):
@@ -659,15 +679,22 @@ func _update_selection_highlight() -> void:
 
 # --- Play-mode picket destruction -------------------------------------
 
-func notify_picket_hit(body: Node) -> void:
+func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: Vector3 = Vector3.UP) -> void:
 	# Called by weapon.gd when a bullet ray hits a picket collider that's
-	# part of a destructible segment. Hides mesh + collider, schedules a
-	# respawn after the segment's respawn_time.
+	# part of a destructible segment. Spawns a flung debris piece, frees any
+	# bullet-hole decals parented to the body, hides the picket mesh +
+	# collider, then schedules a respawn after the segment's respawn_time.
 	if body == null or not body.has_meta("picket_mesh_ref"):
 		return
 	var mi: MeshInstance3D = body.get_meta("picket_mesh_ref")
-	if mi == null or not is_instance_valid(mi):
+	if mi == null or not is_instance_valid(mi) or not mi.visible:
 		return
+	_spawn_debris(mi.mesh, mi.global_position, mi.basis, hit_normal)
+	# Free decals (any MeshInstance3D parented to the body by _spawn_bullet_hole).
+	# CollisionShape3D children are left alone.
+	for c in body.get_children():
+		if c is MeshInstance3D:
+			c.queue_free()
 	mi.visible = false
 	if body is CollisionObject3D:
 		(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_DISABLED
@@ -682,6 +709,63 @@ func notify_picket_hit(body: Node) -> void:
 			if body is CollisionObject3D:
 				(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_INHERIT
 	)
+
+func _spawn_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, normal: Vector3) -> void:
+	if mesh == null or _debris_root == null:
+		return
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.global_position = world_pos
+	mi.basis = basis
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_debris_root.add_child(mi)
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var n: Vector3 = normal
+	if n.length_squared() < 0.001:
+		n = Vector3.UP
+	else:
+		n = n.normalized()
+	# Fling away from the surface + a kick upward + a bit of horizontal scatter.
+	var vel: Vector3 = -n * rng.randf_range(3.0, 5.5) + Vector3.UP * rng.randf_range(2.5, 4.0)
+	vel.x += rng.randf_range(-1.5, 1.5)
+	vel.z += rng.randf_range(-1.5, 1.5)
+	var axis := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0), rng.randf_range(-1.0, 1.0))
+	if axis.length_squared() < 0.001:
+		axis = Vector3.UP
+	axis = axis.normalized()
+	_debris.append({
+		"mi": mi,
+		"vel": vel,
+		"spin_axis": axis,
+		"spin_speed": rng.randf_range(5.0, 12.0),
+		"life": DEBRIS_LIFE,
+		"max_life": DEBRIS_LIFE,
+	})
+
+func _process(dt: float) -> void:
+	if _debris.is_empty():
+		return
+	for i in range(_debris.size() - 1, -1, -1):
+		var d: Dictionary = _debris[i]
+		var mi: MeshInstance3D = d["mi"]
+		if not is_instance_valid(mi):
+			_debris.remove_at(i)
+			continue
+		d["life"] -= dt
+		if d["life"] <= 0.0:
+			mi.queue_free()
+			_debris.remove_at(i)
+			continue
+		var vel: Vector3 = d["vel"]
+		vel.y -= DEBRIS_GRAVITY * dt
+		d["vel"] = vel
+		mi.global_position += vel * dt
+		mi.basis = mi.basis.rotated(d["spin_axis"], d["spin_speed"] * dt)
+		# Fade only over the final third of the life so it stays vivid first.
+		var t01: float = clampf(d["life"] / d["max_life"], 0.0, 1.0)
+		var alpha: float = clampf(t01 / 0.33, 0.0, 1.0)
+		mi.transparency = 1.0 - alpha
 
 func _rebuild_all() -> void:
 	for c in _visuals_root.get_children():

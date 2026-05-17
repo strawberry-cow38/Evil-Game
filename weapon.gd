@@ -2026,20 +2026,30 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 		var material := _classify_material(hit_collider)
 		_schedule_impact(hit_pos, hit_normal, material, impact_delay, hit_collider)
 		_schedule_damage(hit_collider, impact_delay, distance)
-		_maybe_notify_fence_picket(hit_collider)
+		_maybe_notify_fence_picket(hit_collider, hit_pos, hit_normal, impact_delay)
 
-func _maybe_notify_fence_picket(collider: Object) -> void:
+func _maybe_notify_fence_picket(collider: Object, hit_pos: Vector3, hit_normal: Vector3, delay: float) -> void:
 	# Per-segment-destructible pickets are tagged with this group on spawn
 	# in play mode (editor_fences.gd::_spawn_picket). Route the hit back to
-	# the fences node so it can hide the picket + schedule respawn.
+	# the fences node so it can spawn debris + hide picket + schedule respawn.
+	# Delay matches the projectile-flight timer so debris launches when the
+	# bullet visually arrives.
 	if collider == null:
 		return
 	var n: Node = collider as Node
 	if n == null or not n.is_in_group("fence_picket_destructible"):
 		return
 	var fn := get_tree().get_first_node_in_group("fences_runtime")
-	if fn != null and fn.has_method("notify_picket_hit"):
-		fn.notify_picket_hit(n)
+	if fn == null or not fn.has_method("notify_picket_hit"):
+		return
+	if delay <= 0.0:
+		fn.notify_picket_hit(n, hit_pos, hit_normal)
+		return
+	var timer := get_tree().create_timer(delay)
+	timer.timeout.connect(func() -> void:
+		if is_instance_valid(fn) and is_instance_valid(n):
+			fn.notify_picket_hit(n, hit_pos, hit_normal)
+	)
 
 func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
 	if collider == null:
@@ -2177,9 +2187,14 @@ func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, c
 	mi.mesh = quad
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# Parent the decal to whatever the bullet actually hit so it follows
-	# moving objects (vehicles, destructibles). Falls back to scene root
-	# only when the collider can't host children.
-	var parent: Node = _find_damageable(collider)
+	# moving objects (vehicles, destructibles) and so we can wipe decals
+	# when a fence picket is destroyed. Falls back to scene root only when
+	# the collider can't host children.
+	var parent: Node = null
+	if collider is Node and (collider as Node).is_in_group("fence_picket_destructible"):
+		parent = collider as Node
+	if parent == null:
+		parent = _find_damageable(collider)
 	if parent == null or not (parent is Node3D):
 		var n_node := _find_movable_host(collider)
 		parent = n_node if n_node != null else get_tree().current_scene
