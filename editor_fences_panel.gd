@@ -5,12 +5,23 @@ extends PanelContainer
 # hard) are keyboard-only and documented in the hint text.
 
 signal post_spacing_changed(value: float)
+signal variant_changed(name: String)
 
 const MIN_SPACING := 0.8
 const MAX_SPACING := 6.0
 const DEFAULT_SPACING := 2.36
 
+# Display labels for each variant — must mirror the keys in
+# editor_fences.gd VARIANTS. Order = display order in dropdown.
+const VARIANT_OPTIONS: Array = [
+	{"id": "picket",       "label": "White picket"},
+	{"id": "tall_brown",   "label": "Tall brown board"},
+	{"id": "log_vertical", "label": "Rustic log (vertical)"},
+	{"id": "log_beam",     "label": "Rustic log (beam)"},
+]
+
 var _spacing_spin: SpinBox
+var _variant_opt: OptionButton
 var _suppress: bool = false
 
 func _ready() -> void:
@@ -22,6 +33,19 @@ func _ready() -> void:
 	var header := Label.new()
 	header.text = "Fences"
 	vb.add_child(header)
+	var vrow := HBoxContainer.new()
+	vb.add_child(vrow)
+	var vlbl := Label.new()
+	vlbl.text = "Style"
+	vlbl.custom_minimum_size = Vector2(90, 0)
+	vrow.add_child(vlbl)
+	_variant_opt = OptionButton.new()
+	_variant_opt.custom_minimum_size = Vector2(110, 0)
+	for opt in VARIANT_OPTIONS:
+		_variant_opt.add_item(opt["label"])
+	_variant_opt.select(0)
+	_variant_opt.item_selected.connect(_on_variant_pick)
+	vrow.add_child(_variant_opt)
 	var row := HBoxContainer.new()
 	vb.add_child(row)
 	var lbl := Label.new()
@@ -55,3 +79,19 @@ func _on_spin(v: float) -> void:
 	if _suppress:
 		return
 	post_spacing_changed.emit(v)
+
+func get_variant() -> String:
+	return VARIANT_OPTIONS[_variant_opt.selected]["id"]
+
+func set_variant(id: String) -> void:
+	for i in range(VARIANT_OPTIONS.size()):
+		if VARIANT_OPTIONS[i]["id"] == id:
+			_suppress = true
+			_variant_opt.select(i)
+			_suppress = false
+			return
+
+func _on_variant_pick(idx: int) -> void:
+	if _suppress:
+		return
+	variant_changed.emit(VARIANT_OPTIONS[idx]["id"])

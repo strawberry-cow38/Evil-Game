@@ -513,6 +513,7 @@ func _ready() -> void:
 	_fences_panel.offset_bottom = 320
 	$UI.add_child(_fences_panel)
 	_fences_panel.post_spacing_changed.connect(_on_fences_panel_spacing)
+	_fences_panel.variant_changed.connect(_on_fences_panel_variant)
 	# Paint panel — runtime-built like the roads panel. Anchored to the
 	# right edge under the sub-bar.
 	_paint_panel = PanelContainer.new()
@@ -689,6 +690,10 @@ func _on_fences_panel_spacing(_v: float) -> void:
 	# Slider value is read live during begin/update/commit_drag; nothing
 	# to do here unless we ever decide to live-edit a selected fence.
 	pass
+
+func _on_fences_panel_variant(name: String) -> void:
+	if _fences_node != null:
+		_fences_node.set_variant(name)
 
 func _input(event: InputEvent) -> void:
 	# Esc toggles the pause menu. While it's open we swallow other shortcuts
