@@ -29,6 +29,7 @@ const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
 const TOOL_E_ROADS := "e_roads"
 const TOOL_E_FENCES := "e_fences"
+const TOOL_E_FENCES_DEL := "e_fences_del"
 const TOOL_E_PAINT := "e_paint"
 const TOOL_T_MAT_SMOOTH := "t_mat_smooth"
 const TOOL_T_HOLE := "t_hole"
@@ -1489,6 +1490,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_fences_node.commit_drag(pf, alt, shift, spacing, ctrl)
 		return
+	# Fence eraser: LMB press deletes the fence run nearest the cursor.
+	if _active_tool == TOOL_E_FENCES_DEL:
+		if not event.pressed:
+			return
+		var hit_fd := _raycast_cursor()
+		if hit_fd.is_empty():
+			return
+		var pfd: Vector3 = hit_fd.position
+		pfd.y = _terrain.sample_height(pfd)
+		_fences_node.delete_at(pfd)
+		return
 	# Foliage exact-place: each LMB press drops a single billboard at the
 	# cursor. Spray mode is handled by the per-frame _apply_tool path.
 	if _active_tool == TOOL_F_PAINT and _foliage_mode == "exact" and event.pressed:
@@ -1662,8 +1674,12 @@ func _on_tool_picked(tool_id: String) -> void:
 	if _fences_panel != null:
 		_fences_panel.visible = (tool_id == TOOL_E_FENCES)
 	if _fences_node != null:
-		_fences_node.set_snap_hint_visible(tool_id == TOOL_E_FENCES)
-		if tool_id != TOOL_E_FENCES:
+		var on_fence_tool: bool = (tool_id == TOOL_E_FENCES or tool_id == TOOL_E_FENCES_DEL)
+		_fences_node.set_snap_hint_visible(on_fence_tool)
+		if not on_fence_tool:
+			_fences_node.cancel_drag()
+			_fences_node.clear_hover()
+		elif tool_id == TOOL_E_FENCES_DEL:
 			_fences_node.cancel_drag()
 			_fences_node.clear_hover()
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)

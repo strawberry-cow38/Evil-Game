@@ -6,12 +6,13 @@ extends Node3D
 # integer count of intervals fits exactly between the endpoints), with
 # pickets + rails filling each interval.
 #
-# Snap rules (applied to whichever endpoint the user is dragging):
-#   default        — endpoint snaps to nearest existing fence post within
-#                    SNAP_RADIUS if one is in range
-#   shift held     — hard snap suppressed; endpoint goes where the cursor
-#                    points
-#   alt held       — all snapping off (reserved for future soft-snap)
+# Modifier rules while dragging:
+#   none           — end snaps to nearest existing post, then to nearest
+#                    point on any existing fence line within SNAP_RADIUS
+#   shift          — angle from start snaps to nearest 15°
+#   ctrl           — length snaps to integer multiples of post_spacing
+#   shift+ctrl     — both
+#   alt            — all snapping off
 #
 # Glb meshes are loaded once at setup via GLTFDocument (mirrors
 # editor_objects_catalog's runtime-load pattern so the launcher's
@@ -166,8 +167,9 @@ func is_dragging() -> bool:
 func begin_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float, ctrl: bool = false) -> void:
 	_drag_active = true
 	_drag_spacing = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
-	# Ctrl never affects the start point — it constrains end relative to start.
-	_drag_start = _maybe_snap(world_pos, alt, shift)
+	# Shift / ctrl are end-relative-to-start constraints — they don't apply
+	# to the start point itself. Only alt suppresses snapping on begin.
+	_drag_start = _maybe_snap(world_pos, alt)
 	_drag_end = _drag_start
 	_refresh_ghost()
 
@@ -175,20 +177,14 @@ func update_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float
 	if not _drag_active:
 		return
 	_drag_spacing = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
-	var end_pos: Vector3 = _maybe_snap(world_pos, alt, shift)
-	if ctrl:
-		end_pos = _ctrl_snap(_drag_start, end_pos, _drag_spacing)
-	_drag_end = end_pos
+	_drag_end = _resolve_end(world_pos, alt, shift, ctrl)
 	_refresh_ghost()
 
 func commit_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float, ctrl: bool = false) -> void:
 	if not _drag_active:
 		return
 	_drag_spacing = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
-	var end_pos: Vector3 = _maybe_snap(world_pos, alt, shift)
-	if ctrl:
-		end_pos = _ctrl_snap(_drag_start, end_pos, _drag_spacing)
-	_drag_end = end_pos
+	_drag_end = _resolve_end(world_pos, alt, shift, ctrl)
 	var dist: float = _drag_start.distance_to(_drag_end)
 	if dist >= MIN_RUN_LENGTH:
 		_fences.append({
@@ -202,6 +198,20 @@ func commit_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float
 	_clear_ghost()
 	_rebuild_all()
 
+func _resolve_end(world_pos: Vector3, alt: bool, shift: bool, ctrl: bool) -> Vector3:
+	# alt: freehand, no snap at all.
+	# shift: angle-only snap (15° increments around start).
+	# ctrl:  distance-only snap (integer multiples of post_spacing).
+	# none of the above: snap end to nearest existing fence line/post.
+	if alt:
+		return world_pos
+	var end_pos: Vector3 = world_pos
+	if shift or ctrl:
+		end_pos = _modifier_snap(_drag_start, end_pos, shift, ctrl, _drag_spacing)
+	else:
+		end_pos = _maybe_snap(world_pos, false)
+	return end_pos
+
 func cancel_drag() -> void:
 	_drag_active = false
 	_clear_ghost()
@@ -213,7 +223,7 @@ func update_hover(world_pos: Vector3, alt: bool, shift: bool, post_spacing: floa
 		return
 	_clear_ghost()
 	var spacing: float = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
-	var snapped: Vector3 = _maybe_snap(world_pos, alt, shift)
+	var snapped: Vector3 = _maybe_snap(world_pos, alt)
 	# Snap engaged iff the snap actually moved the cursor onto an existing post.
 	var snap_hit: bool = (snapped != world_pos) and _post_position_taken(snapped)
 	snapped.y = _ground_y(snapped)
@@ -230,20 +240,21 @@ func clear_hover() -> void:
 		return
 	_clear_ghost()
 
-func _ctrl_snap(start: Vector3, end: Vector3, spacing: float) -> Vector3:
-	# 1) Angle from start to end snaps to nearest 15° (XZ plane).
-	# 2) Length snaps to nearest integer multiple of `spacing`.
+func _modifier_snap(start: Vector3, end: Vector3, shift: bool, ctrl: bool, spacing: float) -> Vector3:
+	# Independent snaps: shift = angle (15°), ctrl = length (multiple of spacing).
 	var d: Vector3 = end - start
 	d.y = 0.0
 	var L: float = d.length()
 	if L < 0.001:
 		return start
 	var ang: float = atan2(d.z, d.x)
-	var step: float = deg_to_rad(15.0)
-	ang = round(ang / step) * step
-	var n: int = max(1, int(round(L / spacing)))
-	var snapped_L: float = n * spacing
-	var out := start + Vector3(cos(ang), 0.0, sin(ang)) * snapped_L
+	if shift:
+		var step: float = deg_to_rad(15.0)
+		ang = round(ang / step) * step
+	if ctrl:
+		var n: int = max(1, int(round(L / spacing)))
+		L = n * spacing
+	var out: Vector3 = start + Vector3(cos(ang), 0.0, sin(ang)) * L
 	out.y = _ground_y(out)
 	return out
 
@@ -284,13 +295,16 @@ func _spawn_snap_ring(world_pos: Vector3) -> void:
 	mi.position = world_pos + Vector3(0, 0.02, 0)
 	_ghost_root.add_child(mi)
 
-func _maybe_snap(world_pos: Vector3, alt: bool, shift: bool) -> Vector3:
+func _maybe_snap(world_pos: Vector3, alt: bool) -> Vector3:
+	# Post snap wins over line snap (sharper feedback). Alt suppresses both.
 	if alt:
 		return world_pos
-	if not shift:
-		var nearest := _nearest_post(world_pos, SNAP_RADIUS)
-		if nearest != Vector3.INF:
-			return nearest
+	var nearest_post := _nearest_post(world_pos, SNAP_RADIUS)
+	if nearest_post != Vector3.INF:
+		return nearest_post
+	var nearest_line := _nearest_line_point(world_pos, SNAP_RADIUS)
+	if nearest_line != Vector3.INF:
+		return nearest_line
 	return world_pos
 
 func _nearest_post(world: Vector3, radius: float) -> Vector3:
@@ -302,6 +316,55 @@ func _nearest_post(world: Vector3, radius: float) -> Vector3:
 			best_d = d
 			best = p
 	return best
+
+func _nearest_line_point(world: Vector3, radius: float) -> Vector3:
+	# Project `world` onto every committed fence segment (XZ only), return the
+	# closest projection within `radius`. Used so the user can branch off an
+	# existing run anywhere along its length, not just at posts.
+	var best: Vector3 = Vector3.INF
+	var best_d: float = radius
+	var wxz := Vector3(world.x, 0.0, world.z)
+	for f in _fences:
+		var a: Vector3 = Vector3(f.start.x, 0.0, f.start.z)
+		var b: Vector3 = Vector3(f.end.x,   0.0, f.end.z)
+		var ab: Vector3 = b - a
+		var L2: float = ab.length_squared()
+		if L2 < 0.0001:
+			continue
+		var t: float = clampf((wxz - a).dot(ab) / L2, 0.0, 1.0)
+		var p: Vector3 = a + ab * t
+		var d: float = p.distance_to(wxz)
+		if d < best_d:
+			best_d = d
+			best = Vector3(p.x, world.y, p.z)
+	return best
+
+func delete_at(world_pos: Vector3, radius: float = SNAP_RADIUS) -> bool:
+	# Remove the single fence run whose line is closest to `world_pos`
+	# (XZ-projected). Returns true iff something was removed.
+	var wxz := Vector3(world_pos.x, 0.0, world_pos.z)
+	var best_i: int = -1
+	var best_d: float = radius
+	for i in range(_fences.size()):
+		var f: Dictionary = _fences[i]
+		var a: Vector3 = Vector3(f.start.x, 0.0, f.start.z)
+		var b: Vector3 = Vector3(f.end.x,   0.0, f.end.z)
+		var ab: Vector3 = b - a
+		var L2: float = ab.length_squared()
+		if L2 < 0.0001:
+			continue
+		var t: float = clampf((wxz - a).dot(ab) / L2, 0.0, 1.0)
+		var p: Vector3 = a + ab * t
+		var d: float = p.distance_to(wxz)
+		if d < best_d:
+			best_d = d
+			best_i = i
+	if best_i < 0:
+		return false
+	_fences.remove_at(best_i)
+	fence_state_changed.emit()
+	_rebuild_all()
+	return true
 
 func set_snap_hint_visible(b: bool) -> void:
 	if _snap_hint_root != null:
