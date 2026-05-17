@@ -87,6 +87,8 @@ var _drag_spacing: float = DEFAULT_POST_SPACING
 
 var _visuals_root: Node3D = null
 var _ghost_root: Node3D = null
+var _snap_hint_root: Node3D = null
+var _snap_hint_material: StandardMaterial3D = null
 
 # Cached world positions of every post placed so far — drives hard snap.
 var _post_positions: Array = []
@@ -106,6 +108,14 @@ func setup(terrain: Node3D) -> void:
 	_ghost_root = Node3D.new()
 	_ghost_root.name = "FenceGhost"
 	add_child(_ghost_root)
+	_snap_hint_root = Node3D.new()
+	_snap_hint_root.name = "FenceSnapHints"
+	_snap_hint_root.visible = false
+	add_child(_snap_hint_root)
+	_snap_hint_material = StandardMaterial3D.new()
+	_snap_hint_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_snap_hint_material.albedo_color = Color(1.0, 0.95, 0.35, 0.55)
+	_snap_hint_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 
 func set_variant(name: String) -> void:
 	if VARIANTS.has(name):
@@ -153,25 +163,32 @@ func get_state() -> Array:
 func is_dragging() -> bool:
 	return _drag_active
 
-func begin_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float) -> void:
+func begin_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float, ctrl: bool = false) -> void:
 	_drag_active = true
 	_drag_spacing = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
+	# Ctrl never affects the start point — it constrains end relative to start.
 	_drag_start = _maybe_snap(world_pos, alt, shift)
 	_drag_end = _drag_start
 	_refresh_ghost()
 
-func update_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float) -> void:
+func update_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float, ctrl: bool = false) -> void:
 	if not _drag_active:
 		return
 	_drag_spacing = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
-	_drag_end = _maybe_snap(world_pos, alt, shift)
+	var end_pos: Vector3 = _maybe_snap(world_pos, alt, shift)
+	if ctrl:
+		end_pos = _ctrl_snap(_drag_start, end_pos, _drag_spacing)
+	_drag_end = end_pos
 	_refresh_ghost()
 
-func commit_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float) -> void:
+func commit_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float, ctrl: bool = false) -> void:
 	if not _drag_active:
 		return
 	_drag_spacing = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
-	_drag_end = _maybe_snap(world_pos, alt, shift)
+	var end_pos: Vector3 = _maybe_snap(world_pos, alt, shift)
+	if ctrl:
+		end_pos = _ctrl_snap(_drag_start, end_pos, _drag_spacing)
+	_drag_end = end_pos
 	var dist: float = _drag_start.distance_to(_drag_end)
 	if dist >= MIN_RUN_LENGTH:
 		_fences.append({
@@ -188,6 +205,84 @@ func commit_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float
 func cancel_drag() -> void:
 	_drag_active = false
 	_clear_ghost()
+
+func update_hover(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float, ctrl: bool = false) -> void:
+	# Pre-click ghost: a single post at the hover position + a ring on the
+	# ground when the hover landed on an existing post via hard snap.
+	if _drag_active:
+		return
+	_clear_ghost()
+	var spacing: float = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
+	var snapped: Vector3 = _maybe_snap(world_pos, alt, shift)
+	# Snap engaged iff the snap actually moved the cursor onto an existing post.
+	var snap_hit: bool = (snapped != world_pos) and _post_position_taken(snapped)
+	snapped.y = _ground_y(snapped)
+	# Forward direction for the ghost post is meaningless before the first
+	# click, so use world +X to give the post a stable yaw.
+	var forward := Vector3(1, 0, 0)
+	var variant: Dictionary = VARIANTS[_active_variant]
+	_spawn_post(_ghost_root, snapped, forward, variant, true)
+	if snap_hit:
+		_spawn_snap_ring(snapped)
+
+func clear_hover() -> void:
+	if _drag_active:
+		return
+	_clear_ghost()
+
+func _ctrl_snap(start: Vector3, end: Vector3, spacing: float) -> Vector3:
+	# 1) Angle from start to end snaps to nearest 15° (XZ plane).
+	# 2) Length snaps to nearest integer multiple of `spacing`.
+	var d: Vector3 = end - start
+	d.y = 0.0
+	var L: float = d.length()
+	if L < 0.001:
+		return start
+	var ang: float = atan2(d.z, d.x)
+	var step: float = deg_to_rad(15.0)
+	ang = round(ang / step) * step
+	var n: int = max(1, int(round(L / spacing)))
+	var snapped_L: float = n * spacing
+	var out := start + Vector3(cos(ang), 0.0, sin(ang)) * snapped_L
+	out.y = _ground_y(out)
+	return out
+
+func _build_snap_hint(start: Vector3, end: Vector3) -> void:
+	var delta: Vector3 = end - start
+	delta.y = 0.0
+	var L: float = delta.length()
+	if L < 0.01:
+		return
+	var forward: Vector3 = delta.normalized()
+	var mid: Vector3 = start + forward * (L * 0.5)
+	mid.y = _ground_y(mid) + 0.015  # nudge above ground to avoid z-fighting
+	var box := BoxMesh.new()
+	box.size = Vector3(1.0, 0.005, 0.06)  # flat strip 6cm wide
+	box.material = _snap_hint_material
+	var mi := MeshInstance3D.new()
+	mi.mesh = box
+	mi.position = mid
+	mi.basis = _yaw_basis(forward).scaled_local(Vector3(L, 1.0, 1.0))
+	_snap_hint_root.add_child(mi)
+
+func _spawn_snap_ring(world_pos: Vector3) -> void:
+	# Flat torus on the ground marking that the hover snapped to a post.
+	var tm := TorusMesh.new()
+	tm.inner_radius = 0.32
+	tm.outer_radius = 0.44
+	tm.ring_segments = 6
+	tm.rings = 32
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.95, 0.35, 0.85)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	tm.material = mat
+	var mi := MeshInstance3D.new()
+	mi.mesh = tm
+	# Torus default axis = +Y in Godot, so it already lies flat. Lift 2cm
+	# above ground to avoid z-fighting.
+	mi.position = world_pos + Vector3(0, 0.02, 0)
+	_ghost_root.add_child(mi)
 
 func _maybe_snap(world_pos: Vector3, alt: bool, shift: bool) -> Vector3:
 	if alt:
@@ -208,8 +303,14 @@ func _nearest_post(world: Vector3, radius: float) -> Vector3:
 			best = p
 	return best
 
+func set_snap_hint_visible(b: bool) -> void:
+	if _snap_hint_root != null:
+		_snap_hint_root.visible = b
+
 func _rebuild_all() -> void:
 	for c in _visuals_root.get_children():
+		c.queue_free()
+	for c in _snap_hint_root.get_children():
 		c.queue_free()
 	_post_positions.clear()
 	# Collect every post (position + the run's forward + variant) across
@@ -228,6 +329,10 @@ func _rebuild_all() -> void:
 	# they can run independently per segment.
 	for f in _fences:
 		_build_intervals(_visuals_root, f.start, f.end, f.post_spacing, _variant_for(f), false)
+	# Snap-hint flat lines on the ground beneath every committed run so the
+	# user can see where their next drag can branch off.
+	for f in _fences:
+		_build_snap_hint(f.start, f.end)
 
 func _refresh_ghost() -> void:
 	_clear_ghost()

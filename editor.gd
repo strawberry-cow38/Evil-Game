@@ -1209,13 +1209,24 @@ func _process(delta: float) -> void:
 	# Fences ghost-follow: while LMB is held the run preview tracks the
 	# cursor. Alt/Shift modifier state is read live so snap toggles update
 	# the ghost without releasing the mouse.
-	if _active_tool == TOOL_E_FENCES and _fences_node != null and _fences_node.is_dragging():
+	if _active_tool == TOOL_E_FENCES and _fences_node != null:
 		if not _camera.is_looking() and not _is_over_ui():
 			var fhit := _raycast_cursor()
 			if not fhit.is_empty():
 				var fp: Vector3 = fhit.position
 				fp.y = _terrain.sample_height(fp)
-				_fences_node.update_drag(fp, Input.is_key_pressed(KEY_ALT), Input.is_key_pressed(KEY_SHIFT), _fences_panel.get_post_spacing())
+				var falt := Input.is_key_pressed(KEY_ALT)
+				var fshift := Input.is_key_pressed(KEY_SHIFT)
+				var fctrl := Input.is_key_pressed(KEY_CTRL)
+				var fspc := _fences_panel.get_post_spacing()
+				if _fences_node.is_dragging():
+					_fences_node.update_drag(fp, falt, fshift, fspc, fctrl)
+				else:
+					_fences_node.update_hover(fp, falt, fshift, fspc, fctrl)
+			else:
+				_fences_node.clear_hover()
+		else:
+			_fences_node.clear_hover()
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
 	if _camera.is_looking() or _active_tool == TOOL_NONE:
@@ -1465,6 +1476,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var spacing: float = _fences_panel.get_post_spacing()
 		var alt: bool = event.alt_pressed
 		var shift: bool = event.shift_pressed
+		var ctrl: bool = event.ctrl_pressed
 		var hit_f := _raycast_cursor()
 		if hit_f.is_empty():
 			if not event.pressed and _fences_node.is_dragging():
@@ -1473,9 +1485,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		var pf: Vector3 = hit_f.position
 		pf.y = _terrain.sample_height(pf)
 		if event.pressed:
-			_fences_node.begin_drag(pf, alt, shift, spacing)
+			_fences_node.begin_drag(pf, alt, shift, spacing, ctrl)
 		else:
-			_fences_node.commit_drag(pf, alt, shift, spacing)
+			_fences_node.commit_drag(pf, alt, shift, spacing, ctrl)
 		return
 	# Foliage exact-place: each LMB press drops a single billboard at the
 	# cursor. Spray mode is handled by the per-frame _apply_tool path.
@@ -1649,8 +1661,11 @@ func _on_tool_picked(tool_id: String) -> void:
 			_refresh_roads_panel()
 	if _fences_panel != null:
 		_fences_panel.visible = (tool_id == TOOL_E_FENCES)
-	if _fences_node != null and tool_id != TOOL_E_FENCES:
-		_fences_node.cancel_drag()
+	if _fences_node != null:
+		_fences_node.set_snap_hint_visible(tool_id == TOOL_E_FENCES)
+		if tool_id != TOOL_E_FENCES:
+			_fences_node.cancel_drag()
+			_fences_node.clear_hover()
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
 	_objects_panel.visible = (tool_id == TOOL_O_OBJECTS)
 	_item_tables_panel.visible = (tool_id == TOOL_S_ITEMS)
