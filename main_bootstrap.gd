@@ -513,12 +513,13 @@ func _make_dynamic(content: Node3D) -> void:
 		rb.add_to_group("dynamic_prop")
 		var parent: Node = sb.get_parent()
 		var xform: Transform3D = sb.transform
-		# Move collision shapes from the old static to the new rigid.
-		var shapes: Array = []
+		# Reparent EVERY child (shapes + meshes + lights + etc) so the
+		# visual + physics travel together. CollisionShape3D-only reparenting
+		# left the mesh planted while the rigid body rolled off invisibly.
+		var kids: Array = []
 		for ch in sb.get_children():
-			if ch is CollisionShape3D:
-				shapes.append(ch)
-		for ch in shapes:
+			kids.append(ch)
+		for ch in kids:
 			sb.remove_child(ch)
 			rb.add_child(ch)
 		parent.remove_child(sb)

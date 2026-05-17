@@ -210,10 +210,12 @@ static func _build_ball() -> Node3D:
 	mat.roughness = 0.45
 	mat.metallic = 0.0
 	mi.material_override = mat
-	mi.position = Vector3(0, radius, 0)
-	holder.add_child(mi)
 	var body := StaticBody3D.new()
 	body.position = Vector3(0, radius, 0)
+	# Mesh lives under the body so bootstrap's StaticBody3D→RigidBody3D
+	# swap carries the visual with the physics body (else ball rolls
+	# invisibly while the mesh stays planted at the spawn point).
+	body.add_child(mi)
 	var cs := CollisionShape3D.new()
 	var shape := SphereShape3D.new()
 	shape.radius = radius
