@@ -785,6 +785,10 @@ func _hide_rail(rail_mesh: MeshInstance3D, rail_body: Node) -> void:
 		for c in rail_body.get_children():
 			if c is MeshInstance3D:
 				c.queue_free()
+		# Kill collision too — otherwise bullets still hit the invisible rail.
+		if rail_body is CollisionObject3D:
+			(rail_body as CollisionObject3D).process_mode = Node.PROCESS_MODE_DISABLED
+		rail_body.visible = false
 
 func _segment_respawn_timer_reset(seg_key: String) -> void:
 	# (Re)start the per-segment Timer so the wait counts from the LAST hit.
