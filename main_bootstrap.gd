@@ -107,6 +107,7 @@ func _ready() -> void:
 		add_child(fences_root)
 		fences_root.setup(terrain_node)
 		fences_root.set_state(MapState.fences)
+		fences_root.enable_collision(true)
 	# Player spawn override: pick a random authored marker and drop the
 	# Player there. Sit them slightly above the terrain so they don't
 	# clip through the new mesh.

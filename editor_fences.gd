@@ -34,6 +34,8 @@ const VARIANTS := {
 		"post_width": 0.12,
 		"rails": [0.175, 0.675],
 		"picket_random": false,
+		"wall_height": 1.0,
+		"wall_thickness": 0.18,
 	},
 	"tall_brown": {
 		"post_glb": "res://assets/models/tall_fence_post.glb",
@@ -43,6 +45,8 @@ const VARIANTS := {
 		"post_width": 0.14,
 		"rails": [0.30, 1.30],
 		"picket_random": false,
+		"wall_height": 1.7,
+		"wall_thickness": 0.20,
 	},
 	"log_vertical": {
 		"post_glb": "res://assets/models/log_pole.glb",
@@ -53,6 +57,8 @@ const VARIANTS := {
 		"rails": [],
 		"picket_random": true,
 		"post_scale_y": 1.0,
+		"wall_height": 1.5,
+		"wall_thickness": 0.30,
 	},
 	"log_beam": {
 		"post_glb": "res://assets/models/log_pole.glb",
@@ -63,11 +69,20 @@ const VARIANTS := {
 		"rails": [0.20, 0.70],
 		"picket_random": false,
 		"post_scale_y": 0.58,
+		"wall_height": 0.95,
+		"wall_thickness": 0.30,
 	},
 }
 
 const MIN_RUN_LENGTH := 0.5
 const SNAP_RADIUS := 0.6
+# Perpendicular distance from cursor to an existing fence line within
+# which line-snap engages and snaps the cursor onto that run's nearest
+# post slot. Generous so the user only has to be vaguely near the line.
+const LINE_SNAP_RADIUS := 1.4
+# Click-anywhere-on-a-fence radius for the per-section eraser. Measured
+# from the cursor to the fence line, regardless of which segment.
+const DELETE_LINE_RADIUS := 1.8
 
 const DEFAULT_POST_SPACING := 2.36
 const MIN_POST_SPACING := 0.8
@@ -80,6 +95,8 @@ var _fences: Array = []
 var _terrain: Node3D = null
 var _mesh_cache: Dictionary = {}  # path → Mesh
 var _active_variant: String = "picket"
+# Off in the editor (would obstruct camera + raycasts), opt-in in play mode.
+var _collision_enabled: bool = false
 
 var _drag_active: bool = false
 var _drag_start: Vector3 = Vector3.ZERO
@@ -129,6 +146,10 @@ func setup(terrain: Node3D) -> void:
 func set_variant(name: String) -> void:
 	if VARIANTS.has(name):
 		_active_variant = name
+
+func enable_collision(b: bool) -> void:
+	_collision_enabled = b
+	_rebuild_all()
 
 func get_variant() -> String:
 	return _active_variant
@@ -322,7 +343,7 @@ func _maybe_snap(world_pos: Vector3, alt: bool) -> Vector3:
 		# so a junction's merged post inherits the existing run's rotation.
 		_last_snap_anchor = _forward_at(nearest_post)
 		return nearest_post
-	var line_hit: Dictionary = _nearest_line_slot(world_pos, SNAP_RADIUS)
+	var line_hit: Dictionary = _nearest_line_slot(world_pos, LINE_SNAP_RADIUS)
 	if not line_hit.is_empty():
 		_last_snap_anchor = line_hit["forward"]
 		return line_hit["pos"]
@@ -339,10 +360,9 @@ func _nearest_post(world: Vector3, radius: float) -> Vector3:
 	return best
 
 func _nearest_line_slot(world: Vector3, radius: float) -> Dictionary:
-	# Project `world` onto each fence run, snap to nearest post slot along
-	# the run, return {pos, forward} of the closest hit. Snapping to slot
-	# positions (not the raw projection) makes new fences butt into the
-	# existing picket grid cleanly.
+	# Snap engages on perpendicular distance to the run's line (so the user
+	# only has to be near the line, not near a slot). Result is the nearest
+	# post slot on that run, which butts cleanly into the existing grid.
 	var best_pos: Vector3 = Vector3.INF
 	var best_fwd: Vector3 = Vector3.ZERO
 	var best_d: float = radius
@@ -354,17 +374,19 @@ func _nearest_line_slot(world: Vector3, radius: float) -> Dictionary:
 		var L: float = ab.length()
 		if L < 0.0001:
 			continue
+		var raw_t: float = clampf((wxz - a).dot(ab) / (L * L), 0.0, 1.0)
+		var line_pt: Vector3 = a + ab * raw_t
+		var d_line: float = line_pt.distance_to(wxz)
+		if d_line >= best_d:
+			continue
+		best_d = d_line
 		var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
 		var n_intervals: int = max(1, int(round(L / spacing)))
-		var raw_t: float = clampf((wxz - a).dot(ab) / (L * L), 0.0, 1.0)
 		var slot_idx: int = clampi(int(round(raw_t * n_intervals)), 0, n_intervals)
 		var slot_t: float = float(slot_idx) / float(n_intervals)
 		var p: Vector3 = a + ab * slot_t
-		var d: float = p.distance_to(wxz)
-		if d < best_d:
-			best_d = d
-			best_pos = Vector3(p.x, world.y, p.z)
-			best_fwd = (ab / L)
+		best_pos = Vector3(p.x, world.y, p.z)
+		best_fwd = (ab / L)
 	if best_pos == Vector3.INF:
 		return {}
 	return {"pos": best_pos, "forward": best_fwd}
@@ -398,11 +420,10 @@ func _segment_forward(f: Dictionary) -> Vector3:
 		return Vector3.ZERO
 	return d.normalized()
 
-func delete_section_at(world_pos: Vector3, radius: float = SNAP_RADIUS) -> bool:
-	# Find the run+interval (between two adjacent posts) closest to
-	# `world_pos`, replace the original run with 0/1/2 sub-runs covering the
-	# portions before/after the deleted interval. Returns true iff a section
-	# was removed.
+func delete_section_at(world_pos: Vector3, radius: float = DELETE_LINE_RADIUS) -> bool:
+	# Find the run whose line is closest to `world_pos` (perp distance),
+	# pick the segment under the projected point, replace the run with up to
+	# two sub-runs covering the portions before/after the deleted segment.
 	var wxz := Vector3(world_pos.x, 0.0, world_pos.z)
 	var best_i: int = -1
 	var best_seg: int = -1
@@ -416,17 +437,17 @@ func delete_section_at(world_pos: Vector3, radius: float = SNAP_RADIUS) -> bool:
 		var L: float = ab.length()
 		if L < 0.0001:
 			continue
+		var raw_t: float = clampf((wxz - a).dot(ab) / (L * L), 0.0, 1.0)
+		var line_pt: Vector3 = a + ab * raw_t
+		var d: float = line_pt.distance_to(wxz)
+		if d >= best_d:
+			continue
 		var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
 		var n_intervals: int = max(1, int(round(L / spacing)))
-		var raw_t: float = clampf((wxz - a).dot(ab) / (L * L), 0.0, 1.0)
-		var seg_idx: int = clampi(int(raw_t * n_intervals), 0, n_intervals - 1)
-		var mid: Vector3 = a + ab * ((float(seg_idx) + 0.5) / float(n_intervals))
-		var d: float = mid.distance_to(wxz)
-		if d < best_d:
-			best_d = d
-			best_i = i
-			best_seg = seg_idx
-			best_n = n_intervals
+		best_d = d
+		best_i = i
+		best_seg = clampi(int(raw_t * n_intervals), 0, n_intervals - 1)
+		best_n = n_intervals
 	if best_i < 0:
 		return false
 	var orig: Dictionary = _fences[best_i]
@@ -483,6 +504,9 @@ func _rebuild_all() -> void:
 	# user can see where their next drag can branch off.
 	for f in _fences:
 		_build_snap_hint(f.start, f.end)
+	if _collision_enabled:
+		for f in _fences:
+			_spawn_wall_collider(f, _variant_for(f))
 
 func _refresh_ghost() -> void:
 	_clear_ghost()
@@ -592,6 +616,39 @@ func _cluster_posts(entries: Array) -> Array:
 func _cardinality(f: Vector3) -> float:
 	# 1.0 for perfectly axis-aligned, 0.0 for 45deg diagonal.
 	return absf(absf(f.x) - absf(f.z))
+
+func _spawn_wall_collider(f: Dictionary, variant: Dictionary) -> void:
+	# Single box-shaped wall collider per run, oriented along the run, sized
+	# to (length, wall_height, wall_thickness). Subdivided into one box per
+	# segment so each segment sits on its own ground sample — keeps the
+	# collider following gentle terrain without warping a thin wall.
+	var height: float = float(variant.get("wall_height", 1.0))
+	var thickness: float = float(variant.get("wall_thickness", 0.20))
+	var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+	var delta: Vector3 = f.end - f.start
+	delta.y = 0.0
+	var L: float = delta.length()
+	if L < MIN_RUN_LENGTH:
+		return
+	var forward: Vector3 = delta.normalized()
+	var n_intervals: int = max(1, int(round(L / spacing)))
+	var seg_len: float = L / float(n_intervals)
+	for i in range(n_intervals):
+		var ps: Vector3 = f.start + forward * (i * seg_len)
+		var pe: Vector3 = f.start + forward * ((i + 1) * seg_len)
+		ps.y = _ground_y(ps)
+		pe.y = _ground_y(pe)
+		var mid: Vector3 = (ps + pe) * 0.5
+		mid.y += height * 0.5
+		var body := StaticBody3D.new()
+		body.position = mid
+		body.basis = _yaw_basis(forward)
+		var shape := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = Vector3(seg_len, height, thickness)
+		shape.shape = box
+		body.add_child(shape)
+		_visuals_root.add_child(body)
 
 func _post_position_taken(pos: Vector3) -> bool:
 	for p in _post_positions:
