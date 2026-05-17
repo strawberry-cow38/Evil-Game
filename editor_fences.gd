@@ -104,6 +104,17 @@ const POST_DEDUP_RADIUS := 0.05
 const WALL_COLLISION_LAYER: int = 1 << 5
 const DETAIL_COLLISION_LAYER: int = 1 << 6
 
+# Per-segment tunables. Defaults applied wherever the segment dict is
+# missing a key — store overrides only.
+const SEG_DEFAULTS := {
+	"destructible": false,
+	"respawn_time": 10.0,
+	"wallbang": false,
+}
+# Group every picket collider in a destructible segment joins so weapon.gd
+# can detect a fence-picket hit and route it back to this node.
+const PICKET_GROUP := "fence_picket_destructible"
+
 var _fences: Array = []
 var _terrain: Node3D = null
 var _mesh_cache: Dictionary = {}  # path → Mesh
@@ -132,6 +143,16 @@ var _snap_hint_material: StandardMaterial3D = null
 # Cached world positions of every post placed so far — drives hard snap.
 var _post_positions: Array = []
 
+# Edit-mode selection — fence index + segment (interval) index within
+# that run, or -1/-1 if nothing selected.
+var _selected_fence: int = -1
+var _selected_seg: int = -1
+var _select_highlight: MeshInstance3D = null
+var _select_material: StandardMaterial3D = null
+
+signal segment_selected(props: Dictionary)
+signal selection_cleared()
+
 func setup(terrain: Node3D) -> void:
 	_terrain = terrain
 	# Preload every variant's meshes once. Cheap — 4 variants × ~3 GLBs.
@@ -155,6 +176,11 @@ func setup(terrain: Node3D) -> void:
 	_snap_hint_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_snap_hint_material.albedo_color = Color(1.0, 0.95, 0.35, 0.55)
 	_snap_hint_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_select_material = StandardMaterial3D.new()
+	_select_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_select_material.albedo_color = Color(0.35, 0.95, 1.0, 0.30)
+	_select_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_select_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 func set_variant(name: String) -> void:
 	if VARIANTS.has(name):
@@ -162,6 +188,14 @@ func set_variant(name: String) -> void:
 
 func enable_collision(b: bool) -> void:
 	_collision_enabled = b
+	# Play-mode tag so weapon.gd can find this node by group lookup when
+	# routing picket-hit notifications.
+	if b:
+		if not is_in_group("fences_runtime"):
+			add_to_group("fences_runtime")
+	else:
+		if is_in_group("fences_runtime"):
+			remove_from_group("fences_runtime")
 	_rebuild_all()
 
 func get_variant() -> String:
@@ -198,6 +232,7 @@ func _find_first_mesh(n: Node) -> Mesh:
 
 func set_state(state: Array) -> void:
 	_fences = state.duplicate(true)
+	clear_selection()
 	_rebuild_all()
 
 func get_state() -> Array:
@@ -505,6 +540,149 @@ func set_snap_hint_visible(b: bool) -> void:
 	if _snap_hint_root != null:
 		_snap_hint_root.visible = b
 
+# --- Segment selection + per-segment props -----------------------------
+
+func get_segment_props(fence_idx: int, seg_idx: int) -> Dictionary:
+	# Merge stored overrides over defaults. Always returns every key.
+	var out: Dictionary = SEG_DEFAULTS.duplicate()
+	if fence_idx < 0 or fence_idx >= _fences.size():
+		return out
+	var segs: Dictionary = _fences[fence_idx].get("segments", {})
+	var key: String = str(seg_idx)
+	if segs.has(key):
+		for k in segs[key].keys():
+			out[k] = segs[key][k]
+	return out
+
+func set_segment_prop(fence_idx: int, seg_idx: int, key: String, value) -> void:
+	if fence_idx < 0 or fence_idx >= _fences.size():
+		return
+	if not _fences[fence_idx].has("segments"):
+		_fences[fence_idx]["segments"] = {}
+	var segs: Dictionary = _fences[fence_idx]["segments"]
+	var k: String = str(seg_idx)
+	if not segs.has(k):
+		segs[k] = {}
+	segs[k][key] = value
+	fence_state_changed.emit()
+	_rebuild_all()  # _rebuild_all restores selection highlight
+
+func _segment_at(world_pos: Vector3, radius: float) -> Dictionary:
+	# Mirrors delete_section_at hit-test. Returns {fence, seg} or {} if no hit.
+	var wxz := Vector3(world_pos.x, 0.0, world_pos.z)
+	var best_i: int = -1
+	var best_seg: int = -1
+	var best_d: float = radius
+	for i in range(_fences.size()):
+		var f: Dictionary = _fences[i]
+		var a: Vector3 = Vector3(f.start.x, 0.0, f.start.z)
+		var b: Vector3 = Vector3(f.end.x,   0.0, f.end.z)
+		var ab: Vector3 = b - a
+		var L: float = ab.length()
+		if L < 0.0001:
+			continue
+		var raw_t: float = clampf((wxz - a).dot(ab) / (L * L), 0.0, 1.0)
+		var d: float = (a + ab * raw_t).distance_to(wxz)
+		if d >= best_d:
+			continue
+		var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+		var n_intervals: int = max(1, int(round(L / spacing)))
+		best_d = d
+		best_i = i
+		best_seg = clampi(int(raw_t * n_intervals), 0, n_intervals - 1)
+	if best_i < 0:
+		return {}
+	return {"fence": best_i, "seg": best_seg}
+
+func select_segment_at(world_pos: Vector3, radius: float = DELETE_LINE_RADIUS) -> Dictionary:
+	var hit: Dictionary = _segment_at(world_pos, radius)
+	if hit.is_empty():
+		clear_selection()
+		return {}
+	_selected_fence = hit["fence"]
+	_selected_seg = hit["seg"]
+	_update_selection_highlight()
+	var props: Dictionary = get_segment_props(_selected_fence, _selected_seg)
+	props["fence"] = _selected_fence
+	props["seg"] = _selected_seg
+	segment_selected.emit(props)
+	return props
+
+func clear_selection() -> void:
+	_selected_fence = -1
+	_selected_seg = -1
+	if _select_highlight != null:
+		_select_highlight.queue_free()
+		_select_highlight = null
+	selection_cleared.emit()
+
+func get_selection() -> Dictionary:
+	if _selected_fence < 0:
+		return {}
+	return {"fence": _selected_fence, "seg": _selected_seg}
+
+func _update_selection_highlight() -> void:
+	if _select_highlight != null:
+		_select_highlight.queue_free()
+		_select_highlight = null
+	if _selected_fence < 0 or _selected_fence >= _fences.size():
+		return
+	var f: Dictionary = _fences[_selected_fence]
+	var a: Vector3 = f.start
+	var b: Vector3 = f.end
+	var delta: Vector3 = Vector3(b.x - a.x, 0.0, b.z - a.z)
+	var L: float = delta.length()
+	if L < 0.0001:
+		return
+	var forward: Vector3 = delta.normalized()
+	var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+	var n: int = max(1, int(round(L / spacing)))
+	var seg_len: float = L / float(n)
+	var ps: Vector3 = a + forward * (_selected_seg * seg_len)
+	var pe: Vector3 = a + forward * ((_selected_seg + 1) * seg_len)
+	ps.y = _ground_y(ps)
+	pe.y = _ground_y(pe)
+	var variant: Dictionary = _variant_for(f)
+	var height: float = float(variant.get("wall_height", 1.0)) + 0.20
+	var thickness: float = float(variant.get("wall_thickness", 0.20)) + 0.10
+	var mid: Vector3 = (ps + pe) * 0.5
+	mid.y += height * 0.5
+	var box := BoxMesh.new()
+	box.size = Vector3(seg_len, height, thickness)
+	box.material = _select_material
+	var mi := MeshInstance3D.new()
+	mi.mesh = box
+	mi.position = mid
+	mi.basis = _yaw_basis(forward)
+	_visuals_root.add_child(mi)
+	_select_highlight = mi
+
+# --- Play-mode picket destruction -------------------------------------
+
+func notify_picket_hit(body: Node) -> void:
+	# Called by weapon.gd when a bullet ray hits a picket collider that's
+	# part of a destructible segment. Hides mesh + collider, schedules a
+	# respawn after the segment's respawn_time.
+	if body == null or not body.has_meta("picket_mesh_ref"):
+		return
+	var mi: MeshInstance3D = body.get_meta("picket_mesh_ref")
+	if mi == null or not is_instance_valid(mi):
+		return
+	mi.visible = false
+	if body is CollisionObject3D:
+		(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_DISABLED
+	body.visible = false
+	var respawn: float = float(body.get_meta("respawn_time", 10.0))
+	var t := get_tree().create_timer(respawn)
+	t.timeout.connect(func() -> void:
+		if is_instance_valid(mi):
+			mi.visible = true
+		if is_instance_valid(body):
+			body.visible = true
+			if body is CollisionObject3D:
+				(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_INHERIT
+	)
+
 func _rebuild_all() -> void:
 	for c in _visuals_root.get_children():
 		c.queue_free()
@@ -527,8 +705,9 @@ func _rebuild_all() -> void:
 		_post_positions.append(pw)
 	# Pickets + rails are per-interval and never overlap across runs, so
 	# they can run independently per segment.
-	for f in _fences:
-		_build_intervals(_visuals_root, f.start, f.end, f.post_spacing, _variant_for(f), false)
+	for fi in range(_fences.size()):
+		var ff: Dictionary = _fences[fi]
+		_build_intervals(_visuals_root, ff.start, ff.end, ff.post_spacing, _variant_for(ff), false, fi)
 	# Snap-hint flat lines on the ground beneath every committed run so the
 	# user can see where their next drag can branch off.
 	for f in _fences:
@@ -536,6 +715,10 @@ func _rebuild_all() -> void:
 	if _collision_enabled:
 		for f in _fences:
 			_spawn_wall_collider(f, _variant_for(f))
+	# Highlight survives rebuilds while a segment is selected.
+	if _selected_fence >= 0:
+		_select_highlight = null  # was a child of the freed _visuals_root
+		_update_selection_highlight()
 
 func _refresh_ghost() -> void:
 	_clear_ghost()
@@ -590,7 +773,7 @@ func _collect_segment_posts(start: Vector3, end: Vector3, post_spacing: float, v
 			fwd = end_anchor
 		out_entries.append({"pos": pw, "forward": fwd, "variant": variant})
 
-func _build_intervals(root: Node3D, start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, ghost: bool) -> void:
+func _build_intervals(root: Node3D, start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, ghost: bool, fence_idx: int = -1) -> void:
 	var delta: Vector3 = end - start
 	delta.y = 0.0
 	var L: float = delta.length()
@@ -604,7 +787,7 @@ func _build_intervals(root: Node3D, start: Vector3, end: Vector3, post_spacing: 
 		var p_end: Vector3 = start + forward * ((i + 1) * actual_spacing)
 		p_start.y = _ground_y(p_start)
 		p_end.y = _ground_y(p_end)
-		_build_interval(root, p_start, p_end, forward, variant, ghost)
+		_build_interval(root, p_start, p_end, forward, variant, ghost, fence_idx, i)
 
 func _cluster_posts(entries: Array) -> Array:
 	# O(N^2) greedy cluster — N is small (few hundred posts max).
@@ -646,13 +829,13 @@ func _cardinality(f: Vector3) -> float:
 	# 1.0 for perfectly axis-aligned, 0.0 for 45deg diagonal.
 	return absf(absf(f.x) - absf(f.z))
 
-func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis) -> void:
+func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis) -> StaticBody3D:
 	# Per-element AABB collider on DETAIL_COLLISION_LAYER: matches each
 	# spawned post / picket / rail tightly so bullets+raycasts hit only the
 	# wood. The player does NOT mask this layer (it uses the smooth wall
 	# box instead) so it never catches on individual pickets.
 	if mesh == null:
-		return
+		return null
 	var aabb: AABB = mesh.get_aabb()
 	var scale_vec: Vector3 = basis.get_scale()
 	# Drop scale from the basis so the StaticBody3D stays unit-scaled and we
@@ -663,7 +846,7 @@ func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis
 	var center_world: Vector3 = world_pos + ortho * center_local
 	var size: Vector3 = aabb.size * scale_vec
 	if size.x <= 0.0 or size.y <= 0.0 or size.z <= 0.0:
-		return
+		return null
 	var body := StaticBody3D.new()
 	body.position = center_world
 	body.basis = ortho
@@ -675,6 +858,7 @@ func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis
 	shape.shape = box
 	body.add_child(shape)
 	root.add_child(body)
+	return body
 
 func _spawn_wall_collider(f: Dictionary, variant: Dictionary) -> void:
 	# Smooth wall box per segment on WALL_COLLISION_LAYER. Sole purpose is to
@@ -718,10 +902,17 @@ func _post_position_taken(pos: Vector3) -> bool:
 			return true
 	return false
 
-func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Vector3, variant: Dictionary, ghost: bool) -> void:
+func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Vector3, variant: Dictionary, ghost: bool, fence_idx: int = -1, seg_idx: int = -1) -> void:
 	var span: float = p_start.distance_to(p_end)
 	var picket_glb: String = variant["picket_glb"]
 	var picket_spacing: float = variant["picket_spacing"]
+	# Resolve segment props once per interval so pickets share the lookup.
+	var destructible: bool = false
+	var respawn_time: float = 10.0
+	if fence_idx >= 0 and seg_idx >= 0:
+		var props: Dictionary = get_segment_props(fence_idx, seg_idx)
+		destructible = bool(props.get("destructible", false))
+		respawn_time = float(props.get("respawn_time", 10.0))
 	if picket_glb != "" and picket_spacing > 0.0:
 		# Picket count: pick the integer N that makes the spacing s = span/(N+1)
 		# closest to picket_spacing. Treating end-to-post as another picket slot
@@ -732,7 +923,7 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 			for i in range(n_pickets):
 				var pw: Vector3 = p_start + forward * (s * (i + 1))
 				pw.y = _ground_y(pw)
-				_spawn_picket(root, pw, forward, variant, ghost)
+				_spawn_picket(root, pw, forward, variant, ghost, destructible, respawn_time)
 	# Rails sit between posts (inner edge → inner edge). Heights per variant.
 	var post_width: float = variant["post_width"]
 	var rail_origin: Vector3 = p_start + forward * (post_width * 0.5)
@@ -750,7 +941,7 @@ func _spawn_post(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Di
 		basis = basis.scaled_local(Vector3(1.0, ysc, 1.0))
 	_spawn(root, mesh, world_pos, basis, ghost)
 
-func _spawn_picket(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool) -> void:
+func _spawn_picket(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool, destructible: bool = false, respawn_time: float = 10.0) -> void:
 	var mesh: Mesh = _mesh_cache.get(variant["picket_glb"], null)
 	if mesh == null:
 		return
@@ -769,7 +960,12 @@ func _spawn_picket(root: Node3D, world_pos: Vector3, forward: Vector3, variant: 
 		basis = basis.rotated(Vector3.UP, spin)
 		basis = basis.rotated(forward, tilt)
 		basis = basis.scaled_local(Vector3(r_scale, h_scale, r_scale))
-	_spawn(root, mesh, world_pos, basis, ghost)
+	var pair: Dictionary = _spawn(root, mesh, world_pos, basis, ghost)
+	if destructible and pair.has("body") and pair["body"] != null:
+		var body: StaticBody3D = pair["body"]
+		body.add_to_group(PICKET_GROUP)
+		body.set_meta("picket_mesh_ref", pair["mesh"])
+		body.set_meta("respawn_time", respawn_time)
 
 func _spawn_rail(root: Node3D, world_pos: Vector3, forward: Vector3, length: float, variant: Dictionary, ghost: bool) -> void:
 	var mesh: Mesh = _mesh_cache.get(variant["rail_glb"], null)
@@ -779,9 +975,9 @@ func _spawn_rail(root: Node3D, world_pos: Vector3, forward: Vector3, length: flo
 	var basis: Basis = _yaw_basis(forward).scaled_local(Vector3(length, 1.0, 1.0))
 	_spawn(root, mesh, world_pos, basis, ghost)
 
-func _spawn(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis, ghost: bool) -> void:
+func _spawn(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis, ghost: bool) -> Dictionary:
 	if mesh == null:
-		return
+		return {}
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.position = world_pos
@@ -789,8 +985,10 @@ func _spawn(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis, ghost: b
 	if ghost:
 		mi.transparency = 0.55
 	root.add_child(mi)
+	var body: StaticBody3D = null
 	if _collision_enabled and not ghost:
-		_attach_collider(root, mesh, world_pos, basis)
+		body = _attach_collider(root, mesh, world_pos, basis)
+	return {"mesh": mi, "body": body}
 
 func _yaw_basis(forward: Vector3) -> Basis:
 	# Build a basis whose local +X axis maps to `forward` (XZ-plane only),

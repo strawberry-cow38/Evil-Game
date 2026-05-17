@@ -514,6 +514,10 @@ func _ready() -> void:
 	$UI.add_child(_fences_panel)
 	_fences_panel.post_spacing_changed.connect(_on_fences_panel_spacing)
 	_fences_panel.variant_changed.connect(_on_fences_panel_variant)
+	_fences_panel.edit_mode_changed.connect(_on_fences_panel_edit_mode)
+	_fences_panel.seg_destructible_changed.connect(_on_fences_panel_seg_destructible)
+	_fences_panel.seg_respawn_changed.connect(_on_fences_panel_seg_respawn)
+	_fences_panel.seg_wallbang_changed.connect(_on_fences_panel_seg_wallbang)
 	# Paint panel — runtime-built like the roads panel. Anchored to the
 	# right edge under the sub-bar.
 	_paint_panel = PanelContainer.new()
@@ -694,6 +698,28 @@ func _on_fences_panel_spacing(_v: float) -> void:
 func _on_fences_panel_variant(name: String) -> void:
 	if _fences_node != null:
 		_fences_node.set_variant(name)
+
+func _on_fences_panel_edit_mode(on: bool) -> void:
+	# Leaving edit mode drops the highlight + tweak panel.
+	if not on and _fences_node != null:
+		_fences_node.clear_selection()
+
+func _on_fences_panel_seg_destructible(on: bool) -> void:
+	_apply_seg_prop("destructible", on)
+
+func _on_fences_panel_seg_respawn(v: float) -> void:
+	_apply_seg_prop("respawn_time", v)
+
+func _on_fences_panel_seg_wallbang(on: bool) -> void:
+	_apply_seg_prop("wallbang", on)
+
+func _apply_seg_prop(key: String, value) -> void:
+	if _fences_node == null:
+		return
+	var sel: Dictionary = _fences_node.get_selection()
+	if sel.is_empty():
+		return
+	_fences_node.set_segment_prop(int(sel["fence"]), int(sel["seg"]), key, value)
 
 func _input(event: InputEvent) -> void:
 	# Esc toggles the pause menu. While it's open we swallow other shortcuts
@@ -1211,7 +1237,8 @@ func _process(delta: float) -> void:
 	# the ghost without releasing the mouse.
 	if _active_tool == TOOL_E_FENCES and _fences_node != null:
 		var erase_mode: bool = _fences_panel != null and _fences_panel.is_erase_mode()
-		if not _camera.is_looking() and not _is_over_ui() and not erase_mode:
+		var edit_mode: bool = _fences_panel != null and _fences_panel.is_edit_mode()
+		if not _camera.is_looking() and not _is_over_ui() and not erase_mode and not edit_mode:
 			var fhit := _raycast_cursor()
 			if not fhit.is_empty():
 				var fp: Vector3 = fhit.position
@@ -1228,7 +1255,7 @@ func _process(delta: float) -> void:
 				_fences_node.clear_hover()
 		else:
 			_fences_node.clear_hover()
-			if erase_mode and _fences_node.is_dragging():
+			if (erase_mode or edit_mode) and _fences_node.is_dragging():
 				_fences_node.cancel_drag()
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
@@ -1494,6 +1521,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 			_fences_node.delete_section_at(pf)
 			return
+		if _fences_panel != null and _fences_panel.is_edit_mode():
+			# Edit mode: LMB selects a segment under the cursor and opens
+			# the tweak sub-panel. Click on empty ground clears selection.
+			if not event.pressed:
+				return
+			var props: Dictionary = _fences_node.select_segment_at(pf)
+			if props.is_empty():
+				_fences_panel.hide_segment_panel()
+			else:
+				_fences_panel.show_segment_panel(props)
+			return
 		if event.pressed:
 			_fences_node.begin_drag(pf, alt, shift, spacing, ctrl)
 		else:
@@ -1676,6 +1714,7 @@ func _on_tool_picked(tool_id: String) -> void:
 		if tool_id != TOOL_E_FENCES:
 			_fences_node.cancel_drag()
 			_fences_node.clear_hover()
+			_fences_node.clear_selection()
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)
 	_objects_panel.visible = (tool_id == TOOL_O_OBJECTS)
 	_item_tables_panel.visible = (tool_id == TOOL_S_ITEMS)

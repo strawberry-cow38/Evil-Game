@@ -2026,6 +2026,20 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 		var material := _classify_material(hit_collider)
 		_schedule_impact(hit_pos, hit_normal, material, impact_delay, hit_collider)
 		_schedule_damage(hit_collider, impact_delay, distance)
+		_maybe_notify_fence_picket(hit_collider)
+
+func _maybe_notify_fence_picket(collider: Object) -> void:
+	# Per-segment-destructible pickets are tagged with this group on spawn
+	# in play mode (editor_fences.gd::_spawn_picket). Route the hit back to
+	# the fences node so it can hide the picket + schedule respawn.
+	if collider == null:
+		return
+	var n: Node = collider as Node
+	if n == null or not n.is_in_group("fence_picket_destructible"):
+		return
+	var fn := get_tree().get_first_node_in_group("fences_runtime")
+	if fn != null and fn.has_method("notify_picket_hit"):
+		fn.notify_picket_hit(n)
 
 func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
 	if collider == null:
