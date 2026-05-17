@@ -91,6 +91,14 @@ const MAX_POST_SPACING := 6.0
 # larger so two snapped endpoints will always cluster here.
 const POST_DEDUP_RADIUS := 0.05
 
+# Physics layers (1-indexed in the editor UI).
+#   Layer 6 — smooth wall box for player collision. Bullets ignore.
+#   Layer 7 — per-element AABB boxes matching each post/picket/rail. The
+#             player ignores so it doesn't catch on every picket and
+#             jitter; bullets / raycasts use this for precise hits.
+const WALL_COLLISION_LAYER: int = 1 << 5
+const DETAIL_COLLISION_LAYER: int = 1 << 6
+
 var _fences: Array = []
 var _terrain: Node3D = null
 var _mesh_cache: Dictionary = {}  # path → Mesh
@@ -259,8 +267,9 @@ func update_hover(world_pos: Vector3, alt: bool, shift: bool, post_spacing: floa
 	_clear_ghost()
 	var spacing: float = clampf(post_spacing, MIN_POST_SPACING, MAX_POST_SPACING)
 	var snapped: Vector3 = _maybe_snap(world_pos, alt)
-	# Snap engaged iff the snap actually moved the cursor onto an existing post.
-	var snap_hit: bool = (snapped != world_pos) and _post_position_taken(snapped)
+	# Snap engaged iff the line snap returned a forward (i.e. picked up
+	# an existing run); _last_snap_anchor is set in _maybe_snap.
+	var snap_hit: bool = _last_snap_anchor != Vector3.ZERO
 	snapped.y = _ground_y(snapped)
 	# Forward direction for the ghost post is meaningless before the first
 	# click, so use world +X to give the post a stable yaw.
@@ -331,18 +340,12 @@ func _spawn_snap_ring(world_pos: Vector3) -> void:
 	_ghost_root.add_child(mi)
 
 func _maybe_snap(world_pos: Vector3, alt: bool) -> Vector3:
-	# Post snap wins over line snap (sharper feedback). Alt suppresses both.
-	# Sets `_last_snap_anchor` to the snapped line's forward when line-snap
-	# engages so the caller can record an anchor direction.
+	# Line snap quantised to the picket grid is the only snap target — it
+	# already lands on post positions when the cursor is near one, plus
+	# every picket position in between. Alt suppresses snapping entirely.
 	_last_snap_anchor = Vector3.ZERO
 	if alt:
 		return world_pos
-	var nearest_post: Vector3 = _nearest_post(world_pos, SNAP_RADIUS)
-	if nearest_post != Vector3.INF:
-		# Recover the run that owns this post — gives us the anchor forward
-		# so a junction's merged post inherits the existing run's rotation.
-		_last_snap_anchor = _forward_at(nearest_post)
-		return nearest_post
 	var line_hit: Dictionary = _nearest_line_slot(world_pos, LINE_SNAP_RADIUS)
 	if not line_hit.is_empty():
 		_last_snap_anchor = line_hit["forward"]
@@ -360,9 +363,10 @@ func _nearest_post(world: Vector3, radius: float) -> Vector3:
 	return best
 
 func _nearest_line_slot(world: Vector3, radius: float) -> Dictionary:
-	# Snap engages on perpendicular distance to the run's line (so the user
-	# only has to be near the line, not near a slot). Result is the nearest
-	# post slot on that run, which butts cleanly into the existing grid.
+	# Snap engages on perpendicular distance to the run's line, then quantises
+	# the projection to the picket grid (positions where this run actually
+	# places a picket or a post). Variants with no pickets (picket_spacing=0)
+	# fall back to the post grid.
 	var best_pos: Vector3 = Vector3.INF
 	var best_fwd: Vector3 = Vector3.ZERO
 	var best_d: float = radius
@@ -379,12 +383,19 @@ func _nearest_line_slot(world: Vector3, radius: float) -> Dictionary:
 		var d_line: float = line_pt.distance_to(wxz)
 		if d_line >= best_d:
 			continue
-		best_d = d_line
-		var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
-		var n_intervals: int = max(1, int(round(L / spacing)))
-		var slot_idx: int = clampi(int(round(raw_t * n_intervals)), 0, n_intervals)
-		var slot_t: float = float(slot_idx) / float(n_intervals)
+		var variant: Dictionary = _variant_for(f)
+		var post_spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+		var n_intervals: int = max(1, int(round(L / post_spacing)))
+		var actual_post_spacing: float = L / float(n_intervals)
+		var picket_spacing: float = float(variant.get("picket_spacing", 0.0))
+		var sub_steps: int = 1
+		if picket_spacing > 0.0:
+			sub_steps = max(1, int(round(actual_post_spacing / picket_spacing)))
+		var total_slots: int = n_intervals * sub_steps
+		var slot_idx: int = clampi(int(round(raw_t * total_slots)), 0, total_slots)
+		var slot_t: float = float(slot_idx) / float(total_slots)
 		var p: Vector3 = a + ab * slot_t
+		best_d = d_line
 		best_pos = Vector3(p.x, world.y, p.z)
 		best_fwd = (ab / L)
 	if best_pos == Vector3.INF:
@@ -504,6 +515,9 @@ func _rebuild_all() -> void:
 	# user can see where their next drag can branch off.
 	for f in _fences:
 		_build_snap_hint(f.start, f.end)
+	if _collision_enabled:
+		for f in _fences:
+			_spawn_wall_collider(f, _variant_for(f))
 
 func _refresh_ghost() -> void:
 	_clear_ghost()
@@ -615,9 +629,10 @@ func _cardinality(f: Vector3) -> float:
 	return absf(absf(f.x) - absf(f.z))
 
 func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis) -> void:
-	# Per-element AABB collider: one BoxShape3D sized to the spawned mesh's
-	# world-space bounds. Bullets / raycasts that pass between pickets, over
-	# rails, or through the gap on a beam fence cleanly miss every body.
+	# Per-element AABB collider on DETAIL_COLLISION_LAYER: matches each
+	# spawned post / picket / rail tightly so bullets+raycasts hit only the
+	# wood. The player does NOT mask this layer (it uses the smooth wall
+	# box instead) so it never catches on individual pickets.
 	if mesh == null:
 		return
 	var aabb: AABB = mesh.get_aabb()
@@ -634,12 +649,50 @@ func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis
 	var body := StaticBody3D.new()
 	body.position = center_world
 	body.basis = ortho
+	body.collision_layer = DETAIL_COLLISION_LAYER
+	body.collision_mask = 0
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = size
 	shape.shape = box
 	body.add_child(shape)
 	root.add_child(body)
+
+func _spawn_wall_collider(f: Dictionary, variant: Dictionary) -> void:
+	# Smooth wall box per segment on WALL_COLLISION_LAYER. Sole purpose is to
+	# give the player capsule a single flat surface to slide along instead of
+	# the bumpy per-picket geometry that causes jitter on movement. Bullets
+	# don't mask this layer so they pass straight through to the per-element
+	# colliders behind.
+	var height: float = float(variant.get("wall_height", 1.0))
+	var thickness: float = float(variant.get("wall_thickness", 0.20))
+	var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+	var delta: Vector3 = f.end - f.start
+	delta.y = 0.0
+	var L: float = delta.length()
+	if L < MIN_RUN_LENGTH:
+		return
+	var forward: Vector3 = delta.normalized()
+	var n_intervals: int = max(1, int(round(L / spacing)))
+	var seg_len: float = L / float(n_intervals)
+	for i in range(n_intervals):
+		var ps: Vector3 = f.start + forward * (i * seg_len)
+		var pe: Vector3 = f.start + forward * ((i + 1) * seg_len)
+		ps.y = _ground_y(ps)
+		pe.y = _ground_y(pe)
+		var mid: Vector3 = (ps + pe) * 0.5
+		mid.y += height * 0.5
+		var body := StaticBody3D.new()
+		body.position = mid
+		body.basis = _yaw_basis(forward)
+		body.collision_layer = WALL_COLLISION_LAYER
+		body.collision_mask = 0
+		var shape := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = Vector3(seg_len, height, thickness)
+		shape.shape = box
+		body.add_child(shape)
+		_visuals_root.add_child(body)
 
 func _post_position_taken(pos: Vector3) -> bool:
 	for p in _post_positions:

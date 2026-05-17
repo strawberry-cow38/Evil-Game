@@ -1998,6 +1998,10 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 		var next_pos := pos + vel * STEP_DT + gravity * 0.5 * STEP_DT * STEP_DT
 		vel += gravity * STEP_DT
 		var q := PhysicsRayQueryParameters3D.create(pos, next_pos)
+		# Skip the player's own capsule + the fence player-smoothing layer
+		# (bit 6). Bullets resolve on the precise per-element fence colliders
+		# on bit 7 instead, so they pass between pickets cleanly.
+		q.collision_mask = 0xFFFFFFFF & ~(1 << 5)
 		var ex: Array[RID] = []
 		if _player is CollisionObject3D:
 			ex.append((_player as CollisionObject3D).get_rid())
@@ -2314,6 +2318,10 @@ func _update_laser() -> void:
 	var space := get_world_3d().direct_space_state
 	if space != null:
 		var q := PhysicsRayQueryParameters3D.create(origin, end)
+		# Laser dot uses the same precise-fence mask as bullets — it should
+		# land on the post the bullet would actually hit, not on the smooth
+		# wall collider the player slides along.
+		q.collision_mask = 0xFFFFFFFF & ~(1 << 5)
 		var ex: Array[RID] = []
 		if _player is CollisionObject3D:
 			ex.append((_player as CollisionObject3D).get_rid())

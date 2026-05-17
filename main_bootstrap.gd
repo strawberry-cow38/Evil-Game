@@ -108,6 +108,11 @@ func _ready() -> void:
 		fences_root.setup(terrain_node)
 		fences_root.set_state(MapState.fences)
 		fences_root.enable_collision(true)
+		# Ensure the player capsule masks the fence smoothing layer (bit 6)
+		# so it slides along the smooth wall box, not the per-picket bumps.
+		var player_node := get_node_or_null("Player")
+		if player_node is CollisionObject3D:
+			(player_node as CollisionObject3D).collision_mask |= (1 << 5)
 	# Player spawn override: pick a random authored marker and drop the
 	# Player there. Sit them slightly above the terrain so they don't
 	# clip through the new mesh.
