@@ -511,7 +511,7 @@ func _make_dynamic(content: Node3D) -> void:
 		# Mark as dynamic prop so grenade splash + player push code can find it
 		# without walking metadata one node at a time.
 		rb.add_to_group("dynamic_prop")
-		var parent := sb.get_parent()
+		var parent: Node = sb.get_parent()
 		var xform: Transform3D = sb.transform
 		# Move collision shapes from the old static to the new rigid.
 		var shapes: Array = []
