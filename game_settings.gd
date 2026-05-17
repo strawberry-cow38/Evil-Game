@@ -19,10 +19,12 @@ const DEFAULTS: Dictionary = {
 	"ssr_enabled": false,
 	"sdfgi_enabled": false,
 	"fog_enabled": false,
-	# Sun
+	# Sun + shadows
 	"sun_shadow_enabled": true,
 	"sun_shadow_distance": 100.0,
 	"sun_angular_distance": 0.5,
+	"shadow_filter_quality": int(RenderingServer.SHADOW_QUALITY_SOFT_HIGH),
+	"positional_shadow_atlas_size": 4096,
 	# Viewport
 	"msaa_3d": 2,        # 0=Disabled, 1=2x, 2=4x, 3=8x
 	"taa": false,
@@ -110,6 +112,14 @@ func apply_all() -> void:
 	_apply_environment(root)
 	_apply_sun(root)
 	_apply_viewport()
+	_apply_shadow_quality()
+
+func _apply_shadow_quality() -> void:
+	# Directional + omni/spot share one quality enum each. Cross-hatchy shadow
+	# edges = SHADOW_QUALITY_HARD or LOW; bump to SOFT_HIGH for smooth PCF.
+	var q: int = int(get_value("shadow_filter_quality"))
+	RenderingServer.directional_soft_shadow_filter_set_quality(q)
+	RenderingServer.positional_soft_shadow_filter_set_quality(q)
 
 func _apply_environment(root: Node) -> void:
 	var we: WorldEnvironment = _find_first(root, "WorldEnvironment") as WorldEnvironment
@@ -143,6 +153,7 @@ func _apply_viewport() -> void:
 	vp.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if bool(get_value("fxaa")) else Viewport.SCREEN_SPACE_AA_DISABLED
 	vp.scaling_3d_mode = int(get_value("scaling_mode"))
 	vp.scaling_3d_scale = float(get_value("render_scale"))
+	vp.positional_shadow_atlas_size = int(get_value("positional_shadow_atlas_size"))
 
 func _find_first(root: Node, type_name: String) -> Node:
 	# Breadth-first walk — first node whose class matches wins. WorldEnvironment

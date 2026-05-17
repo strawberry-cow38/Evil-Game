@@ -25,6 +25,23 @@ const SCALING_OPTIONS: Array = [
 	{"label": "FSR 2.2",  "value": 2},
 ]
 
+const SHADOW_QUALITY_OPTIONS: Array = [
+	{"label": "Hard",         "value": int(RenderingServer.SHADOW_QUALITY_HARD)},
+	{"label": "Soft Very Low", "value": int(RenderingServer.SHADOW_QUALITY_SOFT_VERY_LOW)},
+	{"label": "Soft Low",     "value": int(RenderingServer.SHADOW_QUALITY_SOFT_LOW)},
+	{"label": "Soft Medium",  "value": int(RenderingServer.SHADOW_QUALITY_SOFT_MEDIUM)},
+	{"label": "Soft High",    "value": int(RenderingServer.SHADOW_QUALITY_SOFT_HIGH)},
+	{"label": "Soft Ultra",   "value": int(RenderingServer.SHADOW_QUALITY_SOFT_ULTRA)},
+]
+
+const SHADOW_ATLAS_OPTIONS: Array = [
+	{"label": "1024",  "value": 1024},
+	{"label": "2048",  "value": 2048},
+	{"label": "4096",  "value": 4096},
+	{"label": "8192",  "value": 8192},
+	{"label": "16384", "value": 16384},
+]
+
 var _open := false
 var _root: Control
 var _captured_mouse_was: int = Input.MOUSE_MODE_VISIBLE
@@ -130,6 +147,8 @@ func _build_ui() -> void:
 	_checkbox(grid, "Sun shadows", "sun_shadow_enabled")
 	_slider(grid, "Shadow distance (m)", "sun_shadow_distance", 20.0, 400.0, 5.0)
 	_slider(grid, "Sun angular size (soft penumbra)", "sun_angular_distance", 0.0, 4.0, 0.1)
+	_dropdown(grid, "Shadow filter quality", "shadow_filter_quality", SHADOW_QUALITY_OPTIONS)
+	_dropdown(grid, "Positional shadow atlas size", "positional_shadow_atlas_size", SHADOW_ATLAS_OPTIONS)
 
 	_section(grid, "Anti-aliasing & scaling")
 	_dropdown(grid, "MSAA", "msaa_3d", MSAA_OPTIONS)
