@@ -151,6 +151,17 @@ var _snap_hint_material: StandardMaterial3D = null
 var _debris: Array = []
 const DEBRIS_LIFE := 1.8
 const DEBRIS_GRAVITY := 9.8
+# When this fraction of a segment's pickets is destroyed, the smooth wall
+# collider for that segment is freed (player can walk through) and the
+# affected rail sub-pieces are hidden.
+const SEG_BREACH_RATIO := 0.4
+
+# Live damage state per segment in play mode.
+#   key = "%d_%d" % [fence_idx, seg_idx]
+#   val = { destroyed: Dictionary[int -> true], breached: bool }
+var _segment_state: Dictionary = {}
+# Wall collider StaticBody3D per segment, keyed the same way.
+var _wall_bodies: Dictionary = {}
 
 # Cached world positions of every post placed so far — drives hard snap.
 var _post_positions: Array = []
@@ -699,6 +710,28 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 	if body is CollisionObject3D:
 		(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_DISABLED
 	body.visible = false
+	# Hide rail sub-pieces adjacent to this picket so the gap looks real.
+	var adj_rails: Array = body.get_meta("adjacent_rails", [])
+	for r in adj_rails:
+		if is_instance_valid(r):
+			(r as MeshInstance3D).visible = false
+	# Track per-segment damage and trigger a breach (free wall collider, so
+	# the player can walk through) once enough pickets are gone.
+	var fence_idx: int = int(body.get_meta("fence_idx", -1))
+	var seg_idx: int = int(body.get_meta("seg_idx", -1))
+	var picket_index: int = int(body.get_meta("picket_index", -1))
+	var n_seg: int = int(body.get_meta("n_pickets_in_seg", 0))
+	if fence_idx >= 0 and seg_idx >= 0 and n_seg > 0:
+		var seg_key: String = "%d_%d" % [fence_idx, seg_idx]
+		if not _segment_state.has(seg_key):
+			_segment_state[seg_key] = {"destroyed": {}, "breached": false}
+		var state: Dictionary = _segment_state[seg_key]
+		state["destroyed"][picket_index] = true
+		if not state["breached"]:
+			var ratio: float = float(state["destroyed"].size()) / float(n_seg)
+			if ratio >= SEG_BREACH_RATIO:
+				state["breached"] = true
+				_free_segment_wall(seg_key)
 	var respawn: float = float(body.get_meta("respawn_time", 10.0))
 	# Use a Timer node parented to self (the fences node) so a scene unload
 	# cleans up pending respawns and so the body's PROCESS_MODE_DISABLED
@@ -719,9 +752,34 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 			body_now.visible = true
 			if body_now is CollisionObject3D:
 				(body_now as CollisionObject3D).process_mode = Node.PROCESS_MODE_INHERIT
+			# Restore the rail sub-pieces this picket was holding up.
+			var rails: Array = body_now.get_meta("adjacent_rails", [])
+			for r in rails:
+				if is_instance_valid(r):
+					(r as MeshInstance3D).visible = true
+			# Decrement segment damage. Wall collider stays gone until a
+			# rebuild — a breached wall doesn't re-form mid-play.
+			var fi: int = int(body_now.get_meta("fence_idx", -1))
+			var si: int = int(body_now.get_meta("seg_idx", -1))
+			var pi: int = int(body_now.get_meta("picket_index", -1))
+			if fi >= 0 and si >= 0:
+				var sk: String = "%d_%d" % [fi, si]
+				if _segment_state.has(sk):
+					(_segment_state[sk]["destroyed"] as Dictionary).erase(pi)
 		if is_instance_valid(timer):
 			timer.queue_free()
 	)
+
+func _free_segment_wall(seg_key: String) -> void:
+	# Drop the player-smoothing wall box for the breached segment so the
+	# player can walk through the gap. Per-element picket colliders stay
+	# alive on layer 7 — bullets still resolve on the remaining wood.
+	if not _wall_bodies.has(seg_key):
+		return
+	var body: StaticBody3D = _wall_bodies[seg_key]
+	if is_instance_valid(body):
+		body.queue_free()
+	_wall_bodies.erase(seg_key)
 
 func _spawn_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, normal: Vector3) -> void:
 	if mesh == null or _debris_root == null:
@@ -809,9 +867,11 @@ func _rebuild_all() -> void:
 	# user can see where their next drag can branch off.
 	for f in _fences:
 		_build_snap_hint(f.start, f.end)
+	_segment_state.clear()
+	_wall_bodies.clear()
 	if _collision_enabled:
-		for f in _fences:
-			_spawn_wall_collider(f, _variant_for(f))
+		for fi in range(_fences.size()):
+			_spawn_wall_collider(fi, _fences[fi], _variant_for(_fences[fi]))
 	# Highlight survives rebuilds while a segment is selected.
 	if _selected_fence >= 0:
 		_select_highlight = null  # was a child of the freed _visuals_root
@@ -957,7 +1017,7 @@ func _attach_collider(root: Node3D, mesh: Mesh, world_pos: Vector3, basis: Basis
 	root.add_child(body)
 	return body
 
-func _spawn_wall_collider(f: Dictionary, variant: Dictionary) -> void:
+func _spawn_wall_collider(fence_idx: int, f: Dictionary, variant: Dictionary) -> void:
 	# Smooth wall box per segment on WALL_COLLISION_LAYER. Sole purpose is to
 	# give the player capsule a single flat surface to slide along instead of
 	# the bumpy per-picket geometry that causes jitter on movement. Bullets
@@ -992,6 +1052,9 @@ func _spawn_wall_collider(f: Dictionary, variant: Dictionary) -> void:
 		shape.shape = box
 		body.add_child(shape)
 		_visuals_root.add_child(body)
+		var seg_key: String = "%d_%d" % [fence_idx, i]
+		body.set_meta("seg_key", seg_key)
+		_wall_bodies[seg_key] = body
 
 func _post_position_taken(pos: Vector3) -> bool:
 	for p in _post_positions:
@@ -1010,25 +1073,88 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 		var props: Dictionary = get_segment_props(fence_idx, seg_idx)
 		destructible = bool(props.get("destructible", false))
 		respawn_time = float(props.get("respawn_time", 10.0))
+	# Picket positions along the run (axis distance from p_start) — computed
+	# up-front so rails can split into per-picket cells.
+	var n_pickets: int = 0
+	var picket_positions: Array = []
+	var picket_t_axis: Array = []  # signed distance along forward from p_start
 	if picket_glb != "" and picket_spacing > 0.0:
 		# Picket count: pick the integer N that makes the spacing s = span/(N+1)
 		# closest to picket_spacing. Treating end-to-post as another picket slot
 		# guarantees symmetric end gaps that match the inter-picket gap.
-		var n_pickets: int = max(0, int(round(span / picket_spacing)) - 1)
+		n_pickets = max(0, int(round(span / picket_spacing)) - 1)
 		if n_pickets > 0:
 			var s: float = span / float(n_pickets + 1)
 			for i in range(n_pickets):
-				var pw: Vector3 = p_start + forward * (s * (i + 1))
+				var t: float = s * (i + 1)
+				var pw: Vector3 = p_start + forward * t
 				pw.y = _ground_y(pw)
-				_spawn_picket(root, pw, forward, variant, ghost, destructible, respawn_time)
+				picket_positions.append(pw)
+				picket_t_axis.append(t)
 	# Rails sit between posts (inner edge → inner edge). Heights per variant.
+	# Split each rail into n_pickets sub-pieces (one per picket cell) when
+	# destructible so we can hide just the affected part on picket death.
 	var post_width: float = variant["post_width"]
 	var rail_origin: Vector3 = p_start + forward * (post_width * 0.5)
 	var rail_length: float = span - post_width
+	var rail_subs_by_height: Array = []  # Array[Array[MeshInstance3D|null]]
 	for ry in variant["rails"]:
 		var rp: Vector3 = rail_origin
 		rp.y = _ground_y(rp) + ry
-		_spawn_rail(root, rp, forward, rail_length, variant, ghost)
+		if destructible and n_pickets > 0 and not ghost:
+			rail_subs_by_height.append(_spawn_split_rail(root, p_start, rp.y, forward, post_width, rail_length, variant, picket_t_axis))
+		else:
+			_spawn_rail(root, rp, forward, rail_length, variant, ghost)
+	# Spawn pickets and (if destructible) tag each body with its segment +
+	# picket index + adjacent rail sub-pieces. The picket-hit handler uses
+	# those refs to hide the affected rail cells when the picket dies.
+	for i in range(n_pickets):
+		var pw_i: Vector3 = picket_positions[i]
+		var adj_rails: Array = []
+		if destructible:
+			for sub_arr in rail_subs_by_height:
+				if i < sub_arr.size() and sub_arr[i] != null:
+					adj_rails.append(sub_arr[i])
+		var picket_tags: Dictionary = {}
+		if destructible:
+			picket_tags = {
+				"fence_idx": fence_idx,
+				"seg_idx": seg_idx,
+				"picket_index": i,
+				"n_pickets_in_seg": n_pickets,
+				"adjacent_rails": adj_rails,
+			}
+		_spawn_picket(root, pw_i, forward, variant, ghost, destructible, respawn_time, picket_tags)
+
+func _spawn_split_rail(root: Node3D, p_start: Vector3, rail_y: float, forward: Vector3, post_width: float, rail_length: float, variant: Dictionary, picket_t_axis: Array) -> Array:
+	# Split a rail into one sub-piece per picket cell. Each cell spans from
+	# midway-with-previous-picket to midway-with-next-picket (clamped to the
+	# rail's left/right inner-post bounds). Returns an array indexed by
+	# picket_index pointing at the sub-rail's MeshInstance3D (or null).
+	var refs: Array = []
+	var mesh: Mesh = _mesh_cache.get(variant["rail_glb"], null)
+	if mesh == null or picket_t_axis.is_empty():
+		return refs
+	var rail_left: float = post_width * 0.5
+	var rail_right: float = rail_left + rail_length
+	var n: int = picket_t_axis.size()
+	for i in range(n):
+		var L: float = rail_left
+		var R: float = rail_right
+		if i > 0:
+			L = (picket_t_axis[i - 1] + picket_t_axis[i]) * 0.5
+		if i < n - 1:
+			R = (picket_t_axis[i] + picket_t_axis[i + 1]) * 0.5
+		var sub_len: float = R - L
+		if sub_len <= 0.01:
+			refs.append(null)
+			continue
+		var left_world: Vector3 = p_start + forward * L
+		left_world.y = rail_y
+		var basis: Basis = _yaw_basis(forward).scaled_local(Vector3(sub_len, 1.0, 1.0))
+		var pair: Dictionary = _spawn(root, mesh, left_world, basis, false)
+		refs.append(pair.get("mesh", null))
+	return refs
 
 func _spawn_post(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool) -> void:
 	var mesh: Mesh = _mesh_cache.get(variant["post_glb"], null)
@@ -1038,7 +1164,7 @@ func _spawn_post(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Di
 		basis = basis.scaled_local(Vector3(1.0, ysc, 1.0))
 	_spawn(root, mesh, world_pos, basis, ghost)
 
-func _spawn_picket(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool, destructible: bool = false, respawn_time: float = 10.0) -> void:
+func _spawn_picket(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool, destructible: bool = false, respawn_time: float = 10.0, tags: Dictionary = {}) -> void:
 	var mesh: Mesh = _mesh_cache.get(variant["picket_glb"], null)
 	if mesh == null:
 		return
@@ -1063,6 +1189,8 @@ func _spawn_picket(root: Node3D, world_pos: Vector3, forward: Vector3, variant: 
 		body.add_to_group(PICKET_GROUP)
 		body.set_meta("picket_mesh_ref", pair["mesh"])
 		body.set_meta("respawn_time", respawn_time)
+		for k in tags.keys():
+			body.set_meta(k, tags[k])
 
 func _spawn_rail(root: Node3D, world_pos: Vector3, forward: Vector3, length: float, variant: Dictionary, ghost: bool) -> void:
 	var mesh: Mesh = _mesh_cache.get(variant["rail_glb"], null)
