@@ -126,7 +126,12 @@ func _explode(world_pos: Vector3, normal: Vector3) -> void:
 		sp.global_position = world_pos
 		sp.play()
 		var st := get_tree().create_timer(4.0)
-		st.timeout.connect(func(): if is_instance_valid(sp): sp.queue_free())
+		var sp_ref: WeakRef = weakref(sp)
+		st.timeout.connect(func():
+			var n: Node = sp_ref.get_ref() as Node
+			if n != null:
+				n.queue_free()
+		)
 
 	# Brief light flash.
 	var light := OmniLight3D.new()
@@ -142,7 +147,10 @@ func _explode(world_pos: Vector3, normal: Vector3) -> void:
 
 	# Cleanup the particles + self after particles finish.
 	var t := get_tree().create_timer(p.lifetime + 0.4)
+	var p_ref: WeakRef = weakref(p)
 	t.timeout.connect(func():
-		if is_instance_valid(p): p.queue_free()
+		var n: Node = p_ref.get_ref() as Node
+		if n != null:
+			n.queue_free()
 	)
 	queue_free()

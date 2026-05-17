@@ -195,7 +195,12 @@ func _fire_trigger(tr: Dictionary) -> void:
 		var eid: String = String(fire_ids[i])
 		var wait: float = delay + between * float(i)
 		if wait > 0.0:
-			get_tree().create_timer(wait).timeout.connect(func(): _apply_event(eid))
+			var self_ref: WeakRef = weakref(self)
+			get_tree().create_timer(wait).timeout.connect(func():
+				var s = self_ref.get_ref()
+				if s != null:
+					s._apply_event(eid)
+			)
 		else:
 			_apply_event(eid)
 

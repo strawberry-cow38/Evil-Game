@@ -121,6 +121,10 @@ const VARIANT_SEG_DEFAULTS := {
 # Group every picket collider in a destructible segment joins so weapon.gd
 # can detect a fence-picket hit and route it back to this node.
 const PICKET_GROUP := "fence_picket_destructible"
+# Rail sub-pieces in a destructible segment land in this group so bullet
+# decals can parent to them — same cleanup story as pickets, but rails
+# don't take "damage" so they stay out of PICKET_GROUP.
+const RAIL_GROUP := "fence_rail_destructible"
 
 var _fences: Array = []
 var _terrain: Node3D = null
@@ -724,6 +728,7 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 	var seg_key: String = "%d_%d" % [fence_idx, seg_idx]
 	var state: Dictionary = _ensure_segment_state(seg_key, body)
 	_spawn_debris(mi.mesh, mi.global_position, mi.basis, hit_normal)
+	_spawn_picket_stub(seg_key, mi)
 	_hide_picket(body, mi, picket_index, state)
 	if not state["breached"]:
 		var ratio: float = float(state["destroyed"].size()) / float(n_seg)
@@ -881,6 +886,7 @@ func _collapse_segment(seg_key: String, hit_normal: Vector3) -> void:
 		var mi: MeshInstance3D = b.get_meta("picket_mesh_ref", null)
 		if mi != null and is_instance_valid(mi) and mi.visible:
 			_spawn_collapse_debris(mi.mesh, mi.global_position, mi.basis, -n, 0.6)
+			_spawn_picket_stub(seg_key, mi)
 			var pi: int = int(b.get_meta("picket_index", -1))
 			_hide_picket(b, mi, pi, state)
 		# Each picket carries refs to its adjacent rail sub-pieces as
@@ -927,6 +933,24 @@ func _spawn_collapse_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, kick_d
 		"life": life,
 		"max_life": life,
 	})
+
+func _spawn_picket_stub(seg_key: String, mi: MeshInstance3D) -> void:
+	# Leave a short broken stub where the picket used to stand. Parents under
+	# the segment holder so it dies cleanly with the next teardown/rebuild.
+	# Y-component of the picket's basis is rescaled to ~18% so the stub is
+	# a stumpy bottom slice of the original mesh, anchored at ground level.
+	if mi == null or mi.mesh == null:
+		return
+	var holder: Node = _segment_holders.get(seg_key, null)
+	if holder == null or not is_instance_valid(holder):
+		return
+	const STUB_HEIGHT: float = 0.18
+	var stub := MeshInstance3D.new()
+	stub.mesh = mi.mesh
+	stub.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	holder.add_child(stub)
+	stub.global_position = mi.global_position
+	stub.basis = Basis(mi.basis.x, mi.basis.y * STUB_HEIGHT, mi.basis.z)
 
 func _spawn_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, normal: Vector3) -> void:
 	if mesh == null or _debris_root == null:
@@ -996,14 +1020,15 @@ func _rebuild_all() -> void:
 	# this, two runs meeting at a snapped endpoint stack two posts at the
 	# same world position rotated differently — visible mess.
 	var entries: Array = []
-	for f in _fences:
+	for fi_e in range(_fences.size()):
+		var f: Dictionary = _fences[fi_e]
 		var sa: Vector3 = f.get("start_anchor", Vector3.ZERO)
 		var ea: Vector3 = f.get("end_anchor", Vector3.ZERO)
-		_collect_segment_posts(f.start, f.end, f.post_spacing, _variant_for(f), entries, sa, ea)
+		_collect_segment_posts(f.start, f.end, f.post_spacing, _variant_for(f), entries, sa, ea, fi_e)
 	for cl in _cluster_posts(entries):
 		var pw: Vector3 = cl["pos"]
 		pw.y = _ground_y(pw)
-		_spawn_post(_visuals_root, pw, cl["forward"], cl["variant"], false)
+		_spawn_post(_visuals_root, pw, cl["forward"], cl["variant"], false, bool(cl.get("wallbang", false)))
 		_post_positions.append(pw)
 	# Pickets + rails are per-interval and never overlap across runs, so
 	# they can run independently per segment.
@@ -1062,7 +1087,7 @@ func _clear_ghost() -> void:
 	for c in _ghost_root.get_children():
 		c.queue_free()
 
-func _collect_segment_posts(start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, out_entries: Array, start_anchor: Vector3 = Vector3.ZERO, end_anchor: Vector3 = Vector3.ZERO) -> void:
+func _collect_segment_posts(start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, out_entries: Array, start_anchor: Vector3 = Vector3.ZERO, end_anchor: Vector3 = Vector3.ZERO, fence_idx: int = -1) -> void:
 	var delta: Vector3 = end - start
 	delta.y = 0.0
 	var L: float = delta.length()
@@ -1080,7 +1105,16 @@ func _collect_segment_posts(start: Vector3, end: Vector3, post_spacing: float, v
 			fwd = start_anchor
 		elif i == n_intervals and end_anchor != Vector3.ZERO:
 			fwd = end_anchor
-		out_entries.append({"pos": pw, "forward": fwd, "variant": variant})
+		# Wallbang the post if either neighbouring segment opts in. End posts
+		# only have one neighbour. Variant-default wallbang still applies if
+		# neither neighbour set it explicitly.
+		var wb: bool = bool(variant.get("wallbang", false))
+		if fence_idx >= 0:
+			if i > 0:
+				wb = wb or bool(get_segment_props(fence_idx, i - 1).get("wallbang", false))
+			if i < n_intervals:
+				wb = wb or bool(get_segment_props(fence_idx, i).get("wallbang", false))
+		out_entries.append({"pos": pw, "forward": fwd, "variant": variant, "wallbang": wb})
 
 func _build_intervals(root: Node3D, start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, ghost: bool, fence_idx: int = -1) -> void:
 	var delta: Vector3 = end - start
@@ -1131,7 +1165,14 @@ func _cluster_posts(entries: Array) -> Array:
 			if g["count"] > best_group["count"] or (g["count"] == best_group["count"] and _cardinality(g["forward"]) > _cardinality(best_group["forward"])):
 				best_group = g
 		var sample: Dictionary = best_group["sample"]
-		out.append({"pos": cl["pos"], "forward": sample["forward"], "variant": sample["variant"]})
+		# Post wallbang is the OR of every contributing entry — if ANY adjacent
+		# segment opted into wallbang, the shared post gets it too.
+		var cluster_wb: bool = false
+		for e in cl["entries"]:
+			if bool(e.get("wallbang", false)):
+				cluster_wb = true
+				break
+		out.append({"pos": cl["pos"], "forward": sample["forward"], "variant": sample["variant"], "wallbang": cluster_wb})
 	return out
 
 func _cardinality(f: Vector3) -> float:
@@ -1355,19 +1396,21 @@ func _spawn_split_rail(root: Node3D, p_start: Vector3, rail_y: float, forward: V
 		left_world.y = rail_y
 		var basis: Basis = _yaw_basis(forward).scaled_local(Vector3(sub_len, 1.0, 1.0))
 		var pair: Dictionary = _spawn(root, mesh, left_world, basis, false, wallbang)
-		refs.append({"mesh": pair.get("mesh", null), "body": pair.get("body", null)})
+		var rb: Node = pair.get("body", null)
+		if rb != null:
+			rb.add_to_group(RAIL_GROUP)
+		refs.append({"mesh": pair.get("mesh", null), "body": rb})
 	return refs
 
-func _spawn_post(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool) -> void:
+func _spawn_post(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool, wallbang_override: bool = false) -> void:
 	var mesh: Mesh = _mesh_cache.get(variant["post_glb"], null)
 	var basis: Basis = _yaw_basis(forward)
 	var ysc: float = variant.get("post_scale_y", 1.0)
 	if ysc != 1.0:
 		basis = basis.scaled_local(Vector3(1.0, ysc, 1.0))
-	# Posts inherit variant-default wallbang. Per-segment overrides apply
-	# only to pickets+rails since a post can sit between two segments with
-	# different settings.
-	var wallbang: bool = bool(variant.get("wallbang", false))
+	# Wallbang the post if either of its adjacent segments opts in. The
+	# cluster pass ORs neighbouring entries before this point.
+	var wallbang: bool = wallbang_override or bool(variant.get("wallbang", false))
 	_spawn(root, mesh, world_pos, basis, ghost, wallbang)
 
 func _spawn_picket(root: Node3D, world_pos: Vector3, forward: Vector3, variant: Dictionary, ghost: bool, destructible: bool = false, respawn_time: float = 10.0, tags: Dictionary = {}) -> void:

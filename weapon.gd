@@ -2275,8 +2275,10 @@ func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, c
 	# when a fence picket is destroyed. Falls back to scene root only when
 	# the collider can't host children.
 	var parent: Node = null
-	if collider is Node and (collider as Node).is_in_group("fence_picket_destructible"):
-		parent = collider as Node
+	if collider is Node:
+		var cn := collider as Node
+		if cn.is_in_group("fence_picket_destructible") or cn.is_in_group("fence_rail_destructible"):
+			parent = cn
 	if parent == null:
 		parent = _find_damageable(collider)
 	if parent == null or not (parent is Node3D):
