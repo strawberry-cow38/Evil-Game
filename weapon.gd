@@ -2100,8 +2100,8 @@ func _maybe_notify_fence_picket(collider: Object, hit_pos: Vector3, hit_normal: 
 	# Use a Timer node parented to the picket body so it dies cleanly with
 	# the scene (avoids spam from freed-capture warnings when timers fire
 	# after the fence/picket has been disposed).
-	var fn_ref := weakref(fn)
-	var n_ref := weakref(n)
+	var fn_ref: WeakRef = weakref(fn)
+	var n_ref: WeakRef = weakref(n)
 	var timer := Timer.new()
 	timer.one_shot = true
 	timer.wait_time = delay
