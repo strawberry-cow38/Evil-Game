@@ -8,6 +8,7 @@ extends Node3D
 
 const EDITOR_TERRAIN := preload("res://editor_terrain.gd")
 const ROAD_RENDERER := preload("res://road_renderer.gd")
+const FENCES_SCRIPT := preload("res://editor_fences.gd")
 const EFFECT_CATALOG := preload("res://editor_effect_catalog.gd")
 const OBJECT_CATALOG := preload("res://editor_objects_catalog.gd")
 const PICKUP := preload("res://pickup.gd")
@@ -96,6 +97,16 @@ func _ready() -> void:
 		roads_root.name = "Roads"
 		add_child(roads_root)
 		roads_root.build(terrain_node, MapState.roads)
+	# Fences — reuses the editor's renderer minus its editing UI. setup()
+	# preloads the variant GLBs; set_state() spawns the cached posts/rails/
+	# pickets for every authored run, sampling terrain for ground Y.
+	if not MapState.fences.is_empty():
+		var fences_root := Node3D.new()
+		fences_root.set_script(FENCES_SCRIPT)
+		fences_root.name = "Fences"
+		add_child(fences_root)
+		fences_root.setup(terrain_node)
+		fences_root.set_state(MapState.fences)
 	# Player spawn override: pick a random authored marker and drop the
 	# Player there. Sit them slightly above the terrain so they don't
 	# clip through the new mesh.

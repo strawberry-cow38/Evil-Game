@@ -6,6 +6,7 @@ extends PanelContainer
 
 signal post_spacing_changed(value: float)
 signal variant_changed(name: String)
+signal erase_mode_changed(enabled: bool)
 
 const MIN_SPACING := 0.8
 const MAX_SPACING := 6.0
@@ -22,6 +23,7 @@ const VARIANT_OPTIONS: Array = [
 
 var _spacing_spin: SpinBox
 var _variant_opt: OptionButton
+var _erase_btn: CheckButton
 var _suppress: bool = false
 
 func _ready() -> void:
@@ -61,8 +63,12 @@ func _ready() -> void:
 	_spacing_spin.custom_minimum_size = Vector2(110, 0)
 	_spacing_spin.value_changed.connect(_on_spin)
 	row.add_child(_spacing_spin)
+	_erase_btn = CheckButton.new()
+	_erase_btn.text = "Erase mode"
+	_erase_btn.toggled.connect(_on_erase_toggled)
+	vb.add_child(_erase_btn)
 	var hint := Label.new()
-	hint.text = "LMB drag to place a run.\nSnaps to nearest post.\nShift = no post snap.\nAlt = no snap at all.\nRMB / Esc to cancel."
+	hint.text = "LMB drag to place a run.\nSnaps to existing posts + lines.\nShift = angle snap (15°).\nCtrl = distance snap (spacing).\nAlt = no snap.\nErase mode: LMB deletes one section."
 	hint.modulate = Color(1, 1, 1, 0.65)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	vb.add_child(hint)
@@ -95,3 +101,9 @@ func _on_variant_pick(idx: int) -> void:
 	if _suppress:
 		return
 	variant_changed.emit(VARIANT_OPTIONS[idx]["id"])
+
+func is_erase_mode() -> bool:
+	return _erase_btn != null and _erase_btn.button_pressed
+
+func _on_erase_toggled(on: bool) -> void:
+	erase_mode_changed.emit(on)

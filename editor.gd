@@ -29,7 +29,6 @@ const TOOL_O_OBJECTS := "o_objects"
 const TOOL_E_LIGHTING := "e_lighting"
 const TOOL_E_ROADS := "e_roads"
 const TOOL_E_FENCES := "e_fences"
-const TOOL_E_FENCES_DEL := "e_fences_del"
 const TOOL_E_PAINT := "e_paint"
 const TOOL_T_MAT_SMOOTH := "t_mat_smooth"
 const TOOL_T_HOLE := "t_hole"
@@ -1211,7 +1210,8 @@ func _process(delta: float) -> void:
 	# cursor. Alt/Shift modifier state is read live so snap toggles update
 	# the ghost without releasing the mouse.
 	if _active_tool == TOOL_E_FENCES and _fences_node != null:
-		if not _camera.is_looking() and not _is_over_ui():
+		var erase_mode: bool = _fences_panel != null and _fences_panel.is_erase_mode()
+		if not _camera.is_looking() and not _is_over_ui() and not erase_mode:
 			var fhit := _raycast_cursor()
 			if not fhit.is_empty():
 				var fp: Vector3 = fhit.position
@@ -1228,6 +1228,8 @@ func _process(delta: float) -> void:
 				_fences_node.clear_hover()
 		else:
 			_fences_node.clear_hover()
+			if erase_mode and _fences_node.is_dragging():
+				_fences_node.cancel_drag()
 	# Brush preview + LMB-stroke logic only runs when the cursor is free
 	# (camera not in look-mode) and a terrain tool is active.
 	if _camera.is_looking() or _active_tool == TOOL_NONE:
@@ -1485,21 +1487,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		var pf: Vector3 = hit_f.position
 		pf.y = _terrain.sample_height(pf)
+		if _fences_panel != null and _fences_panel.is_erase_mode():
+			# In erase mode each LMB press deletes one section (between two
+			# adjacent posts) of the run nearest the cursor.
+			if not event.pressed:
+				return
+			_fences_node.delete_section_at(pf)
+			return
 		if event.pressed:
 			_fences_node.begin_drag(pf, alt, shift, spacing, ctrl)
 		else:
 			_fences_node.commit_drag(pf, alt, shift, spacing, ctrl)
-		return
-	# Fence eraser: LMB press deletes the fence run nearest the cursor.
-	if _active_tool == TOOL_E_FENCES_DEL:
-		if not event.pressed:
-			return
-		var hit_fd := _raycast_cursor()
-		if hit_fd.is_empty():
-			return
-		var pfd: Vector3 = hit_fd.position
-		pfd.y = _terrain.sample_height(pfd)
-		_fences_node.delete_at(pfd)
 		return
 	# Foliage exact-place: each LMB press drops a single billboard at the
 	# cursor. Spray mode is handled by the per-frame _apply_tool path.
@@ -1674,12 +1672,8 @@ func _on_tool_picked(tool_id: String) -> void:
 	if _fences_panel != null:
 		_fences_panel.visible = (tool_id == TOOL_E_FENCES)
 	if _fences_node != null:
-		var on_fence_tool: bool = (tool_id == TOOL_E_FENCES or tool_id == TOOL_E_FENCES_DEL)
-		_fences_node.set_snap_hint_visible(on_fence_tool)
-		if not on_fence_tool:
-			_fences_node.cancel_drag()
-			_fences_node.clear_hover()
-		elif tool_id == TOOL_E_FENCES_DEL:
+		_fences_node.set_snap_hint_visible(tool_id == TOOL_E_FENCES)
+		if tool_id != TOOL_E_FENCES:
 			_fences_node.cancel_drag()
 			_fences_node.clear_hover()
 	_effects_panel.visible = (tool_id == TOOL_L_EFFECTS)

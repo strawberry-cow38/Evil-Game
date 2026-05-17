@@ -85,6 +85,14 @@ var _drag_active: bool = false
 var _drag_start: Vector3 = Vector3.ZERO
 var _drag_end: Vector3 = Vector3.ZERO
 var _drag_spacing: float = DEFAULT_POST_SPACING
+# Anchor forwards captured when an endpoint snaps to an existing fence
+# line. Used at rebuild time to rotate the merged post to match the
+# fence we're joining onto (zero vector = no anchor / free rotation).
+var _drag_start_anchor: Vector3 = Vector3.ZERO
+var _drag_end_anchor: Vector3 = Vector3.ZERO
+# Set by _maybe_snap as a side-channel: forward of the line snapped onto,
+# Vector3.ZERO if no line snap engaged on the latest call.
+var _last_snap_anchor: Vector3 = Vector3.ZERO
 
 var _visuals_root: Node3D = null
 var _ghost_root: Node3D = null
@@ -170,6 +178,8 @@ func begin_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float,
 	# Shift / ctrl are end-relative-to-start constraints — they don't apply
 	# to the start point itself. Only alt suppresses snapping on begin.
 	_drag_start = _maybe_snap(world_pos, alt)
+	_drag_start_anchor = _last_snap_anchor
+	_drag_end_anchor = Vector3.ZERO
 	_drag_end = _drag_start
 	_refresh_ghost()
 
@@ -192,9 +202,13 @@ func commit_drag(world_pos: Vector3, alt: bool, shift: bool, post_spacing: float
 			"end": _drag_end,
 			"post_spacing": _drag_spacing,
 			"variant": _active_variant,
+			"start_anchor": _drag_start_anchor,
+			"end_anchor": _drag_end_anchor,
 		})
 		fence_state_changed.emit()
 	_drag_active = false
+	_drag_start_anchor = Vector3.ZERO
+	_drag_end_anchor = Vector3.ZERO
 	_clear_ghost()
 	_rebuild_all()
 
@@ -203,13 +217,13 @@ func _resolve_end(world_pos: Vector3, alt: bool, shift: bool, ctrl: bool) -> Vec
 	# shift: angle-only snap (15° increments around start).
 	# ctrl:  distance-only snap (integer multiples of post_spacing).
 	# none of the above: snap end to nearest existing fence line/post.
+	_drag_end_anchor = Vector3.ZERO
 	if alt:
 		return world_pos
-	var end_pos: Vector3 = world_pos
 	if shift or ctrl:
-		end_pos = _modifier_snap(_drag_start, end_pos, shift, ctrl, _drag_spacing)
-	else:
-		end_pos = _maybe_snap(world_pos, false)
+		return _modifier_snap(_drag_start, world_pos, shift, ctrl, _drag_spacing)
+	var end_pos: Vector3 = _maybe_snap(world_pos, false)
+	_drag_end_anchor = _last_snap_anchor
 	return end_pos
 
 func cancel_drag() -> void:
@@ -297,14 +311,21 @@ func _spawn_snap_ring(world_pos: Vector3) -> void:
 
 func _maybe_snap(world_pos: Vector3, alt: bool) -> Vector3:
 	# Post snap wins over line snap (sharper feedback). Alt suppresses both.
+	# Sets `_last_snap_anchor` to the snapped line's forward when line-snap
+	# engages so the caller can record an anchor direction.
+	_last_snap_anchor = Vector3.ZERO
 	if alt:
 		return world_pos
-	var nearest_post := _nearest_post(world_pos, SNAP_RADIUS)
+	var nearest_post: Vector3 = _nearest_post(world_pos, SNAP_RADIUS)
 	if nearest_post != Vector3.INF:
+		# Recover the run that owns this post — gives us the anchor forward
+		# so a junction's merged post inherits the existing run's rotation.
+		_last_snap_anchor = _forward_at(nearest_post)
 		return nearest_post
-	var nearest_line := _nearest_line_point(world_pos, SNAP_RADIUS)
-	if nearest_line != Vector3.INF:
-		return nearest_line
+	var line_hit: Dictionary = _nearest_line_slot(world_pos, SNAP_RADIUS)
+	if not line_hit.is_empty():
+		_last_snap_anchor = line_hit["forward"]
+		return line_hit["pos"]
 	return world_pos
 
 func _nearest_post(world: Vector3, radius: float) -> Vector3:
@@ -317,51 +338,115 @@ func _nearest_post(world: Vector3, radius: float) -> Vector3:
 			best = p
 	return best
 
-func _nearest_line_point(world: Vector3, radius: float) -> Vector3:
-	# Project `world` onto every committed fence segment (XZ only), return the
-	# closest projection within `radius`. Used so the user can branch off an
-	# existing run anywhere along its length, not just at posts.
-	var best: Vector3 = Vector3.INF
+func _nearest_line_slot(world: Vector3, radius: float) -> Dictionary:
+	# Project `world` onto each fence run, snap to nearest post slot along
+	# the run, return {pos, forward} of the closest hit. Snapping to slot
+	# positions (not the raw projection) makes new fences butt into the
+	# existing picket grid cleanly.
+	var best_pos: Vector3 = Vector3.INF
+	var best_fwd: Vector3 = Vector3.ZERO
 	var best_d: float = radius
 	var wxz := Vector3(world.x, 0.0, world.z)
 	for f in _fences:
 		var a: Vector3 = Vector3(f.start.x, 0.0, f.start.z)
 		var b: Vector3 = Vector3(f.end.x,   0.0, f.end.z)
 		var ab: Vector3 = b - a
-		var L2: float = ab.length_squared()
-		if L2 < 0.0001:
+		var L: float = ab.length()
+		if L < 0.0001:
 			continue
-		var t: float = clampf((wxz - a).dot(ab) / L2, 0.0, 1.0)
-		var p: Vector3 = a + ab * t
+		var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+		var n_intervals: int = max(1, int(round(L / spacing)))
+		var raw_t: float = clampf((wxz - a).dot(ab) / (L * L), 0.0, 1.0)
+		var slot_idx: int = clampi(int(round(raw_t * n_intervals)), 0, n_intervals)
+		var slot_t: float = float(slot_idx) / float(n_intervals)
+		var p: Vector3 = a + ab * slot_t
 		var d: float = p.distance_to(wxz)
 		if d < best_d:
 			best_d = d
-			best = Vector3(p.x, world.y, p.z)
-	return best
+			best_pos = Vector3(p.x, world.y, p.z)
+			best_fwd = (ab / L)
+	if best_pos == Vector3.INF:
+		return {}
+	return {"pos": best_pos, "forward": best_fwd}
 
-func delete_at(world_pos: Vector3, radius: float = SNAP_RADIUS) -> bool:
-	# Remove the single fence run whose line is closest to `world_pos`
-	# (XZ-projected). Returns true iff something was removed.
+func _forward_at(world_post: Vector3) -> Vector3:
+	# Returns the forward of any fence whose endpoint coincides with the
+	# given world-space post position. Used to anchor a snapped post to the
+	# direction of the run we're joining onto.
+	for f in _fences:
+		if Vector3(f.start.x, 0.0, f.start.z).distance_to(Vector3(world_post.x, 0.0, world_post.z)) < POST_DEDUP_RADIUS:
+			return _segment_forward(f)
+		if Vector3(f.end.x, 0.0, f.end.z).distance_to(Vector3(world_post.x, 0.0, world_post.z)) < POST_DEDUP_RADIUS:
+			return _segment_forward(f)
+		# Also check interior slot positions for very long runs.
+		var a := Vector3(f.start.x, 0.0, f.start.z)
+		var b := Vector3(f.end.x,   0.0, f.end.z)
+		var L := (b - a).length()
+		if L < 0.0001:
+			continue
+		var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+		var n_intervals: int = max(1, int(round(L / spacing)))
+		for i in range(1, n_intervals):
+			var p := a + (b - a) * (float(i) / float(n_intervals))
+			if p.distance_to(Vector3(world_post.x, 0.0, world_post.z)) < POST_DEDUP_RADIUS:
+				return _segment_forward(f)
+	return Vector3.ZERO
+
+func _segment_forward(f: Dictionary) -> Vector3:
+	var d: Vector3 = Vector3(f.end.x, 0.0, f.end.z) - Vector3(f.start.x, 0.0, f.start.z)
+	if d.length_squared() < 0.0001:
+		return Vector3.ZERO
+	return d.normalized()
+
+func delete_section_at(world_pos: Vector3, radius: float = SNAP_RADIUS) -> bool:
+	# Find the run+interval (between two adjacent posts) closest to
+	# `world_pos`, replace the original run with 0/1/2 sub-runs covering the
+	# portions before/after the deleted interval. Returns true iff a section
+	# was removed.
 	var wxz := Vector3(world_pos.x, 0.0, world_pos.z)
 	var best_i: int = -1
+	var best_seg: int = -1
+	var best_n: int = 0
 	var best_d: float = radius
 	for i in range(_fences.size()):
 		var f: Dictionary = _fences[i]
 		var a: Vector3 = Vector3(f.start.x, 0.0, f.start.z)
 		var b: Vector3 = Vector3(f.end.x,   0.0, f.end.z)
 		var ab: Vector3 = b - a
-		var L2: float = ab.length_squared()
-		if L2 < 0.0001:
+		var L: float = ab.length()
+		if L < 0.0001:
 			continue
-		var t: float = clampf((wxz - a).dot(ab) / L2, 0.0, 1.0)
-		var p: Vector3 = a + ab * t
-		var d: float = p.distance_to(wxz)
+		var spacing: float = float(f.get("post_spacing", DEFAULT_POST_SPACING))
+		var n_intervals: int = max(1, int(round(L / spacing)))
+		var raw_t: float = clampf((wxz - a).dot(ab) / (L * L), 0.0, 1.0)
+		var seg_idx: int = clampi(int(raw_t * n_intervals), 0, n_intervals - 1)
+		var mid: Vector3 = a + ab * ((float(seg_idx) + 0.5) / float(n_intervals))
+		var d: float = mid.distance_to(wxz)
 		if d < best_d:
 			best_d = d
 			best_i = i
+			best_seg = seg_idx
+			best_n = n_intervals
 	if best_i < 0:
 		return false
+	var orig: Dictionary = _fences[best_i]
+	var seg_a: Vector3 = orig.start.lerp(orig.end, float(best_seg) / float(best_n))
+	var seg_b: Vector3 = orig.start.lerp(orig.end, float(best_seg + 1) / float(best_n))
 	_fences.remove_at(best_i)
+	var insert_at: int = best_i
+	if best_seg > 0:
+		var pre: Dictionary = orig.duplicate(true)
+		pre["start"] = orig.start
+		pre["end"] = seg_a
+		pre["end_anchor"] = Vector3.ZERO
+		_fences.insert(insert_at, pre)
+		insert_at += 1
+	if best_seg < best_n - 1:
+		var post: Dictionary = orig.duplicate(true)
+		post["start"] = seg_b
+		post["end"] = orig.end
+		post["start_anchor"] = Vector3.ZERO
+		_fences.insert(insert_at, post)
 	fence_state_changed.emit()
 	_rebuild_all()
 	return true
@@ -382,7 +467,9 @@ func _rebuild_all() -> void:
 	# same world position rotated differently — visible mess.
 	var entries: Array = []
 	for f in _fences:
-		_collect_segment_posts(f.start, f.end, f.post_spacing, _variant_for(f), entries)
+		var sa: Vector3 = f.get("start_anchor", Vector3.ZERO)
+		var ea: Vector3 = f.get("end_anchor", Vector3.ZERO)
+		_collect_segment_posts(f.start, f.end, f.post_spacing, _variant_for(f), entries, sa, ea)
 	for cl in _cluster_posts(entries):
 		var pw: Vector3 = cl["pos"]
 		pw.y = _ground_y(pw)
@@ -430,7 +517,7 @@ func _clear_ghost() -> void:
 	for c in _ghost_root.get_children():
 		c.queue_free()
 
-func _collect_segment_posts(start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, out_entries: Array) -> void:
+func _collect_segment_posts(start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, out_entries: Array, start_anchor: Vector3 = Vector3.ZERO, end_anchor: Vector3 = Vector3.ZERO) -> void:
 	var delta: Vector3 = end - start
 	delta.y = 0.0
 	var L: float = delta.length()
@@ -441,7 +528,14 @@ func _collect_segment_posts(start: Vector3, end: Vector3, post_spacing: float, v
 	var actual_spacing: float = L / n_intervals
 	for i in range(n_intervals + 1):
 		var pw: Vector3 = start + forward * (i * actual_spacing)
-		out_entries.append({"pos": pw, "forward": forward, "variant": variant})
+		# First / last post inherit the anchor forward when snapped onto an
+		# existing run so the merged post rotates to match it.
+		var fwd: Vector3 = forward
+		if i == 0 and start_anchor != Vector3.ZERO:
+			fwd = start_anchor
+		elif i == n_intervals and end_anchor != Vector3.ZERO:
+			fwd = end_anchor
+		out_entries.append({"pos": pw, "forward": fwd, "variant": variant})
 
 func _build_intervals(root: Node3D, start: Vector3, end: Vector3, post_spacing: float, variant: Dictionary, ghost: bool) -> void:
 	var delta: Vector3 = end - start
@@ -474,14 +568,25 @@ func _cluster_posts(entries: Array) -> Array:
 			clusters.append({"pos": ep, "entries": [e]})
 	var out: Array = []
 	for cl in clusters:
-		var best: Dictionary = cl["entries"][0]
-		var best_score: float = _cardinality(best["forward"])
+		# Group entries by approximately-equal forward (dot ≈ ±1). The most
+		# populous group wins so a T-junction post inherits the through-line's
+		# rotation; ties fall back to whichever entry is closer to axis-aligned.
+		var groups: Array = []
 		for e in cl["entries"]:
-			var s: float = _cardinality(e["forward"])
-			if s > best_score:
-				best_score = s
-				best = e
-		out.append({"pos": cl["pos"], "forward": best["forward"], "variant": best["variant"]})
+			var matched: bool = false
+			for g in groups:
+				if absf((g["forward"] as Vector3).dot(e["forward"])) > 0.985:
+					g["count"] += 1
+					matched = true
+					break
+			if not matched:
+				groups.append({"forward": e["forward"], "count": 1, "sample": e})
+		var best_group: Dictionary = groups[0]
+		for g in groups:
+			if g["count"] > best_group["count"] or (g["count"] == best_group["count"] and _cardinality(g["forward"]) > _cardinality(best_group["forward"])):
+				best_group = g
+		var sample: Dictionary = best_group["sample"]
+		out.append({"pos": cl["pos"], "forward": sample["forward"], "variant": sample["variant"]})
 	return out
 
 func _cardinality(f: Vector3) -> float:
