@@ -2208,6 +2208,13 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 func _classify_material(collider: Object) -> String:
 	if collider == null:
 		return "concrete"
+	# Explicit impact_material meta wins over heuristics — glass, for example,
+	# exposes take_damage but should NOT spawn flesh (red) particles.
+	var m: Node = collider as Node
+	while m != null:
+		if m.has_meta("impact_material"):
+			return String(m.get_meta("impact_material"))
+		m = m.get_parent()
 	# Walk up looking for a take_damage method — those are flesh (dummies,
 	# enemies). Destructible-meta props don't count as flesh; they get the
 	# default concrete impact since they're crates/boxes/etc.
@@ -2362,6 +2369,8 @@ func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: Stri
 			mat.albedo_color = Color(0.85, 0.83, 0.78, 1.0)
 		"flesh":
 			mat.albedo_color = Color(0.55, 0.05, 0.05, 1.0)
+		"glass":
+			mat.albedo_color = Color(0.88, 0.94, 1.0, 1.0)
 		_:
 			mat.albedo_color = Color(0.7, 0.7, 0.7, 1.0)
 	var mesh := SphereMesh.new()

@@ -2054,6 +2054,9 @@ func _spawn_object_at(object_id: String, world_pos: Vector3) -> void:
 	box.object_id = object_id
 	box.object_state = _default_object_state(object_id)
 	box.frozen = OBJECTS_CATALOG.default_frozen(object_id)
+	if OBJECTS_CATALOG.default_destructible(object_id):
+		box.destructible = true
+		box.hp_max = 60 if object_id == "obj_glass_sheet" else int(box.get("hp_max"))
 	add_child(box)
 	box.global_position = world_pos
 	_placed_props.append(box)

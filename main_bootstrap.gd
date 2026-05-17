@@ -163,9 +163,11 @@ func _ready() -> void:
 			if kind == "object":
 				if bool(entry.get("no_collide", false)):
 					_disable_collision(content)
-				if bool(entry.get("destructible", false)):
+				var dest_default: bool = OBJECT_CATALOG.default_destructible(id) if OBJECT_CATALOG.has_method("default_destructible") else false
+				var dest: bool = bool(entry.get("destructible", dest_default))
+				content.set_meta("destructible", dest)
+				if dest:
 					var hpmax: int = int(entry.get("hp_max", 100))
-					content.set_meta("destructible", true)
 					content.set_meta("hp_max", hpmax)
 					content.set_meta("hp", hpmax)
 				# Frozen flag default = true (most props stay put). When

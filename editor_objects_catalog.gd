@@ -23,11 +23,18 @@ const CONTAINER_IDS := ["obj_crate_small", "obj_crate_large"]
 # else defaults frozen so set-dressing doesn't roll off the table.
 const UNFROZEN_BY_DEFAULT := ["obj_ball"]
 
+# Props that ship with Destructible on by default. Glass is fragile by
+# nature; other props stay set-dressing unless the user opts them in.
+const DESTRUCTIBLE_BY_DEFAULT := ["obj_glass_sheet"]
+
 static func is_container(object_id: String) -> bool:
 	return CONTAINER_IDS.has(object_id)
 
 static func default_frozen(object_id: String) -> bool:
 	return not UNFROZEN_BY_DEFAULT.has(object_id)
+
+static func default_destructible(object_id: String) -> bool:
+	return DESTRUCTIBLE_BY_DEFAULT.has(object_id)
 
 static func build(object_id: String) -> Node3D:
 	match object_id:
