@@ -172,6 +172,11 @@ const SEG_BREACH_RATIO := 0.4
 var _segment_state: Dictionary = {}
 # Wall collider StaticBody3D per segment, keyed the same way.
 var _wall_bodies: Dictionary = {}
+# Per-segment Node3D holder that owns every picket + rail node spawned for
+# the interval. Tearing this down on respawn nukes the whole segment cleanly
+# (visuals + bodies + any decals parented to them) so the rebuilt version
+# never inherits partial-damage state.
+var _segment_holders: Dictionary = {}
 
 # Cached world positions of every post placed so far — drives hard snap.
 var _post_positions: Array = []
@@ -724,7 +729,7 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 		var ratio: float = float(state["destroyed"].size()) / float(n_seg)
 		if ratio >= SEG_BREACH_RATIO:
 			state["breached"] = true
-			_free_segment_wall(seg_key, state)
+			_free_segment_wall(seg_key)
 			_collapse_segment(seg_key, hit_normal)
 	_segment_respawn_timer_reset(seg_key)
 
@@ -732,19 +737,16 @@ func _ensure_segment_state(seg_key: String, body: Node) -> Dictionary:
 	if not _segment_state.has(seg_key):
 		_segment_state[seg_key] = {
 			"destroyed": {},
-			"hidden_pickets": {},
-			"hidden_rails": {},
 			"breached": false,
 			"timer": null,
 			"respawn_time": float(body.get_meta("respawn_time", 10.0)),
-			"wall_props": null,
 		}
 	return _segment_state[seg_key]
 
 func _hide_picket(body: Node, mi: MeshInstance3D, picket_index: int, state: Dictionary) -> void:
-	# Hide the picket mesh + disable its body + free any bullet-hole decals
-	# parented to the body. Records the refs on the segment state so the
-	# segment-respawn path can flip them back together.
+	# Hide the picket mesh + disable its body. The respawn path nukes the
+	# whole segment holder so we don't need to retain refs here — just mark
+	# the picket destroyed for the breach-threshold count.
 	for c in body.get_children():
 		if c is MeshInstance3D:
 			c.queue_free()
@@ -753,11 +755,8 @@ func _hide_picket(body: Node, mi: MeshInstance3D, picket_index: int, state: Dict
 		(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_DISABLED
 	body.visible = false
 	state["destroyed"][picket_index] = true
-	state["hidden_pickets"][picket_index] = {"body": body, "mi": mi}
 
-func _hide_rail(rail_mesh: MeshInstance3D, rail_body: Node, state: Dictionary) -> void:
-	# Hide the rail sub-piece + free any decals parented to its body. The
-	# body itself stays in the tree — it gets re-enabled on segment respawn.
+func _hide_rail(rail_mesh: MeshInstance3D, rail_body: Node) -> void:
 	if rail_mesh == null or not is_instance_valid(rail_mesh):
 		return
 	rail_mesh.visible = false
@@ -765,8 +764,6 @@ func _hide_rail(rail_mesh: MeshInstance3D, rail_body: Node, state: Dictionary) -
 		for c in rail_body.get_children():
 			if c is MeshInstance3D:
 				c.queue_free()
-	var rid: int = rail_mesh.get_instance_id()
-	state["hidden_rails"][rid] = {"mesh": rail_mesh, "body": rail_body}
 
 func _segment_respawn_timer_reset(seg_key: String) -> void:
 	# (Re)start the per-segment Timer so the wait counts from the LAST hit.
@@ -789,88 +786,69 @@ func _segment_respawn_timer_reset(seg_key: String) -> void:
 	timer.start()
 
 func _respawn_segment(seg_key: String) -> void:
-	# Bring the whole segment back: every hidden picket + every hidden rail
-	# sub-piece + the player-smoothing wall body if the breach freed it.
-	# Clears destroyed/hidden tracking + breached flag so the 40% threshold
-	# can fire again on a fresh round of damage.
+	# Full teardown + rebuild. Frees the segment's Node3D holder (taking
+	# every picket, rail, body, and decal child with it) and the wall
+	# collider, then rebuilds the interval from the fence's stored params.
+	# Guarantees the respawned segment has zero stale state.
 	if not _segment_state.has(seg_key):
 		return
-	var state: Dictionary = _segment_state[seg_key]
-	for pi in state["hidden_pickets"].keys():
-		var rec: Dictionary = state["hidden_pickets"][pi]
-		var body: Node = rec.get("body", null)
-		var mi: MeshInstance3D = rec.get("mi", null)
-		if mi != null and is_instance_valid(mi):
-			mi.visible = true
-		if body != null and is_instance_valid(body):
-			body.visible = true
-			if body is CollisionObject3D:
-				(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_INHERIT
-	for rid in state["hidden_rails"].keys():
-		var rrec: Dictionary = state["hidden_rails"][rid]
-		var rmesh: MeshInstance3D = rrec.get("mesh", null)
-		if rmesh != null and is_instance_valid(rmesh):
-			rmesh.visible = true
-	# Re-create the player-smoothing wall body from the props captured when
-	# the breach freed it. Pickets carry their own collision; the wall body
-	# just gives the player capsule a flat surface to slide along.
-	if state.get("wall_props", null) != null:
-		_restore_segment_wall(seg_key, state["wall_props"])
-		state["wall_props"] = null
-	state["destroyed"].clear()
-	state["hidden_pickets"].clear()
-	state["hidden_rails"].clear()
-	state["breached"] = false
-	var timer: Timer = state.get("timer", null)
+	var parts: PackedStringArray = seg_key.split("_")
+	if parts.size() < 2:
+		_drop_segment_state(seg_key)
+		return
+	var fi: int = int(parts[0])
+	var si: int = int(parts[1])
+	if fi < 0 or fi >= _fences.size():
+		_drop_segment_state(seg_key)
+		return
+	var holder: Node = _segment_holders.get(seg_key, null)
+	if holder != null and is_instance_valid(holder):
+		holder.queue_free()
+	_segment_holders.erase(seg_key)
+	if _wall_bodies.has(seg_key):
+		var wb: Node = _wall_bodies[seg_key]
+		if wb != null and is_instance_valid(wb):
+			wb.queue_free()
+		_wall_bodies.erase(seg_key)
+	_drop_segment_state(seg_key)
+	var f: Dictionary = _fences[fi]
+	var delta: Vector3 = f.end - f.start
+	delta.y = 0.0
+	var L: float = delta.length()
+	if L < MIN_RUN_LENGTH:
+		return
+	var forward: Vector3 = delta.normalized()
+	var n_intervals: int = max(1, int(round(L / f.post_spacing)))
+	if si >= n_intervals:
+		return
+	var actual_spacing: float = L / float(n_intervals)
+	var p_start: Vector3 = f.start + forward * (si * actual_spacing)
+	var p_end: Vector3 = f.start + forward * ((si + 1) * actual_spacing)
+	p_start.y = _ground_y(p_start)
+	p_end.y = _ground_y(p_end)
+	_build_interval(_visuals_root, p_start, p_end, forward, _variant_for(f), false, fi, si)
+	if _collision_enabled:
+		_spawn_wall_collider_one(fi, si, n_intervals, f, _variant_for(f))
+
+func _drop_segment_state(seg_key: String) -> void:
+	if not _segment_state.has(seg_key):
+		return
+	var timer: Timer = _segment_state[seg_key].get("timer", null)
 	if timer != null and is_instance_valid(timer):
 		timer.queue_free()
-	state["timer"] = null
+	_segment_state.erase(seg_key)
 
-func _free_segment_wall(seg_key: String, state: Dictionary = {}) -> void:
+func _free_segment_wall(seg_key: String) -> void:
 	# Drop the player-smoothing wall box for the breached segment so the
 	# player can walk through the gap. Per-element picket colliders stay
-	# alive on layer 7 — bullets still resolve on the remaining wood.
-	# Capture the body's pose+size into segment state so the segment-respawn
-	# path can rebuild it without re-running the whole fence cluster pass.
+	# alive on layer 7 — bullets still resolve on the remaining wood. The
+	# wall comes back when the respawn timer rebuilds the whole segment.
 	if not _wall_bodies.has(seg_key):
 		return
 	var body: StaticBody3D = _wall_bodies[seg_key]
 	if is_instance_valid(body):
-		if state != null and not state.is_empty():
-			var shape_size: Vector3 = Vector3.ZERO
-			for c in body.get_children():
-				if c is CollisionShape3D:
-					var s: Shape3D = (c as CollisionShape3D).shape
-					if s is BoxShape3D:
-						shape_size = (s as BoxShape3D).size
-						break
-			state["wall_props"] = {
-				"pos": body.global_position,
-				"basis": body.global_transform.basis,
-				"size": shape_size,
-			}
 		body.queue_free()
 	_wall_bodies.erase(seg_key)
-
-func _restore_segment_wall(seg_key: String, props: Dictionary) -> void:
-	if props == null or props.is_empty():
-		return
-	var size: Vector3 = props.get("size", Vector3.ZERO)
-	if size.x <= 0.0 or size.y <= 0.0 or size.z <= 0.0:
-		return
-	var body := StaticBody3D.new()
-	body.position = props.get("pos", Vector3.ZERO)
-	body.basis = props.get("basis", Basis.IDENTITY)
-	body.collision_layer = WALL_COLLISION_LAYER
-	body.collision_mask = 0
-	var shape := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = size
-	shape.shape = box
-	body.add_child(shape)
-	_visuals_root.add_child(body)
-	body.set_meta("seg_key", seg_key)
-	_wall_bodies[seg_key] = body
 
 func _collapse_segment(seg_key: String, hit_normal: Vector3) -> void:
 	# Breach: convert every still-standing picket + every rail sub-piece in
@@ -919,7 +897,7 @@ func _collapse_segment(seg_key: String, hit_normal: Vector3) -> void:
 				continue
 			rails_seen[rid] = true
 			_spawn_collapse_debris(rmesh.mesh, rmesh.global_position, rmesh.basis, -n, 1.0)
-			_hide_rail(rmesh, rbody, state)
+			_hide_rail(rmesh, rbody)
 
 func _spawn_collapse_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, kick_dir: Vector3, weight: float) -> void:
 	# Heavy-collapse variant of _spawn_debris: mostly downward fall with a
@@ -1042,6 +1020,7 @@ func _rebuild_all() -> void:
 			t.queue_free()
 	_segment_state.clear()
 	_wall_bodies.clear()
+	_segment_holders.clear()
 	if _collision_enabled:
 		for fi in range(_fences.size()):
 			_spawn_wall_collider(fi, _fences[fi], _variant_for(_fences[fi]))
@@ -1229,6 +1208,39 @@ func _spawn_wall_collider(fence_idx: int, f: Dictionary, variant: Dictionary) ->
 		body.set_meta("seg_key", seg_key)
 		_wall_bodies[seg_key] = body
 
+func _spawn_wall_collider_one(fence_idx: int, seg_idx: int, n_intervals: int, f: Dictionary, variant: Dictionary) -> void:
+	# Single-segment wall body — used by the respawn path so we don't have to
+	# tear down + rebuild the whole fence's wall colliders just to refresh one.
+	var height: float = float(variant.get("wall_height", 1.0))
+	var thickness: float = float(variant.get("wall_thickness", 0.20))
+	var delta: Vector3 = f.end - f.start
+	delta.y = 0.0
+	var L: float = delta.length()
+	if L < MIN_RUN_LENGTH or n_intervals <= 0 or seg_idx < 0 or seg_idx >= n_intervals:
+		return
+	var forward: Vector3 = delta.normalized()
+	var seg_len: float = L / float(n_intervals)
+	var ps: Vector3 = f.start + forward * (seg_idx * seg_len)
+	var pe: Vector3 = f.start + forward * ((seg_idx + 1) * seg_len)
+	ps.y = _ground_y(ps)
+	pe.y = _ground_y(pe)
+	var mid: Vector3 = (ps + pe) * 0.5
+	mid.y += height * 0.5
+	var body := StaticBody3D.new()
+	body.position = mid
+	body.basis = _yaw_basis(forward)
+	body.collision_layer = WALL_COLLISION_LAYER
+	body.collision_mask = 0
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(seg_len, height, thickness)
+	shape.shape = box
+	body.add_child(shape)
+	_visuals_root.add_child(body)
+	var seg_key: String = "%d_%d" % [fence_idx, seg_idx]
+	body.set_meta("seg_key", seg_key)
+	_wall_bodies[seg_key] = body
+
 func _post_position_taken(pos: Vector3) -> bool:
 	for p in _post_positions:
 		if (p as Vector3).distance_to(pos) < POST_DEDUP_RADIUS:
@@ -1248,6 +1260,16 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 		destructible = bool(props.get("destructible", false))
 		respawn_time = float(props.get("respawn_time", 10.0))
 		wallbang = bool(props.get("wallbang", false))
+	# Destructible segments get a private Node3D holder so the respawn path
+	# can free the entire interval in one shot.
+	var spawn_parent: Node3D = root
+	if destructible and not ghost and fence_idx >= 0 and seg_idx >= 0:
+		var seg_key: String = "%d_%d" % [fence_idx, seg_idx]
+		var holder := Node3D.new()
+		root.add_child(holder)
+		holder.set_meta("seg_key", seg_key)
+		_segment_holders[seg_key] = holder
+		spawn_parent = holder
 	# Picket positions along the run (axis distance from p_start) — computed
 	# up-front so rails can split into per-picket cells.
 	var n_pickets: int = 0
@@ -1277,9 +1299,9 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 		var rp: Vector3 = rail_origin
 		rp.y = _ground_y(rp) + ry
 		if destructible and n_pickets > 0 and not ghost:
-			rail_subs_by_height.append(_spawn_split_rail(root, p_start, rp.y, forward, post_width, rail_length, variant, picket_t_axis, wallbang))
+			rail_subs_by_height.append(_spawn_split_rail(spawn_parent, p_start, rp.y, forward, post_width, rail_length, variant, picket_t_axis, wallbang))
 		else:
-			_spawn_rail(root, rp, forward, rail_length, variant, ghost, wallbang)
+			_spawn_rail(spawn_parent, rp, forward, rail_length, variant, ghost, wallbang)
 	# Spawn pickets and (if destructible) tag each body with its segment +
 	# picket index + adjacent rail sub-pieces. The picket-hit handler uses
 	# those refs to hide the affected rail cells when the picket dies.
@@ -1302,7 +1324,7 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 				"adjacent_rails": adj_rails,
 				"wallbang": wallbang,
 			}
-		_spawn_picket(root, pw_i, forward, variant, ghost, destructible, respawn_time, picket_tags)
+		_spawn_picket(spawn_parent, pw_i, forward, variant, ghost, destructible, respawn_time, picket_tags)
 
 func _spawn_split_rail(root: Node3D, p_start: Vector3, rail_y: float, forward: Vector3, post_width: float, rail_length: float, variant: Dictionary, picket_t_axis: Array, wallbang: bool = false) -> Array:
 	# Split a rail into one sub-piece per picket cell. Each cell spans from
