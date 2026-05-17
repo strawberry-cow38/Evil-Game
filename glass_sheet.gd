@@ -138,12 +138,14 @@ func _shatter(_world_pos: Vector3, normal: Vector3) -> void:
 	if _shattered:
 		return
 	_shattered = true
-	# Hide the intact pane + disable its collider; keep the node alive so we
-	# can drive the shard sim from _process. queue_free runs after shards die.
-	if _mi != null:
-		_mi.visible = false
-	if _shape != null:
-		_shape.disabled = true
+	# Drop the pane + body + any bullet-hole decals parented to us (weapon.gd
+	# parents bullet holes under the take_damage host). They shouldn't hang
+	# in empty air after the pane goes. Shards spawn fresh below.
+	for c in get_children():
+		c.queue_free()
+	_mi = null
+	_body = null
+	_shape = null
 	set_physics_process(false)
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
