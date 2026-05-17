@@ -163,7 +163,7 @@ func _ready() -> void:
 			if kind == "object":
 				if bool(entry.get("no_collide", false)):
 					_disable_collision(content)
-				var dest_default: bool = OBJECT_CATALOG.default_destructible(id) if OBJECT_CATALOG.has_method("default_destructible") else false
+				var dest_default: bool = OBJECT_CATALOG.default_destructible(id)
 				var dest: bool = bool(entry.get("destructible", dest_default))
 				content.set_meta("destructible", dest)
 				if dest:

@@ -31,6 +31,13 @@ const LASER_DOT_RADIUS := 0.025
 const LASER_BEAM_OFFSET_HIP := Vector3(0.06, -0.06, -0.18)   # camera-local muzzle proxy, hipfire
 const LASER_BEAM_OFFSET_ADS := Vector3(0.0, -0.04, -0.18)    # centered horizontally while ADS
 
+# Tracer muzzle offset — same idea as the laser proxy: camera-local point we
+# anchor the visual tracer to so bullets look like they come out of the gun
+# instead of the camera origin. Pulled forward a touch + slightly farther
+# right so it reads as a faux barrel exit rather than the laser bezel.
+const TRACER_MUZZLE_OFFSET_HIP := Vector3(0.18, -0.18, -0.55)
+const TRACER_MUZZLE_OFFSET_ADS := Vector3(0.0, -0.05, -0.60)
+
 # Recoil pattern: (yaw_deg, pitch_deg) per shot. Pitch is "kick up" so positive = up.
 # AKM: harsher, climbs hard, drifts right.
 const RECOIL_PATTERN_AKM: Array[Vector2] = [
@@ -1343,6 +1350,9 @@ func _setup_audio() -> void:
 		cp.stream = _casing_stream
 		cp.bus = "Master"
 		cp.volume_db = CASING_VOL_DB
+		# Fixed volume — crouching shouldn't change brass clink loudness.
+		# Attenuation disabled bypasses distance falloff entirely.
+		cp.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
 		cp.unit_size = 4.0
 		cp.max_distance = 18.0
 		add_child(cp)
@@ -1375,6 +1385,8 @@ func _setup_audio() -> void:
 	for i in range(SHELL_IMPACT_VOICES):
 		var sp := AudioStreamPlayer3D.new()
 		sp.bus = "Master"
+		# Fixed volume — see _casing_voices comment above.
+		sp.attenuation_model = AudioStreamPlayer3D.ATTENUATION_DISABLED
 		sp.unit_size = 4.0
 		sp.max_distance = 22.0
 		add_child(sp)
@@ -2003,7 +2015,10 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 	var gravity := Vector3(0.0, -BULLET_GRAVITY, 0.0)
 	var space := get_world_3d().direct_space_state
 	var pos := origin
-	var seg_start: Vector3 = origin
+	# Tracer visual originates at the faux muzzle, not the camera. Raycast
+	# still starts from `origin` (camera) so aim stays truthful — the line
+	# segment is purely a render artifact.
+	var seg_start: Vector3 = _get_tracer_muzzle_world()
 	var penetrations: int = 0
 	var dmg_mult: float = 1.0
 	# Excludes accumulate across penetrations so the next segment's first
@@ -2258,6 +2273,17 @@ func _apply_impact(world_pos: Vector3, normal: Vector3, material: String, collid
 		_spawn_bullet_hole(world_pos, normal, material, collider)
 
 const BULLET_IMPULSE := 4.5  # base impulse magnitude applied to dynamic_prop rigid bodies on hit (scaled by rb.mass + dmg_mult)
+
+func _get_tracer_muzzle_world() -> Vector3:
+	# Camera-local muzzle proxy → world. Mirrors the laser beam math. Falls
+	# back to camera origin if the camera isn't wired (shouldn't happen in
+	# play, but keeps the tracer call site robust during boot/teardown).
+	if _camera == null:
+		return global_position
+	var cam_xf: Transform3D = _camera.get_global_transform_interpolated()
+	var ads: bool = _player != null and _player.has_method("is_ads") and _player.is_ads()
+	var offset: Vector3 = TRACER_MUZZLE_OFFSET_ADS if ads else TRACER_MUZZLE_OFFSET_HIP
+	return cam_xf * offset
 
 func _apply_bullet_impulse(collider: Object, bullet_vel: Vector3, hit_pos: Vector3, dmg_mult: float) -> void:
 	# Walk up looking for a dynamic_prop RigidBody3D so we don't shove StaticBody
