@@ -1592,14 +1592,16 @@ func _schedule_shell_impact() -> void:
 	var idx: int = _shell_impact_idx
 	_shell_impact_idx = (_shell_impact_idx + 1) % _shell_impact_voices.size()
 	var voice: AudioStreamPlayer3D = _shell_impact_voices[idx]
+	var v_ref: WeakRef = weakref(voice)
 	var timer := get_tree().create_timer(delay)
 	timer.timeout.connect(func():
-		if not is_instance_valid(voice):
+		var v: AudioStreamPlayer3D = v_ref.get_ref() as AudioStreamPlayer3D
+		if v == null:
 			return
-		voice.stream = stream
-		voice.pitch_scale = pitch
-		voice.volume_db = vol
-		voice.play()
+		v.stream = stream
+		v.pitch_scale = pitch
+		v.volume_db = vol
+		v.play()
 	)
 
 func _schedule_bolt() -> void:
@@ -1613,14 +1615,16 @@ func _schedule_bolt() -> void:
 	)
 	var vol: float = float(_profile.get("bolt_vol_db", -4.0))
 	var voice: AudioStreamPlayer3D = _bolt_voice
+	var v_ref: WeakRef = weakref(voice)
 	var timer := get_tree().create_timer(delay)
 	timer.timeout.connect(func():
-		if not is_instance_valid(voice):
+		var v: AudioStreamPlayer3D = v_ref.get_ref() as AudioStreamPlayer3D
+		if v == null:
 			return
-		voice.stream = stream
-		voice.pitch_scale = pitch
-		voice.volume_db = vol
-		voice.play()
+		v.stream = stream
+		v.pitch_scale = pitch
+		v.volume_db = vol
+		v.play()
 	)
 
 func _schedule_casing() -> void:
@@ -1631,12 +1635,14 @@ func _schedule_casing() -> void:
 	var idx: int = _casing_idx
 	_casing_idx = (_casing_idx + 1) % _casing_voices.size()
 	var voice: AudioStreamPlayer3D = _casing_voices[idx]
+	var v_ref: WeakRef = weakref(voice)
 	var timer := get_tree().create_timer(delay)
 	timer.timeout.connect(func():
-		if not is_instance_valid(voice):
+		var v: AudioStreamPlayer3D = v_ref.get_ref() as AudioStreamPlayer3D
+		if v == null:
 			return
-		voice.pitch_scale = pitch
-		voice.play()
+		v.pitch_scale = pitch
+		v.play()
 	)
 
 func _play_fire_sound() -> void:
@@ -2134,9 +2140,11 @@ func _schedule_damage(collider: Object, delay: float, distance: float, dmg_mult:
 		_apply_damage(target, dmg)
 		return
 	var timer := get_tree().create_timer(delay)
+	var t_ref: WeakRef = weakref(target)
 	timer.timeout.connect(func():
-		if is_instance_valid(target):
-			_apply_damage(target, dmg)
+		var t: Node = t_ref.get_ref() as Node
+		if t != null:
+			_apply_damage(t, dmg)
 	)
 
 func _find_damageable(collider: Object) -> Node:
@@ -2179,7 +2187,12 @@ func _spawn_tracer(from: Vector3, to: Vector3) -> void:
 	get_tree().current_scene.add_child(mi)
 
 	var timer := get_tree().create_timer(TRACER_LIFETIME)
-	timer.timeout.connect(func(): if is_instance_valid(mi): mi.queue_free())
+	var mi_ref: WeakRef = weakref(mi)
+	timer.timeout.connect(func():
+		var n: Node = mi_ref.get_ref() as Node
+		if n != null:
+			n.queue_free()
+	)
 
 func _classify_material(collider: Object) -> String:
 	if collider == null:
@@ -2206,7 +2219,13 @@ func _schedule_impact(world_pos: Vector3, normal: Vector3, material: String, del
 		_apply_impact(world_pos, normal, material, collider)
 		return
 	var timer := get_tree().create_timer(delay)
-	timer.timeout.connect(func(): _apply_impact(world_pos, normal, material, collider))
+	var col_ref: WeakRef = weakref(collider) if collider != null else null
+	timer.timeout.connect(func():
+		var c: Object = null
+		if col_ref != null:
+			c = col_ref.get_ref()
+		_apply_impact(world_pos, normal, material, c)
+	)
 
 const BULLET_HOLE_HOLD := 4.0
 const BULLET_HOLE_FADE := 2.5
@@ -2339,7 +2358,12 @@ func _spawn_impact_particles(world_pos: Vector3, normal: Vector3, material: Stri
 	p.emitting = true
 
 	var timer := get_tree().create_timer(p.lifetime + 0.4)
-	timer.timeout.connect(func(): if is_instance_valid(p): p.queue_free())
+	var p_ref: WeakRef = weakref(p)
+	timer.timeout.connect(func():
+		var n: Node = p_ref.get_ref() as Node
+		if n != null:
+			n.queue_free()
+	)
 
 func _setup_laser() -> void:
 	# Dot — small unshaded sphere, no depth test so it stays visible
