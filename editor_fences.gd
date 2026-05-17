@@ -709,6 +709,23 @@ func _update_selection_highlight() -> void:
 
 # --- Play-mode picket destruction -------------------------------------
 
+func notify_rail_hit(rail_body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: Vector3 = Vector3.UP) -> void:
+	# Bullet hit a rail/crossbar — relay to the picket sitting in the same
+	# cell so shooting a rail still destroys the picket behind it.
+	if rail_body == null or not rail_body.has_meta("seg_key") or not rail_body.has_meta("picket_index"):
+		return
+	var seg_key: String = String(rail_body.get_meta("seg_key"))
+	var picket_index: int = int(rail_body.get_meta("picket_index"))
+	var holder: Node = _segment_holders.get(seg_key, null)
+	if holder == null or not is_instance_valid(holder):
+		return
+	for c in holder.get_children():
+		if not (c is Node) or not c.has_meta("picket_mesh_ref"):
+			continue
+		if int(c.get_meta("picket_index", -1)) == picket_index:
+			notify_picket_hit(c, hit_pos, hit_normal)
+			return
+
 func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: Vector3 = Vector3.UP) -> void:
 	# Called by weapon.gd when a bullet ray hits a picket collider that's
 	# part of a destructible segment. Spawns a flung debris piece, frees any
@@ -728,7 +745,6 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 	var seg_key: String = "%d_%d" % [fence_idx, seg_idx]
 	var state: Dictionary = _ensure_segment_state(seg_key, body)
 	_spawn_debris(mi.mesh, mi.global_position, mi.basis, hit_normal)
-	_spawn_picket_stub(seg_key, mi)
 	_hide_picket(body, mi, picket_index, state)
 	if not state["breached"]:
 		var ratio: float = float(state["destroyed"].size()) / float(n_seg)
@@ -886,7 +902,6 @@ func _collapse_segment(seg_key: String, hit_normal: Vector3) -> void:
 		var mi: MeshInstance3D = b.get_meta("picket_mesh_ref", null)
 		if mi != null and is_instance_valid(mi) and mi.visible:
 			_spawn_collapse_debris(mi.mesh, mi.global_position, mi.basis, -n, 0.6)
-			_spawn_picket_stub(seg_key, mi)
 			var pi: int = int(b.get_meta("picket_index", -1))
 			_hide_picket(b, mi, pi, state)
 		# Each picket carries refs to its adjacent rail sub-pieces as
@@ -933,24 +948,6 @@ func _spawn_collapse_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, kick_d
 		"life": life,
 		"max_life": life,
 	})
-
-func _spawn_picket_stub(seg_key: String, mi: MeshInstance3D) -> void:
-	# Leave a short broken stub where the picket used to stand. Parents under
-	# the segment holder so it dies cleanly with the next teardown/rebuild.
-	# Y-component of the picket's basis is rescaled to ~18% so the stub is
-	# a stumpy bottom slice of the original mesh, anchored at ground level.
-	if mi == null or mi.mesh == null:
-		return
-	var holder: Node = _segment_holders.get(seg_key, null)
-	if holder == null or not is_instance_valid(holder):
-		return
-	const STUB_HEIGHT: float = 0.18
-	var stub := MeshInstance3D.new()
-	stub.mesh = mi.mesh
-	stub.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
-	holder.add_child(stub)
-	stub.global_position = mi.global_position
-	stub.basis = Basis(mi.basis.x, mi.basis.y * STUB_HEIGHT, mi.basis.z)
 
 func _spawn_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, normal: Vector3) -> void:
 	if mesh == null or _debris_root == null:
@@ -1348,6 +1345,7 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 	# those refs to hide the affected rail cells when the picket dies.
 	# adjacent_rails entries are {mesh, body} dicts so the breach path can
 	# free any bullet-hole decals parented to the rail's body.
+	var seg_key_local: String = "%d_%d" % [fence_idx, seg_idx] if (fence_idx >= 0 and seg_idx >= 0) else ""
 	for i in range(n_pickets):
 		var pw_i: Vector3 = picket_positions[i]
 		var adj_rails: Array = []
@@ -1355,6 +1353,12 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 			for sub_arr in rail_subs_by_height:
 				if i < sub_arr.size() and sub_arr[i] != null and (sub_arr[i] as Dictionary).get("mesh", null) != null:
 					adj_rails.append(sub_arr[i])
+					# Stamp the rail body with seg_key + picket_index so a
+					# rail hit can be relayed to the picket sitting behind it.
+					var rb: Node = (sub_arr[i] as Dictionary).get("body", null)
+					if rb != null and seg_key_local != "":
+						rb.set_meta("seg_key", seg_key_local)
+						rb.set_meta("picket_index", i)
 		var picket_tags: Dictionary = {}
 		if destructible:
 			picket_tags = {

@@ -2095,13 +2095,20 @@ func _maybe_notify_fence_picket(collider: Object, hit_pos: Vector3, hit_normal: 
 	if collider == null:
 		return
 	var n: Node = collider as Node
-	if n == null or not n.is_in_group("fence_picket_destructible"):
+	if n == null:
+		return
+	var is_picket: bool = n.is_in_group("fence_picket_destructible")
+	var is_rail: bool = n.is_in_group("fence_rail_destructible")
+	if not is_picket and not is_rail:
 		return
 	var fn := get_tree().get_first_node_in_group("fences_runtime")
-	if fn == null or not fn.has_method("notify_picket_hit"):
+	if fn == null:
+		return
+	var method: String = "notify_rail_hit" if is_rail else "notify_picket_hit"
+	if not fn.has_method(method):
 		return
 	if delay <= 0.0:
-		fn.notify_picket_hit(n, hit_pos, hit_normal)
+		fn.call(method, n, hit_pos, hit_normal)
 		return
 	# Use a Timer node parented to the picket body so it dies cleanly with
 	# the scene (avoids spam from freed-capture warnings when timers fire
@@ -2113,13 +2120,16 @@ func _maybe_notify_fence_picket(collider: Object, hit_pos: Vector3, hit_normal: 
 	timer.wait_time = delay
 	timer.autostart = true
 	n.add_child(timer)
+	var timer_ref: WeakRef = weakref(timer)
+	var method_capture: String = method
 	timer.timeout.connect(func() -> void:
 		var fnow = fn_ref.get_ref()
 		var nnow = n_ref.get_ref()
-		if fnow != null and nnow != null and fnow.has_method("notify_picket_hit"):
-			fnow.notify_picket_hit(nnow, hit_pos, hit_normal)
-		if is_instance_valid(timer):
-			timer.queue_free()
+		if fnow != null and nnow != null and fnow.has_method(method_capture):
+			fnow.call(method_capture, nnow, hit_pos, hit_normal)
+		var tnow: Node = timer_ref.get_ref() as Node
+		if tnow != null:
+			tnow.queue_free()
 	)
 
 func _schedule_damage(collider: Object, delay: float, distance: float, dmg_mult: float = 1.0) -> void:
@@ -2293,7 +2303,12 @@ func _spawn_bullet_hole(world_pos: Vector3, normal: Vector3, material: String, c
 	var tween := create_tween()
 	tween.tween_interval(BULLET_HOLE_HOLD)
 	tween.tween_property(mat, "albedo_color:a", 0.0, BULLET_HOLE_FADE)
-	tween.tween_callback(func(): if is_instance_valid(mi): mi.queue_free())
+	var mi_ref: WeakRef = weakref(mi)
+	tween.tween_callback(func():
+		var n: Node = mi_ref.get_ref() as Node
+		if n != null:
+			n.queue_free()
+	)
 
 func _play_impact_sound(world_pos: Vector3, material: String) -> void:
 	if not _impact_streams.has(material):
