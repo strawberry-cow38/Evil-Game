@@ -556,6 +556,8 @@ func is_menu_open() -> bool:
 		return true
 	if _container_menu != null and _container_menu.has_method("is_open") and _container_menu.is_open():
 		return true
+	if GameSettings.is_menu_open():
+		return true
 	return false
 
 func _toggle_third_person() -> void:
@@ -637,9 +639,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_third_person()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
-		# Menu handles its own ESC when open; only the click-recapture flow runs here.
+		# Menu (inventory/container) handles its own ESC when open; otherwise
+		# ESC opens the global settings overlay.
 		if not is_menu_open():
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
+			GameSettings.toggle_menu()
+			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.pressed and _container_target != null and not is_menu_open():
 		# Mouse wheel scrolls the highlighted item in the hover panel. Swallow
 		# the event so the weapon doesn't see it.

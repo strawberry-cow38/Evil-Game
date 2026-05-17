@@ -21,6 +21,7 @@ boot_splash/bg_color=Color(0, 0, 0, 1)
 
 MapState="*res://map_state.gd"
 MapIO="*res://map_io.gd"
+GameSettings="*res://game_settings.gd"
 
 [display]
 

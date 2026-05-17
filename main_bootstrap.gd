@@ -45,6 +45,9 @@ func _ready() -> void:
 		var env_node: WorldEnvironment = get_node_or_null("WorldEnvironment")
 		var sun_node: DirectionalLight3D = get_node_or_null("Sun")
 		EDITOR_SCRIPT.apply_lighting_to(env_node, sun_node, MapState.lighting)
+	# Player graphics settings overlay the per-map authored lighting.
+	# Deferred so WorldEnvironment + Sun are guaranteed in-tree before walk.
+	GameSettings.call_deferred("apply_all")
 	var terrain_node: Node = null
 	if MapState.has_map():
 		var ground := get_node_or_null("Ground")

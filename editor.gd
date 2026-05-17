@@ -223,6 +223,7 @@ var _hover_event_id: String = ""
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	GameSettings.call_deferred("apply_all")
 	# Restore previously-edited heights if we're coming back from F9 play.
 	if MapState.has_map() and MapState.heights.size() == _terrain.heights.size():
 		_terrain.heights = MapState.heights.duplicate()
