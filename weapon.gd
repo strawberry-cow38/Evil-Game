@@ -2045,6 +2045,7 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 		var material := _classify_material(hit_collider)
 		_schedule_impact(hit_pos, hit_normal, material, impact_delay, hit_collider)
 		_schedule_damage(hit_collider, impact_delay, distance, dmg_mult)
+		_apply_bullet_impulse(hit_collider, vel, hit_pos, dmg_mult)
 		_maybe_notify_fence_picket(hit_collider, hit_pos, hit_normal, impact_delay)
 		if penetrations >= MAX_WALLBANGS or not _is_wallbangable(hit_collider):
 			return
@@ -2248,6 +2249,27 @@ func _apply_impact(world_pos: Vector3, normal: Vector3, material: String, collid
 	# the target moves, and look weird stuck to a body anyway.
 	if material != "flesh":
 		_spawn_bullet_hole(world_pos, normal, material, collider)
+
+const BULLET_IMPULSE := 4.5  # base impulse magnitude applied to dynamic_prop rigid bodies on hit (scaled by rb.mass + dmg_mult)
+
+func _apply_bullet_impulse(collider: Object, bullet_vel: Vector3, hit_pos: Vector3, dmg_mult: float) -> void:
+	# Walk up looking for a dynamic_prop RigidBody3D so we don't shove StaticBody
+	# parents or world geometry. dmg_mult scales down on wallbangs so a bullet that
+	# punched through a fence shoves the next prop a little less.
+	if collider == null:
+		return
+	var n: Node = collider as Node
+	while n != null:
+		if n is RigidBody3D and n.is_in_group("dynamic_prop"):
+			var rb: RigidBody3D = n
+			var dir: Vector3 = bullet_vel
+			if dir.length_squared() < 0.0001:
+				return
+			dir = dir.normalized()
+			var mag: float = BULLET_IMPULSE * rb.mass * dmg_mult
+			rb.apply_impulse(dir * mag, hit_pos - rb.global_position)
+			return
+		n = n.get_parent()
 
 func _find_movable_host(collider: Object) -> Node3D:
 	# Walk up the tree to find a RigidBody3D / VehicleBody3D / CharacterBody3D

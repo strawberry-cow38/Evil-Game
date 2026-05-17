@@ -225,9 +225,9 @@ static func _build_ball() -> Node3D:
 	# Bootstrap reads these when converting to RigidBody3D so the toy bounces
 	# realistically. Frozen props ignore them.
 	holder.set_meta("ball_radius", radius)
-	holder.set_meta("rb_mass", 1.2)
-	holder.set_meta("rb_bounce", 0.55)
-	holder.set_meta("rb_friction", 0.6)
+	holder.set_meta("rb_mass", 3.0)
+	holder.set_meta("rb_bounce", 0.3)
+	holder.set_meta("rb_friction", 0.7)
 	return holder
 
 static func _build_demo_crate() -> Node3D:

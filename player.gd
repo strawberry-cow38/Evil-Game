@@ -896,8 +896,8 @@ func _physics_process(delta: float) -> void:
 # dynamic_prop group with an impulse proportional to player speed. The
 # CharacterBody3D doesn't push RBs automatically — we have to read the
 # slide-collision list and apply the impulse ourselves.
-const PUSH_IMPULSE_GAIN := 2.4   # multiplied by player horizontal speed
-const PUSH_IMPULSE_MIN := 0.5    # below this the prop barely moves; floor it
+const PUSH_IMPULSE_GAIN := 0.55  # multiplied by player horizontal speed
+const PUSH_IMPULSE_MIN := 0.12   # below this the prop barely moves; floor it
 
 func _push_dynamic_props() -> void:
 	var hsp: float = Vector2(velocity.x, velocity.z).length()
@@ -921,6 +921,12 @@ func _push_dynamic_props() -> void:
 		if dir.length_squared() < 0.001:
 			continue
 		dir = dir.normalized()
+		# Don't pump energy into a prop that's already escaping faster than
+		# the player can chase it — otherwise repeat contact every physics
+		# frame turns a beach ball into a railgun round.
+		var rb_out: float = rb.linear_velocity.dot(dir)
+		if rb_out > hsp:
+			continue
 		var mag: float = max(hsp * PUSH_IMPULSE_GAIN, PUSH_IMPULSE_MIN) * rb.mass
 		rb.apply_impulse(dir * mag, contact - rb.global_position)
 
