@@ -2045,10 +2045,23 @@ func _maybe_notify_fence_picket(collider: Object, hit_pos: Vector3, hit_normal: 
 	if delay <= 0.0:
 		fn.notify_picket_hit(n, hit_pos, hit_normal)
 		return
-	var timer := get_tree().create_timer(delay)
+	# Use a Timer node parented to the picket body so it dies cleanly with
+	# the scene (avoids spam from freed-capture warnings when timers fire
+	# after the fence/picket has been disposed).
+	var fn_ref := weakref(fn)
+	var n_ref := weakref(n)
+	var timer := Timer.new()
+	timer.one_shot = true
+	timer.wait_time = delay
+	timer.autostart = true
+	n.add_child(timer)
 	timer.timeout.connect(func() -> void:
-		if is_instance_valid(fn) and is_instance_valid(n):
-			fn.notify_picket_hit(n, hit_pos, hit_normal)
+		var fnow = fn_ref.get_ref()
+		var nnow = n_ref.get_ref()
+		if fnow != null and nnow != null and fnow.has_method("notify_picket_hit"):
+			fnow.notify_picket_hit(nnow, hit_pos, hit_normal)
+		if is_instance_valid(timer):
+			timer.queue_free()
 	)
 
 func _schedule_damage(collider: Object, delay: float, distance: float) -> void:

@@ -700,14 +700,27 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 		(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_DISABLED
 	body.visible = false
 	var respawn: float = float(body.get_meta("respawn_time", 10.0))
-	var t := get_tree().create_timer(respawn)
-	t.timeout.connect(func() -> void:
-		if is_instance_valid(mi):
-			mi.visible = true
-		if is_instance_valid(body):
-			body.visible = true
-			if body is CollisionObject3D:
-				(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_INHERIT
+	# Use a Timer node parented to self (the fences node) so a scene unload
+	# cleans up pending respawns and so the body's PROCESS_MODE_DISABLED
+	# doesn't pause the respawn tick.
+	var mi_ref := weakref(mi)
+	var body_ref := weakref(body)
+	var timer := Timer.new()
+	timer.one_shot = true
+	timer.wait_time = respawn
+	timer.autostart = true
+	add_child(timer)
+	timer.timeout.connect(func() -> void:
+		var mi_now = mi_ref.get_ref()
+		var body_now = body_ref.get_ref()
+		if mi_now != null:
+			mi_now.visible = true
+		if body_now != null:
+			body_now.visible = true
+			if body_now is CollisionObject3D:
+				(body_now as CollisionObject3D).process_mode = Node.PROCESS_MODE_INHERIT
+		if is_instance_valid(timer):
+			timer.queue_free()
 	)
 
 func _spawn_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, normal: Vector3) -> void:
