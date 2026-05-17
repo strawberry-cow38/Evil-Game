@@ -10,7 +10,10 @@ const RUN_LEN: float = 9.0
 const ROW_GAP: float = 3.5
 const FIRE_INTERVAL: float = 0.28
 const PRE_DELAY: float = 1.0
-const POST_DELAY: float = 4.0
+# Long enough to capture: every picket killed -> segment collapses ->
+# (RESPAWN_TIME) -> whole segment comes back -> POST_DELAY tail.
+const POST_DELAY: float = 8.0
+const RESPAWN_TIME: float = 4.0
 const VARIANTS: Array = ["picket", "tall_brown"]
 
 @onready var cam: Camera3D = $CameraRig/Camera3D
@@ -49,8 +52,13 @@ func _ready() -> void:
 	for row in by_row:
 		row.sort_custom(func(a, b): return a.global_position.x < b.global_position.x)
 	# Interleave: front row first picket, back row first picket, etc.
+	# Only take every 3rd picket per row — the segment is dense enough that
+	# 33% coverage already trips the 40% breach threshold and keeps the
+	# clip short enough to send.
 	var max_len: int = max(by_row[0].size(), by_row[1].size())
 	for i in range(max_len):
+		if i % 3 != 0:
+			continue
 		for row in by_row:
 			if i < row.size():
 				pickets.append(row[i])
@@ -62,6 +70,8 @@ func _build_runs() -> void:
 		fences.set_variant(VARIANTS[i])
 		fences.begin_drag(Vector3(0, 0, z), false, false, 2.36)
 		fences.commit_drag(Vector3(RUN_LEN, 0, z), false, false, 2.36)
+		# Shorten respawn so the demo can show the segment coming back.
+		fences.set_segment_prop(i, 0, "respawn_time", RESPAWN_TIME)
 
 func _process(delta: float) -> void:
 	if not ready_done:

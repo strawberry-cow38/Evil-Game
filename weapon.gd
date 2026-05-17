@@ -2063,15 +2063,15 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 		dmg_mult *= WALLBANG_DMG_MULT
 
 func _is_wallbangable(collider: Object) -> bool:
-	# Only per-segment-destructible pickets carry the wallbang meta flag for
-	# now — future wallbangable surfaces (drywall, thin metal) can stamp the
-	# same flag on their collider to opt in.
+	# Pure meta check — any per-element collider stamped with wallbang=true
+	# is pass-through. editor_fences stamps it on every post/rail/picket of a
+	# wallbang-enabled section; only destructible pickets also live in
+	# fence_picket_destructible (so notify_picket_hit only fires for them).
+	# Future wallbangable surfaces opt in by setting the same meta.
 	if collider == null:
 		return false
 	var n: Node = collider as Node
 	if n == null:
-		return false
-	if not n.is_in_group("fence_picket_destructible"):
 		return false
 	return bool(n.get_meta("wallbang", false))
 
