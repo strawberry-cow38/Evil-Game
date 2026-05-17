@@ -1235,9 +1235,9 @@ func _process(delta: float) -> void:
 	# Fences ghost-follow: while LMB is held the run preview tracks the
 	# cursor. Alt/Shift modifier state is read live so snap toggles update
 	# the ghost without releasing the mouse.
-	if _active_tool == TOOL_E_FENCES and _fences_node != null:
-		var erase_mode: bool = _fences_panel != null and _fences_panel.is_erase_mode()
-		var edit_mode: bool = _fences_panel != null and _fences_panel.is_edit_mode()
+	if _active_tool == TOOL_E_FENCES and _fences_node != null and _fences_panel != null:
+		var erase_mode: bool = _fences_panel.is_erase_mode()
+		var edit_mode: bool = _fences_panel.is_edit_mode()
 		if not _camera.is_looking() and not _is_over_ui() and not erase_mode and not edit_mode:
 			var fhit := _raycast_cursor()
 			if not fhit.is_empty():

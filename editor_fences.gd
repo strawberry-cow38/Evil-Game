@@ -710,11 +710,6 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 	if body is CollisionObject3D:
 		(body as CollisionObject3D).process_mode = Node.PROCESS_MODE_DISABLED
 	body.visible = false
-	# Hide rail sub-pieces adjacent to this picket so the gap looks real.
-	var adj_rails: Array = body.get_meta("adjacent_rails", [])
-	for r in adj_rails:
-		if is_instance_valid(r):
-			(r as MeshInstance3D).visible = false
 	# Track per-segment damage and trigger a breach (free wall collider, so
 	# the player can walk through) once enough pickets are gone.
 	var fence_idx: int = int(body.get_meta("fence_idx", -1))
@@ -732,12 +727,19 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 			if ratio >= SEG_BREACH_RATIO:
 				state["breached"] = true
 				_free_segment_wall(seg_key)
+				_collapse_segment(seg_key, hit_normal)
+	_schedule_picket_respawn(body, mi)
+
+func _schedule_picket_respawn(body: Node, mi: MeshInstance3D) -> void:
+	# Queue a Timer (parented to self, the fences node) that restores the
+	# picket mesh + collider + adjacent rail sub-pieces after respawn_time.
+	# Parented to self so a scene unload cleans it up and so the body's
+	# PROCESS_MODE_DISABLED doesn't pause the tick.
+	if body == null or mi == null:
+		return
 	var respawn: float = float(body.get_meta("respawn_time", 10.0))
-	# Use a Timer node parented to self (the fences node) so a scene unload
-	# cleans up pending respawns and so the body's PROCESS_MODE_DISABLED
-	# doesn't pause the respawn tick.
-	var mi_ref := weakref(mi)
-	var body_ref := weakref(body)
+	var mi_ref: WeakRef = weakref(mi)
+	var body_ref: WeakRef = weakref(body)
 	var timer := Timer.new()
 	timer.one_shot = true
 	timer.wait_time = respawn
@@ -752,20 +754,17 @@ func notify_picket_hit(body: Node, hit_pos: Vector3 = Vector3.ZERO, hit_normal: 
 			body_now.visible = true
 			if body_now is CollisionObject3D:
 				(body_now as CollisionObject3D).process_mode = Node.PROCESS_MODE_INHERIT
-			# Restore the rail sub-pieces this picket was holding up.
 			var rails: Array = body_now.get_meta("adjacent_rails", [])
 			for r in rails:
 				if is_instance_valid(r):
 					(r as MeshInstance3D).visible = true
-			# Decrement segment damage. Wall collider stays gone until a
-			# rebuild — a breached wall doesn't re-form mid-play.
 			var fi: int = int(body_now.get_meta("fence_idx", -1))
 			var si: int = int(body_now.get_meta("seg_idx", -1))
 			var pi: int = int(body_now.get_meta("picket_index", -1))
 			if fi >= 0 and si >= 0:
 				var sk: String = "%d_%d" % [fi, si]
 				if _segment_state.has(sk):
-					(_segment_state[sk]["destroyed"] as Dictionary).erase(pi)
+					_segment_state[sk]["destroyed"].erase(pi)
 		if is_instance_valid(timer):
 			timer.queue_free()
 	)
@@ -781,15 +780,99 @@ func _free_segment_wall(seg_key: String) -> void:
 		body.queue_free()
 	_wall_bodies.erase(seg_key)
 
+func _collapse_segment(seg_key: String, hit_normal: Vector3) -> void:
+	# Breach: convert every still-standing picket + every rail sub-piece in
+	# this segment into falling debris. The rails get a small outward kick
+	# (away from the shooter) plus gravity so they topple toward the player.
+	var parts: PackedStringArray = seg_key.split("_")
+	if parts.size() < 2:
+		return
+	var sk_fence: int = int(parts[0])
+	var sk_seg: int = int(parts[1])
+	var rails_seen: Dictionary = {}
+	var n: Vector3 = hit_normal
+	if n.length_squared() < 0.001:
+		n = Vector3(0, 0, -1)
+	else:
+		n = n.normalized()
+	for node in get_tree().get_nodes_in_group(PICKET_GROUP):
+		if not (node is StaticBody3D):
+			continue
+		var b: StaticBody3D = node
+		if int(b.get_meta("fence_idx", -1)) != sk_fence:
+			continue
+		if int(b.get_meta("seg_idx", -1)) != sk_seg:
+			continue
+		# Collapse the picket itself if still visible.
+		var mi: MeshInstance3D = b.get_meta("picket_mesh_ref", null)
+		if mi != null and is_instance_valid(mi) and mi.visible:
+			_spawn_collapse_debris(mi.mesh, mi.global_position, mi.basis, -n, 0.6)
+			for c in b.get_children():
+				if c is MeshInstance3D:
+					c.queue_free()
+			mi.visible = false
+			b.process_mode = Node.PROCESS_MODE_DISABLED
+			b.visible = false
+			# Mark and schedule respawn so the collapse-killed pickets come
+			# back too, not just the one that triggered the breach.
+			var pi: int = int(b.get_meta("picket_index", -1))
+			if pi >= 0 and _segment_state.has(seg_key):
+				_segment_state[seg_key]["destroyed"][pi] = true
+			_schedule_picket_respawn(b, mi)
+		# Each picket carries refs to its adjacent rail sub-pieces. Dedup
+		# via instance id so each rail piece collapses once.
+		var rails: Array = b.get_meta("adjacent_rails", [])
+		for r in rails:
+			if not is_instance_valid(r):
+				continue
+			var mr: MeshInstance3D = r
+			if not mr.visible:
+				continue
+			var rid: int = mr.get_instance_id()
+			if rails_seen.has(rid):
+				continue
+			rails_seen[rid] = true
+			_spawn_collapse_debris(mr.mesh, mr.global_position, mr.basis, -n, 1.0)
+			mr.visible = false
+
+func _spawn_collapse_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, kick_dir: Vector3, weight: float) -> void:
+	# Heavy-collapse variant of _spawn_debris: mostly downward fall with a
+	# gentle outward kick + slow tumble, longer life so the rail piece
+	# actually hits the ground before fading out.
+	if mesh == null or _debris_root == null:
+		return
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_debris_root.add_child(mi)
+	mi.global_position = world_pos
+	mi.basis = basis
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var vel: Vector3 = kick_dir.normalized() * rng.randf_range(0.6, 1.6)
+	vel.y += rng.randf_range(0.2, 0.8)
+	var axis_seed := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.2, 0.2), rng.randf_range(-1.0, 1.0))
+	if axis_seed.length_squared() < 0.001:
+		axis_seed = Vector3(1, 0, 0)
+	var life: float = DEBRIS_LIFE * (1.8 if weight >= 1.0 else 1.3)
+	_debris.append({
+		"mi": mi,
+		"vel": vel,
+		"spin_axis": axis_seed.normalized(),
+		"spin_speed": rng.randf_range(1.5, 4.5),
+		"life": life,
+		"max_life": life,
+	})
+
 func _spawn_debris(mesh: Mesh, world_pos: Vector3, basis: Basis, normal: Vector3) -> void:
 	if mesh == null or _debris_root == null:
 		return
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
-	mi.global_position = world_pos
-	mi.basis = basis
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_debris_root.add_child(mi)
+	mi.global_position = world_pos
+	mi.basis = basis
 	var rng := RandomNumberGenerator.new()
 	rng.randomize()
 	var n: Vector3 = normal
@@ -1069,10 +1152,12 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 	# Resolve segment props once per interval so pickets share the lookup.
 	var destructible: bool = false
 	var respawn_time: float = 10.0
+	var wallbang: bool = false
 	if fence_idx >= 0 and seg_idx >= 0:
 		var props: Dictionary = get_segment_props(fence_idx, seg_idx)
 		destructible = bool(props.get("destructible", false))
 		respawn_time = float(props.get("respawn_time", 10.0))
+		wallbang = bool(props.get("wallbang", false))
 	# Picket positions along the run (axis distance from p_start) — computed
 	# up-front so rails can split into per-picket cells.
 	var n_pickets: int = 0
@@ -1123,6 +1208,7 @@ func _build_interval(root: Node3D, p_start: Vector3, p_end: Vector3, forward: Ve
 				"picket_index": i,
 				"n_pickets_in_seg": n_pickets,
 				"adjacent_rails": adj_rails,
+				"wallbang": wallbang,
 			}
 		_spawn_picket(root, pw_i, forward, variant, ghost, destructible, respawn_time, picket_tags)
 

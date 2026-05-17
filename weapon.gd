@@ -14,6 +14,15 @@ const RECOIL_RESET_DELAY := 0.40           # s of no-fire before pattern index r
 const RECOIL_SMOOTH_RATE := 22.0           # higher = snappier (per-shot kick exp-approaches over ~1/RATE s)
 const TRACER_LIFETIME := 0.06              # s
 
+# Wallbang penetration: when a bullet hits a surface tagged wallbang=true the
+# ray punches through with damping + a random scatter, applies damage to
+# anything behind, and stops after MAX_WALLBANGS chained penetrations.
+const MAX_WALLBANGS := 2
+const WALLBANG_PEN_DEPTH := 0.12           # m: distance the exit point sits past the entry
+const WALLBANG_VEL_MULT := 0.55            # post-penetration velocity scale
+const WALLBANG_DMG_MULT := 0.5             # per-penetration damage multiplier (compounds)
+const WALLBANG_SPREAD_DEG := 4.0           # half-angle of post-penetration random scatter
+
 # Weapons that render a red-dot laser sight along the aim ray. Beam +
 # dot are constructed lazily in _ready and updated each frame.
 const LASER_WEAPONS: Array = ["m700"]
@@ -1986,47 +1995,90 @@ func _fire_pellet(origin: Vector3, pdir: Vector3) -> void:
 	var muzzle_speed: float = MUZZLE_VELOCITY * float(_active_mods.get("velocity_mult", 1.0))
 	var vel: Vector3 = pdir * muzzle_speed
 	var gravity := Vector3(0.0, -BULLET_GRAVITY, 0.0)
-
 	var space := get_world_3d().direct_space_state
 	var pos := origin
-	var t := 0.0
-	var hit_pos := Vector3.ZERO
-	var hit_normal := Vector3.UP
-	var hit_collider: Object = null
-	var has_hit := false
-	while t < MAX_SIM_TIME:
-		var next_pos := pos + vel * STEP_DT + gravity * 0.5 * STEP_DT * STEP_DT
-		vel += gravity * STEP_DT
-		var q := PhysicsRayQueryParameters3D.create(pos, next_pos)
-		# Skip the player's own capsule + the fence player-smoothing layer
-		# (bit 6). Bullets resolve on the precise per-element fence colliders
-		# on bit 7 instead, so they pass between pickets cleanly.
-		q.collision_mask = 0xFFFFFFFF & ~(1 << 5)
-		var ex: Array[RID] = []
-		if _player is CollisionObject3D:
-			ex.append((_player as CollisionObject3D).get_rid())
-		q.exclude = ex
-		var r := space.intersect_ray(q)
-		if r and r.has("position"):
-			hit_pos = r.position
-			hit_normal = r.get("normal", Vector3.UP)
-			hit_collider = r.get("collider", null)
-			has_hit = true
-			break
-		pos = next_pos
-		t += STEP_DT
-
-	if not has_hit:
-		hit_pos = pos
-
-	var distance := origin.distance_to(hit_pos)
-	var impact_delay := distance / muzzle_speed
-	_spawn_tracer(origin, hit_pos)
-	if has_hit:
+	var seg_start: Vector3 = origin
+	var penetrations: int = 0
+	var dmg_mult: float = 1.0
+	# Excludes accumulate across penetrations so the next segment's first
+	# raycast doesn't re-hit the back face of the wood we just punched through.
+	var excludes: Array[RID] = []
+	if _player is CollisionObject3D:
+		excludes.append((_player as CollisionObject3D).get_rid())
+	while true:
+		var t := 0.0
+		var hit_pos := Vector3.ZERO
+		var hit_normal := Vector3.UP
+		var hit_collider: Object = null
+		var has_hit := false
+		while t < MAX_SIM_TIME:
+			var next_pos := pos + vel * STEP_DT + gravity * 0.5 * STEP_DT * STEP_DT
+			vel += gravity * STEP_DT
+			var q := PhysicsRayQueryParameters3D.create(pos, next_pos)
+			# Skip the player's own capsule + the fence player-smoothing layer
+			# (bit 6). Bullets resolve on the precise per-element fence colliders
+			# on bit 7 instead, so they pass between pickets cleanly.
+			q.collision_mask = 0xFFFFFFFF & ~(1 << 5)
+			q.exclude = excludes
+			var r := space.intersect_ray(q)
+			if r and r.has("position"):
+				hit_pos = r.position
+				hit_normal = r.get("normal", Vector3.UP)
+				hit_collider = r.get("collider", null)
+				has_hit = true
+				break
+			pos = next_pos
+			t += STEP_DT
+		if not has_hit:
+			hit_pos = pos
+		_spawn_tracer(seg_start, hit_pos)
+		if not has_hit:
+			return
+		var distance := origin.distance_to(hit_pos)
+		var impact_delay := distance / muzzle_speed
 		var material := _classify_material(hit_collider)
 		_schedule_impact(hit_pos, hit_normal, material, impact_delay, hit_collider)
-		_schedule_damage(hit_collider, impact_delay, distance)
+		_schedule_damage(hit_collider, impact_delay, distance, dmg_mult)
 		_maybe_notify_fence_picket(hit_collider, hit_pos, hit_normal, impact_delay)
+		if penetrations >= MAX_WALLBANGS or not _is_wallbangable(hit_collider):
+			return
+		# Wallbang: exit on the back face of the entry surface, scatter the
+		# direction a touch, damp velocity + damage, and resume.
+		var dir_n: Vector3 = vel.normalized()
+		var exit_pos: Vector3 = hit_pos + dir_n * WALLBANG_PEN_DEPTH
+		_schedule_impact(exit_pos, -hit_normal, material, impact_delay, hit_collider)
+		var scattered: Vector3 = _scatter_dir(dir_n, WALLBANG_SPREAD_DEG)
+		vel = scattered * (vel.length() * WALLBANG_VEL_MULT)
+		pos = exit_pos
+		seg_start = exit_pos
+		if hit_collider is CollisionObject3D:
+			excludes.append((hit_collider as CollisionObject3D).get_rid())
+		penetrations += 1
+		dmg_mult *= WALLBANG_DMG_MULT
+
+func _is_wallbangable(collider: Object) -> bool:
+	# Only per-segment-destructible pickets carry the wallbang meta flag for
+	# now — future wallbangable surfaces (drywall, thin metal) can stamp the
+	# same flag on their collider to opt in.
+	if collider == null:
+		return false
+	var n: Node = collider as Node
+	if n == null:
+		return false
+	if not n.is_in_group("fence_picket_destructible"):
+		return false
+	return bool(n.get_meta("wallbang", false))
+
+func _scatter_dir(dir: Vector3, half_angle_deg: float) -> Vector3:
+	# Random unit vector inside a cone of the given half-angle around `dir`.
+	# Uses sqrt(rand) for uniform area distribution across the cone disc.
+	var ang: float = sqrt(_rng.randf()) * deg_to_rad(half_angle_deg)
+	var axis := dir.cross(Vector3.UP)
+	if axis.length_squared() < 0.001:
+		axis = dir.cross(Vector3.RIGHT)
+	axis = axis.normalized()
+	var phi: float = _rng.randf() * TAU
+	return dir.rotated(axis, ang).rotated(dir, phi).normalized()
 
 func _maybe_notify_fence_picket(collider: Object, hit_pos: Vector3, hit_normal: Vector3, delay: float) -> void:
 	# Per-segment-destructible pickets are tagged with this group on spawn
@@ -2064,7 +2116,7 @@ func _maybe_notify_fence_picket(collider: Object, hit_pos: Vector3, hit_normal: 
 			timer.queue_free()
 	)
 
-func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
+func _schedule_damage(collider: Object, delay: float, distance: float, dmg_mult: float = 1.0) -> void:
 	if collider == null:
 		return
 	# Walk up the parent chain looking for either a `take_damage` method
@@ -2075,7 +2127,7 @@ func _schedule_damage(collider: Object, delay: float, distance: float) -> void:
 	if target == null:
 		return
 	var dmg: int = Items.ammo_damage_at(get_selected_ammo(), distance)
-	dmg = int(round(float(dmg) * float(_active_mods.get("damage_mult", 1.0))))
+	dmg = int(round(float(dmg) * float(_active_mods.get("damage_mult", 1.0)) * dmg_mult))
 	if dmg <= 0:
 		return
 	if delay <= 0.0:
