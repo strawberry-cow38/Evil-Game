@@ -1925,6 +1925,7 @@ func _foliage_spray(world_pos: Vector3) -> void:
 	# scale + yaw so the carpet doesn't look stamped.
 	if _foliage_node == null:
 		return
+	var sj_s: Vector2 = _foliage_node.get_preset_scale_jitter(_foliage_preset)
 	for i in range(_foliage_density):
 		var dx: float
 		var dz: float
@@ -1942,7 +1943,7 @@ func _foliage_spray(world_pos: Vector3) -> void:
 		if not _foliage_mat_passes(sample):
 			continue
 		sample.y = _terrain.sample_height(sample)
-		_foliage_node.add_instance(_foliage_preset, sample, randf_range(0.85, 1.15), randf_range(0.0, TAU))
+		_foliage_node.add_instance(_foliage_preset, sample, randf_range(sj_s.x, sj_s.y), randf_range(0.0, TAU))
 
 func _foliage_try_place(world_pos: Vector3) -> void:
 	# Exact-mode single placement. Honours the material lock so the user
@@ -1953,7 +1954,8 @@ func _foliage_try_place(world_pos: Vector3) -> void:
 		return
 	var p: Vector3 = world_pos
 	p.y = _terrain.sample_height(p)
-	_foliage_node.add_instance(_foliage_preset, p, randf_range(0.9, 1.1), randf_range(0.0, TAU))
+	var sj_e: Vector2 = _foliage_node.get_preset_scale_jitter(_foliage_preset)
+	_foliage_node.add_instance(_foliage_preset, p, randf_range(sj_e.x, sj_e.y), randf_range(0.0, TAU))
 
 # Spawn-marker visual: vertical pillar with a flag on top, tinted
 # cyan. Used both for committed markers and the placement ghost

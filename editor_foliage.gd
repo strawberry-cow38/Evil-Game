@@ -77,6 +77,18 @@ const PRESETS: Array = [
 	 # a bald ring around each stump.
 	 "display_scale": 1.4, "clear_grass_radius": 0.65,
 	 "collision_radius": 0.42, "collision_height": 0.7},
+	# cow_tree — 3 baked variants of the stylized stub-canopy tree
+	# authored in Blender. Spray-time scale jitter goes up to 1.5x for
+	# size variation; trunk collision cylinder matches the ~0.30m main
+	# shell radius measured in-blend, with ~2.3m vertical extent.
+	{"id": "tree_cow", "label": "Cow Tree", "kind": "tree", "glb_variants": [
+		"res://assets/models/cow_tree_0.glb",
+		"res://assets/models/cow_tree_1.glb",
+		"res://assets/models/cow_tree_2.glb",
+	], "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1),
+	 "display_scale": 1.0, "clear_grass_radius": 0.55,
+	 "scale_jitter_min": 1.0, "scale_jitter_max": 1.5,
+	 "collision_radius": 0.30, "collision_height": 2.3},
 ]
 
 # Per-instance state keyed by preset id:
@@ -1107,6 +1119,13 @@ func get_preset_tint(preset_id: String) -> Color:
 		if String(p.id) == preset_id:
 			return p.tint
 	return Color.WHITE
+
+func get_preset_scale_jitter(preset_id: String) -> Vector2:
+	for p in PRESETS:
+		if String(p.id) == preset_id:
+			return Vector2(float(p.get("scale_jitter_min", 0.85)),
+				float(p.get("scale_jitter_max", 1.15)))
+	return Vector2(0.85, 1.15)
 
 func add_instance(preset_id: String, world_pos: Vector3, scale: float, rot_y: float) -> bool:
 	# Per-cell density cap. Cells already at MAX_PER_CELL refuse new
