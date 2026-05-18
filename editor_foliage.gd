@@ -87,7 +87,7 @@ const PRESETS: Array = [
 		"res://assets/models/cow_tree_2.glb",
 	], "height": 1.0, "width": 1.0, "tint": Color(1, 1, 1, 1),
 	 "display_scale": 1.0, "clear_grass_radius": 0.55,
-	 "scale_jitter_min": 1.0, "scale_jitter_max": 1.5,
+	 "scale_jitter_min": 1.5, "scale_jitter_max": 2.0,
 	 "collision_radius": 0.30, "collision_height": 2.3},
 ]
 
