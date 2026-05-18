@@ -634,13 +634,13 @@ func _merge_into(node: Node, parent_xform: Transform3D, into: ArrayMesh) -> void
 
 func _sanitize_imported_material(mat: Material) -> void:
 	# Godot's gltf importer can carry across emission / specular / clearcoat
-	# settings from the source Principled BSDF that render way brighter under
-	# directional light than they did in Blender's preview — leaves end up
-	# looking nuclear. Force-disable the brightness amplifiers on every
-	# imported StandardMaterial3D so the .glb stays the source of truth for
-	# albedo only.
-	if mat is StandardMaterial3D:
-		var sm := mat as StandardMaterial3D
+	# and vertex-color-multiply settings from the source Principled BSDF.
+	# Vertex colors are stored linear in glb but the importer flags them
+	# srgb→linear in the StandardMaterial3D, so the albedo gets
+	# double-multiplied under directional light and the canopy reads as
+	# nuclear. Stomp every brightness amplifier we know of.
+	if mat is BaseMaterial3D:
+		var sm := mat as BaseMaterial3D
 		sm.emission_enabled = false
 		sm.metallic = 0.0
 		sm.metallic_specular = 0.0
@@ -648,6 +648,13 @@ func _sanitize_imported_material(mat: Material) -> void:
 		sm.clearcoat_enabled = false
 		sm.rim_enabled = false
 		sm.subsurf_scatter_enabled = false
+		sm.vertex_color_use_as_albedo = false
+		sm.vertex_color_is_srgb = false
+		# Force a neutral white tint — texture albedo stays the source of
+		# truth. The Principled chain in Blender mapped tex × vertex-color ×
+		# hue/sat into base color; we collapse that to just the texture.
+		sm.albedo_color = Color(1, 1, 1, 1)
+		sm.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 
 func _build_daisy_mesh(p: Dictionary) -> Mesh:
 	# Single Y-billboard quad — the grass shader rebuilds the basis from cam
