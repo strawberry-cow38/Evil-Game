@@ -627,9 +627,27 @@ func _merge_into(node: Node, parent_xform: Transform3D, into: ArrayMesh) -> void
 			if mat == null:
 				mat = src.surface_get_material(s)
 			if mat != null:
+				_sanitize_imported_material(mat)
 				into.surface_set_material(into.get_surface_count() - 1, mat)
 	for c in node.get_children():
 		_merge_into(c, xform, into)
+
+func _sanitize_imported_material(mat: Material) -> void:
+	# Godot's gltf importer can carry across emission / specular / clearcoat
+	# settings from the source Principled BSDF that render way brighter under
+	# directional light than they did in Blender's preview — leaves end up
+	# looking nuclear. Force-disable the brightness amplifiers on every
+	# imported StandardMaterial3D so the .glb stays the source of truth for
+	# albedo only.
+	if mat is StandardMaterial3D:
+		var sm := mat as StandardMaterial3D
+		sm.emission_enabled = false
+		sm.metallic = 0.0
+		sm.metallic_specular = 0.0
+		sm.roughness = 1.0
+		sm.clearcoat_enabled = false
+		sm.rim_enabled = false
+		sm.subsurf_scatter_enabled = false
 
 func _build_daisy_mesh(p: Dictionary) -> Mesh:
 	# Single Y-billboard quad — the grass shader rebuilds the basis from cam
